@@ -1,9 +1,13 @@
 package anthropicadapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,7 +21,10 @@ import (
 const providerID provider.ID = provider.IDAnthropic
 
 type Adapter struct {
-	client anthropic.Client
+	client     anthropic.Client
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
 }
 
 func New(apiKey string, options ...anthropicoption.RequestOption) (*Adapter, error) {
@@ -25,15 +32,34 @@ func New(apiKey string, options ...anthropicoption.RequestOption) (*Adapter, err
 		return nil, errors.New("anthropic api key is required")
 	}
 
-	opts := make([]anthropicoption.RequestOption, 0, len(options)+1)
+	opts := make([]anthropicoption.RequestOption, 0, len(options)+2)
+	opts = append(opts, anthropicoption.WithoutEnvironmentDefaults())
 	opts = append(opts, anthropicoption.WithAPIKey(apiKey))
 	opts = append(opts, options...)
 
-	return &Adapter{client: anthropic.NewClient(opts...)}, nil
+	return &Adapter{client: anthropic.NewClient(opts...), apiKey: apiKey, baseURL: "https://api.anthropic.com", httpClient: &http.Client{Timeout: 0, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func NewWithClient(client anthropic.Client) *Adapter {
 	return &Adapter{client: client}
+}
+
+func NewWithBaseURL(apiKey, baseURL string, options ...anthropicoption.RequestOption) (*Adapter, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.anthropic.com"
+	}
+	opts := append([]anthropicoption.RequestOption{anthropicoption.WithBaseURL(baseURL)}, options...)
+	adapter, err := New(apiKey, opts...)
+	if err != nil {
+		return nil, err
+	}
+	adapter.baseURL = baseURL
+	return adapter, nil
+}
+
+func (a *Adapter) SupportsNativeToolCalling() bool {
+	return strings.TrimSpace(a.apiKey) != "" && strings.TrimSpace(a.baseURL) != ""
 }
 
 var _ modelgateway.Model = (*Adapter)(nil)
@@ -42,6 +68,9 @@ func (a *Adapter) Generate(
 	ctx context.Context,
 	req modelgateway.GenerateRequest,
 ) (*modelgateway.GenerateResponse, error) {
+	if len(req.Tools) > 0 && a.SupportsNativeToolCalling() {
+		return a.generateNative(ctx, req)
+	}
 	params, err := buildRequest(req)
 	if err != nil {
 		return nil, err
@@ -63,6 +92,9 @@ func (a *Adapter) Stream(
 	ctx context.Context,
 	req modelgateway.GenerateRequest,
 ) (<-chan modelgateway.StreamEvent, error) {
+	if len(req.Tools) > 0 {
+		return nil, errors.New("Anthropic native tool streaming is not implemented")
+	}
 	params, err := buildRequest(req)
 	if err != nil {
 		return nil, err
@@ -304,4 +336,120 @@ func normalizeError(err error) error {
 	}
 
 	return provider.NewError(providerID, provider.ErrorCodeProvider, "Anthropic request failed", err)
+}
+
+type nativeMessageResponse struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Content []struct {
+		Type  string         `json:"type"`
+		Text  string         `json:"text"`
+		ID    string         `json:"id"`
+		Name  string         `json:"name"`
+		Input map[string]any `json:"input"`
+	} `json:"content"`
+	Usage struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage"`
+	StopReason string `json:"stop_reason"`
+}
+
+func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
+	if strings.TrimSpace(req.ProviderModel) == "" {
+		return nil, errors.New("Anthropic model is required")
+	}
+	system := make([]string, 0)
+	messages := make([]map[string]any, 0, len(req.Messages))
+	if strings.TrimSpace(req.System) != "" {
+		system = append(system, req.System)
+	}
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case modelgateway.RoleSystem, modelgateway.RoleDeveloper:
+			system = append(system, msg.Content)
+		case modelgateway.RoleUser:
+			messages = append(messages, map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": msg.Content}}})
+		case modelgateway.RoleAssistant:
+			blocks := make([]any, 0)
+			if msg.Content != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": msg.Content})
+			}
+			for _, call := range msg.ToolCalls {
+				var input map[string]any
+				if err := json.Unmarshal(call.Arguments, &input); err != nil {
+					return nil, modelgateway.ErrInvalidToolCall
+				}
+				blocks = append(blocks, map[string]any{"type": "tool_use", "id": call.ID, "name": call.Name, "input": input})
+			}
+			if len(blocks) > 0 {
+				messages = append(messages, map[string]any{"role": "assistant", "content": blocks})
+			}
+		case modelgateway.RoleTool:
+			messages = append(messages, map[string]any{"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": msg.ToolCallID, "content": msg.Content}}})
+		default:
+			return nil, fmt.Errorf("unsupported Anthropic role: %q", msg.Role)
+		}
+	}
+	toolDefs := make([]map[string]any, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		toolDefs = append(toolDefs, map[string]any{"name": tool.Name, "description": tool.Description, "input_schema": tool.Parameters})
+	}
+	maxTokens := req.MaxOutputTokens
+	if maxTokens <= 0 {
+		maxTokens = 4096
+	}
+	payload := map[string]any{"model": req.ProviderModel, "max_tokens": maxTokens, "messages": messages, "tools": toolDefs}
+	if len(system) > 0 {
+		payload["system"] = strings.Join(system, "\n\n")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := strings.TrimRight(a.baseURL, "/") + "/v1/messages"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("x-api-key", a.apiKey)
+	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("content-type", "application/json")
+	client := a.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(httpReq)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		return nil, fmt.Errorf("Anthropic Messages API failed (HTTP %d)", response.StatusCode)
+	}
+	var decoded nativeMessageResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("decode Anthropic response: %w", err)
+	}
+	result := &modelgateway.GenerateResponse{ID: decoded.ID, ProviderID: providerID, ModelID: req.ModelID, Model: decoded.Model, Usage: modelgateway.Usage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens}}
+	for _, block := range decoded.Content {
+		if block.Type == "text" {
+			result.Content += block.Text
+		}
+		if block.Type == "tool_use" {
+			args, err := json.Marshal(block.Input)
+			if err != nil {
+				return nil, err
+			}
+			result.ToolCalls = append(result.ToolCalls, modelgateway.ToolCall{ID: block.ID, Name: block.Name, Arguments: args})
+		}
+	}
+	if len(result.ToolCalls) > 0 {
+		result.FinishReason = modelgateway.FinishReasonToolCall
+	} else {
+		result.FinishReason = modelgateway.FinishReasonStop
+	}
+	result.Normalize()
+	return result, nil
 }

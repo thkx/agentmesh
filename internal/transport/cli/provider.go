@@ -91,7 +91,7 @@ func newProviderListCommand(opts *rootOptions) *cobra.Command {
 func newProviderTestCommand(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "test PROVIDER_ID",
-		Short: "Test provider connectivity",
+		Short: "Check provider runtime readiness",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := newClientFromOptions(opts)

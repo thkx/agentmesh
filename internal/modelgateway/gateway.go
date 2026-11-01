@@ -7,20 +7,27 @@ import (
 	"net"
 	"time"
 
+	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
 )
 
 var (
-	ErrNilRegistry       = errors.New("model registry is nil")
-	ErrNilResolver       = errors.New("model resolver is nil")
-	ErrNilResponse       = errors.New("provider returned nil response")
-	ErrNilStream         = errors.New("provider returned nil stream")
-	ErrStreamingDisabled = errors.New("model streaming is disabled")
+	ErrNilRegistry                    = errors.New("model registry is nil")
+	ErrNilResolver                    = errors.New("model resolver is nil")
+	ErrNilResponse                    = errors.New("provider returned nil response")
+	ErrNilStream                      = errors.New("provider returned nil stream")
+	ErrNilProviderRegistry            = errors.New("provider registry is nil")
+	ErrStreamingDisabled              = errors.New("model streaming is disabled")
+	ErrOutputTokenLimitExceeded       = errors.New("requested output tokens exceed model limit")
+	ErrInvalidStreamEvent             = errors.New("provider returned an invalid stream event")
+	ErrNativeToolCallingUnsupported   = errors.New("provider adapter does not support native tool calling")
+	ErrNativeToolStreamingUnsupported = errors.New("provider adapter does not support native tool calling in streaming mode")
 )
 
 type Gateway struct {
-	registry *Registry
-	resolver Resolver
+	registry  *Registry
+	resolver  Resolver
+	providers *provider.ProviderRegistry
 }
 
 func NewGateway(registry *Registry, resolver Resolver) (*Gateway, error) {
@@ -38,6 +45,19 @@ func NewGateway(registry *Registry, resolver Resolver) (*Gateway, error) {
 	}, nil
 }
 
+// NewGatewayWithProviders additionally enforces provider-instance enabled state.
+func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *provider.ProviderRegistry) (*Gateway, error) {
+	if providers == nil {
+		return nil, ErrNilProviderRegistry
+	}
+	g, err := NewGateway(registry, resolver)
+	if err != nil {
+		return nil, err
+	}
+	g.providers = providers
+	return g, nil
+}
+
 // Generate executes a non-streaming model request.
 func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
 	if err := req.Validate(); err != nil {
@@ -51,6 +71,12 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if len(req.Tools) > 0 {
+		capability, ok := adapter.(interface{ SupportsNativeToolCalling() bool })
+		if !ok || !capability.SupportsNativeToolCalling() {
+			return nil, ErrNativeToolCallingUnsupported
+		}
 	}
 
 	resp, err := adapter.Generate(ctx, resolvedReq)
@@ -87,6 +113,12 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if len(req.Tools) > 0 {
+		capability, ok := adapter.(interface{ SupportsNativeToolStreaming() bool })
+		if !ok || !capability.SupportsNativeToolStreaming() {
+			return nil, ErrNativeToolStreamingUnsupported
+		}
 	}
 
 	if !model.SupportsStreaming {
@@ -129,11 +161,7 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 					return
 				}
 
-				if event.Type == StreamEventError {
-					return
-				}
-
-				if event.Type == StreamEventCompleted {
+				if event.Type == StreamEventError || event.Type == StreamEventCompleted {
 					return
 				}
 			}
@@ -141,6 +169,16 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	}()
 
 	return output, nil
+}
+
+// SupportsNativeToolCalling reports whether the resolved adapter implements provider-native function calling.
+func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string) bool {
+	_, adapter, _, err := g.resolve(ctx, GenerateRequest{ModelID: modelID, Messages: []Message{{Role: RoleUser, Content: "capability probe"}}})
+	if err != nil {
+		return false
+	}
+	capability, ok := adapter.(interface{ SupportsNativeToolCalling() bool })
+	return ok && capability.SupportsNativeToolCalling()
 }
 
 func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Model, Model, GenerateRequest, error) {
@@ -160,10 +198,37 @@ func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Mo
 			fmt.Errorf("%w: %s", provider.ErrModelDisabled, model.ID)
 	}
 
+	// The model catalog is the authority for the maximum output size.
+	// Input token counting is intentionally left to provider tokenizers; the
+	// gateway must not pretend that character counts are token counts.
+	if model.MaxOutputTokens > 0 && req.MaxOutputTokens > model.MaxOutputTokens {
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf(
+			"%w: requested=%d allowed=%d model=%s",
+			ErrOutputTokenLimitExceeded,
+			req.MaxOutputTokens,
+			model.MaxOutputTokens,
+			model.ID,
+		)
+	}
+
+	var providerInstance *provider.Provider
+	if g.providers != nil {
+		p, providerErr := g.providers.Get(model.ProviderID)
+		if providerErr != nil {
+			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve provider instance: %w", providerErr)
+		}
+		providerInstance = &p
+		if !p.Enabled {
+			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: %s", provider.ErrProviderDisabled, p.ID)
+		}
+	}
+
 	adapter, err := g.registry.Get(model.ProviderID)
 	if err != nil {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("resolve provider adapter: %w", err)
+		if providerInstance != nil && providerInstance.Kind == provider.KindCloud {
+			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: provider %s", appcredential.ErrCredentialUnavailable, model.ProviderID)
+		}
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve provider adapter: %w", err)
 	}
 
 	resolvedReq := req
@@ -174,35 +239,27 @@ func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Mo
 }
 
 func normalizeResponse(resp *GenerateResponse, model provider.Model) {
-	if resp.ProviderID == "" {
-		resp.ProviderID = model.ProviderID
-	}
+	// The resolved provider instance is authoritative; adapters may only know vendor type.
+	resp.ProviderID = model.ProviderID
 
-	if resp.ModelID == "" {
-		resp.ModelID = model.ID
-	}
+	resp.ModelID = model.ID
 
-	if resp.Model == "" {
-		resp.Model = model.Name
-	}
+	resp.Model = model.Name
 
 	resp.Normalize()
 }
 
 func normalizeStreamEvent(event *StreamEvent, model provider.Model) {
-	if event.ProviderID == "" {
-		event.ProviderID = model.ProviderID
-	}
+	event.ProviderID = model.ProviderID
 
-	if event.ModelID == "" {
-		event.ModelID = model.ID
-	}
+	event.ModelID = model.ID
 
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
 
 	switch event.Type {
+	case StreamEventTextDelta:
 	case StreamEventUsage:
 		if event.Usage != nil {
 			event.Usage.Normalize()
@@ -218,6 +275,12 @@ func normalizeStreamEvent(event *StreamEvent, model provider.Model) {
 			event.Error = errors.New("provider stream failed")
 		}
 
+		event.Error = NormalizeError(model.ProviderID, event.Error)
+
+	default:
+		invalidType := event.Type
+		event.Type = StreamEventError
+		event.Error = fmt.Errorf("%w: %q", ErrInvalidStreamEvent, invalidType)
 		event.Error = NormalizeError(model.ProviderID, event.Error)
 	}
 }
@@ -241,17 +304,23 @@ func NormalizeError(providerID provider.ID, err error) error {
 	}
 
 	if errors.Is(err, context.DeadlineExceeded) {
-		return provider.NewError(
-			providerID,
-			provider.ErrorCodeTimeout,
-			"request deadline exceeded",
-			err,
-		)
+		return &provider.Error{
+			ProviderID: providerID,
+			Code:       provider.ErrorCodeTimeout,
+			Message:    "request deadline exceeded",
+			Retryable:  true,
+			Cause:      err,
+		}
 	}
 
 	var existing *provider.Error
 	if errors.As(err, &existing) {
-		return existing
+		if providerID == "" || existing.ProviderID == providerID {
+			return existing
+		}
+		copy := *existing
+		copy.ProviderID = providerID
+		return &copy
 	}
 
 	var statusError interface {
@@ -333,12 +402,13 @@ func NormalizeError(providerID provider.ID, err error) error {
 
 	var networkError net.Error
 	if errors.As(err, &networkError) && networkError.Timeout() {
-		return provider.NewError(
-			providerID,
-			provider.ErrorCodeTimeout,
-			"network request timed out",
-			err,
-		)
+		return &provider.Error{
+			ProviderID: providerID,
+			Code:       provider.ErrorCodeTimeout,
+			Message:    "network request timed out",
+			Retryable:  true,
+			Cause:      err,
+		}
 	}
 
 	return provider.NewError(

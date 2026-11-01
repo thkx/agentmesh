@@ -21,3 +21,73 @@ database:
 log:
   level: info
   format: json
+
+# Provider instances. Multiple instances of the same type are supported.
+# API keys are read from the named environment variables and are never logged.
+providers:
+  - id: openai-primary
+    name: OpenAI Primary
+    type: openai
+    kind: cloud
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_PRIMARY_API_KEY
+    enabled: true
+  - id: openai-backup
+    name: OpenAI Backup
+    type: openai
+    kind: cloud
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_BACKUP_API_KEY
+    enabled: false
+  - id: ollama-local
+    name: Local Ollama
+    type: ollama
+    kind: local
+    base_url: http://127.0.0.1:11434
+    enabled: true
+
+models:
+  - id: gpt-4.1
+    provider_id: openai-primary
+    name: gpt-4.1
+    display_name: GPT-4.1
+    context_window: 1047576
+    max_output_tokens: 32768
+    supports_streaming: true
+    enabled: true
+  - id: llama3.1-local
+    provider_id: ollama-local
+    name: llama3.1
+    display_name: Llama 3.1 (Local)
+    supports_streaming: true
+    enabled: true
+
+# Local coding-agent CLI integration. CLIs must be installed and authenticated separately.
+agent:
+  workspace_root: ./data/workspaces
+  cli:
+    claude: claude
+    codex: codex
+    gemini: gemini
+    opencode: opencode
+  tools:
+    max_file_bytes: 2097152
+    max_output_bytes: 1048576
+    command_timeout: 30s
+    # Empty by default: shell.exec cannot launch arbitrary executables.
+    # Add exact executable names only when explicitly needed.
+    allowed_commands: []
+
+  runtime:
+    max_steps: 12
+    max_tool_calls: 8
+    max_context_chars: 24000
+    max_concurrent: 4
+    timeout_seconds: 900
+
+scheduler:
+  workers: 1
+  worker_id: ""
+  poll_interval: 500ms
+  lease_duration: 30s
+  max_attempts: 3

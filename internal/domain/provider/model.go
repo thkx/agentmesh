@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var (
 	ErrInvalidModelID            = errors.New("invalid model id")
 	ErrInvalidModelName          = errors.New("invalid model name")
 	ErrInvalidModelProvider      = errors.New("invalid model provider")
+	ErrModelAlreadyExists        = errors.New("model already registered")
 	ErrInvalidModelContext       = errors.New("invalid model context window")
 	ErrInvalidModelMaxTokens     = errors.New("invalid model max output tokens")
 	ErrModelDisabled             = errors.New("model is disabled")
@@ -30,6 +32,9 @@ type Model struct {
 	SupportsStreaming bool `json:"supports_streaming"`
 
 	Enabled bool `json:"enabled"`
+
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 func (m Model) Validate() error {

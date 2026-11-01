@@ -1,7 +1,13 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    schema: "migrations/000001_create_users.up.sql"
+    schema:
+      - "internal/platform/database/migrations/000001_init.up.sql"
+      - "internal/platform/database/migrations/000002_create_users.up.sql"
+      - "internal/platform/database/migrations/000003_create_providers.up.sql"
+      - "internal/platform/database/migrations/000004_create_models.up.sql"
+      - "internal/platform/database/migrations/000005_create_provider_credentials.up.sql"
+      - "internal/platform/database/migrations/000006_create_agent_task_states.up.sql"
     queries: "queries"
     gen:
       go:

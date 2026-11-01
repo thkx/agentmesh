@@ -62,3 +62,23 @@ func TestSQLiteForeignKeysEnabled(t *testing.T) {
 		t.Fatalf("expected foreign_keys=1, got %d", enabled)
 	}
 }
+
+func TestProviderCredentialsMigration(t *testing.T) {
+	cfg := config.Defaults().Database
+	cfg.DSN = filepath.Join(t.TempDir(), "credentials-migration.db")
+	sqliteDB, err := OpenSQLite(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteDB.Close()
+	if err := RunMigrations(sqliteDB.DB); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := sqliteDB.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_credentials'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected provider_credentials table, got %d", count)
+	}
+}

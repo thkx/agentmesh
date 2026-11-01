@@ -10,11 +10,23 @@ import (
 
 type Querier interface {
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeleteModel(ctx context.Context, id string) error
+	DeleteProvider(ctx context.Context, id string) error
+	DeleteProviderCredential(ctx context.Context, providerID string) error
 	DeleteUser(ctx context.Context, id int64) error
+	GetModel(ctx context.Context, id string) (Model, error)
+	GetProvider(ctx context.Context, id string) (Provider, error)
+	GetProviderCredential(ctx context.Context, providerID string) (ProviderCredential, error)
 	GetUser(ctx context.Context, id int64) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	ListModels(ctx context.Context) ([]Model, error)
+	ListProviders(ctx context.Context) ([]Provider, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	ProviderCredentialExists(ctx context.Context, providerID string) (bool, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (int64, error)
+	UpsertModel(ctx context.Context, arg UpsertModelParams) error
+	UpsertProvider(ctx context.Context, arg UpsertProviderParams) error
+	UpsertProviderCredential(ctx context.Context, arg UpsertProviderCredentialParams) error
 }
 
 var _ Querier = (*Queries)(nil)

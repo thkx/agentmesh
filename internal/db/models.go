@@ -4,6 +4,53 @@
 
 package db
 
+type AgentTaskState struct {
+	TaskID    string `json:"task_id"`
+	StateJson string `json:"state_json"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+type AppMetadatum struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+type Model struct {
+	ID                string `json:"id"`
+	ProviderID        string `json:"provider_id"`
+	Name              string `json:"name"`
+	DisplayName       string `json:"display_name"`
+	ContextWindow     int64  `json:"context_window"`
+	MaxOutputTokens   int64  `json:"max_output_tokens"`
+	SupportsStreaming int64  `json:"supports_streaming"`
+	Enabled           int64  `json:"enabled"`
+	CreatedAt         int64  `json:"created_at"`
+	UpdatedAt         int64  `json:"updated_at"`
+}
+
+type Provider struct {
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	Name          string `json:"name"`
+	Kind          string `json:"kind"`
+	BaseUrl       string `json:"base_url"`
+	CredentialRef string `json:"credential_ref"`
+	Enabled       int64  `json:"enabled"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
+}
+
+type ProviderCredential struct {
+	ProviderID        string `json:"provider_id"`
+	EncryptedValue    []byte `json:"encrypted_value"`
+	EncryptionVersion int64  `json:"encryption_version"`
+	CreatedAt         int64  `json:"created_at"`
+	UpdatedAt         int64  `json:"updated_at"`
+}
+
 type User struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email"`

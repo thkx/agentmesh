@@ -3,6 +3,8 @@ package ollamaadapter
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,23 +50,40 @@ func New(baseURL string, client *http.Client) (*Adapter, error) {
 var _ modelgateway.Model = (*Adapter)(nil)
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   string           `json:"content"`
+	ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
+}
+type ollamaToolCall struct {
+	Function struct {
+		Name      string         `json:"name"`
+		Arguments map[string]any `json:"arguments"`
+	} `json:"function"`
+}
+type ollamaToolDefinition struct {
+	Type     string `json:"type"`
+	Function struct {
+		Name        string          `json:"name"`
+		Description string          `json:"description,omitempty"`
+		Parameters  json.RawMessage `json:"parameters"`
+	} `json:"function"`
 }
 
 type chatRequest struct {
-	Model    string         `json:"model"`
-	Messages []chatMessage  `json:"messages"`
-	Stream   bool           `json:"stream"`
-	Options  map[string]any `json:"options,omitempty"`
+	Model    string                 `json:"model"`
+	Messages []chatMessage          `json:"messages"`
+	Stream   bool                   `json:"stream"`
+	Options  map[string]any         `json:"options,omitempty"`
+	Tools    []ollamaToolDefinition `json:"tools,omitempty"`
 }
 
 type chatResponse struct {
 	Model     string `json:"model"`
 	CreatedAt string `json:"created_at"`
 	Message   struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role      string           `json:"role"`
+		Content   string           `json:"content"`
+		ToolCalls []ollamaToolCall `json:"tool_calls,omitempty"`
 	} `json:"message"`
 	Done       bool   `json:"done"`
 	DoneReason string `json:"done_reason"`
@@ -264,10 +283,11 @@ func buildRequest(
 			)
 		}
 
-		messages = append(messages, chatMessage{
-			Role:    role,
-			Content: message.Content,
-		})
+		chatMsg := chatMessage{Role: role, Content: message.Content}
+		if message.Role == modelgateway.RoleAssistant && len(message.ToolCalls) > 0 {
+			chatMsg.ToolCalls = toOllamaToolCalls(message.ToolCalls)
+		}
+		messages = append(messages, chatMsg)
 	}
 
 	if len(messages) == 0 {
@@ -293,12 +313,13 @@ func buildRequest(
 		options = nil
 	}
 
-	return chatRequest{
-		Model:    modelName,
-		Messages: messages,
-		Stream:   stream,
-		Options:  options,
-	}, nil
+	toolDefs := make([]ollamaToolDefinition, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		def := ollamaToolDefinition{Type: "function"}
+		def.Function.Name, def.Function.Description, def.Function.Parameters = tool.Name, tool.Description, tool.Parameters
+		toolDefs = append(toolDefs, def)
+	}
+	return chatRequest{Model: modelName, Messages: messages, Stream: stream, Options: options, Tools: toolDefs}, nil
 }
 
 func mapResponse(
@@ -310,6 +331,7 @@ func mapResponse(
 		ModelID:    req.ModelID,
 		Model:      resp.Model,
 		Content:    resp.Message.Content,
+		ToolCalls:  mapToolCalls(resp.Message.ToolCalls),
 		Usage: modelgateway.Usage{
 			InputTokens:  resp.PromptEvalCount,
 			OutputTokens: resp.EvalCount,
@@ -401,3 +423,38 @@ func send(
 		return false
 	}
 }
+
+func mapToolCalls(calls []ollamaToolCall) []modelgateway.ToolCall {
+	out := make([]modelgateway.ToolCall, 0, len(calls))
+	for i, call := range calls {
+		args, err := json.Marshal(call.Function.Arguments)
+		if err != nil {
+			continue
+		}
+		randomID := make([]byte, 12)
+		id := fmt.Sprintf("ollama-call-%d-%d", time.Now().UnixNano(), i+1)
+		if _, err := rand.Read(randomID); err == nil {
+			id = "ollama-" + hex.EncodeToString(randomID)
+		}
+		out = append(out, modelgateway.ToolCall{ID: id, Name: call.Function.Name, Arguments: args})
+	}
+	return out
+}
+
+func toOllamaToolCalls(calls []modelgateway.ToolCall) []ollamaToolCall {
+	out := make([]ollamaToolCall, 0, len(calls))
+	for _, call := range calls {
+		var args map[string]any
+		if json.Unmarshal(call.Arguments, &args) != nil {
+			continue
+		}
+		var converted ollamaToolCall
+		converted.Function.Name, converted.Function.Arguments = call.Name, args
+		out = append(out, converted)
+	}
+	return out
+}
+
+func (a *Adapter) SupportsNativeToolCalling() bool { return true }
+
+func (a *Adapter) SupportsNativeToolStreaming() bool { return true }

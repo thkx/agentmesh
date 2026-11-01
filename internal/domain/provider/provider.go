@@ -16,9 +16,16 @@ const (
 	IDOllama    ID = "ollama"
 )
 
+type Type string
+
 type Kind string
 
 const (
+	TypeOpenAI    Type = "openai"
+	TypeAnthropic Type = "anthropic"
+	TypeGemini    Type = "gemini"
+	TypeOllama    Type = "ollama"
+
 	KindCloud Kind = "cloud"
 	KindLocal Kind = "local"
 )
@@ -30,10 +37,12 @@ var (
 )
 
 type Provider struct {
-	ID      ID     `json:"id"`
-	Name    string `json:"name"`
-	Kind    Kind   `json:"kind"`
-	BaseURL string `json:"base_url,omitempty"`
+	ID            ID     `json:"id"`
+	Type          Type   `json:"type"`
+	Name          string `json:"name"`
+	Kind          Kind   `json:"kind"`
+	BaseURL       string `json:"base_url,omitempty"`
+	CredentialRef string `json:"-"`
 
 	Enabled bool `json:"enabled"`
 
@@ -48,6 +57,12 @@ func (p Provider) Validate() error {
 
 	if strings.TrimSpace(p.Name) == "" {
 		return ErrInvalidProviderName
+	}
+
+	switch p.Type {
+	case TypeOpenAI, TypeAnthropic, TypeGemini, TypeOllama:
+	default:
+		return fmt.Errorf("unsupported provider type: %q", p.Type)
 	}
 
 	switch p.Kind {

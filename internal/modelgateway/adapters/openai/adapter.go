@@ -1,9 +1,13 @@
 package openai
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -19,7 +23,10 @@ const providerID provider.ID = provider.IDOpenAI
 
 // Adapter implements modelgateway.Model using the OpenAI Responses API.
 type Adapter struct {
-	client sdk.Client
+	client     sdk.Client
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
 }
 
 // New creates an OpenAI adapter.
@@ -35,9 +42,7 @@ func New(apiKey string, options ...sdkoption.RequestOption) (*Adapter, error) {
 	clientOptions = append(clientOptions, sdkoption.WithAPIKey(apiKey))
 	clientOptions = append(clientOptions, options...)
 
-	return &Adapter{
-		client: sdk.NewClient(clientOptions...),
-	}, nil
+	return &Adapter{client: sdk.NewClient(clientOptions...), apiKey: apiKey, baseURL: "https://api.openai.com/v1", httpClient: &http.Client{Timeout: 0, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // NewWithClient supports dependency injection and testing.
@@ -45,9 +50,30 @@ func NewWithClient(client sdk.Client) *Adapter {
 	return &Adapter{client: client}
 }
 
+// NewWithBaseURL creates an adapter with an explicit Responses API endpoint.
+func NewWithBaseURL(apiKey, baseURL string) (*Adapter, error) {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1"
+	}
+	adapter, err := New(apiKey, sdkoption.WithBaseURL(baseURL))
+	if err != nil {
+		return nil, err
+	}
+	adapter.baseURL = baseURL
+	return adapter, nil
+}
+
+func (a *Adapter) SupportsNativeToolCalling() bool {
+	return strings.TrimSpace(a.apiKey) != "" && strings.TrimSpace(a.baseURL) != ""
+}
+
 var _ modelgateway.Model = (*Adapter)(nil)
 
 func (a *Adapter) Generate(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
+	if len(req.Tools) > 0 && a.SupportsNativeToolCalling() {
+		return a.generateNative(ctx, req)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, normalizeOpenAIError(err)
 	}
@@ -69,6 +95,9 @@ func (a *Adapter) Generate(ctx context.Context, req modelgateway.GenerateRequest
 }
 
 func (a *Adapter) Stream(ctx context.Context, req modelgateway.GenerateRequest) (<-chan modelgateway.StreamEvent, error) {
+	if len(req.Tools) > 0 {
+		return nil, errors.New("OpenAI native tool streaming is not implemented")
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, normalizeOpenAIError(err)
 	}
@@ -396,4 +425,125 @@ func normalizeOpenAIError(err error) error {
 		"OpenAI request failed",
 		err,
 	)
+}
+
+type nativeResponse struct {
+	ID     string `json:"id"`
+	Model  string `json:"model"`
+	Output []struct {
+		Type    string `json:"type"`
+		Role    string `json:"role"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		CallID    string `json:"call_id"`
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"output"`
+	Usage struct {
+		InputTokens  int64 `json:"input_tokens"`
+		OutputTokens int64 `json:"output_tokens"`
+	} `json:"usage"`
+	Status string `json:"status"`
+}
+
+func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
+	modelName := strings.TrimSpace(req.ProviderModel)
+	if modelName == "" {
+		return nil, errors.New("openai provider model is required")
+	}
+	instructions := make([]string, 0)
+	input := make([]map[string]any, 0, len(req.Messages)*2)
+	if strings.TrimSpace(req.System) != "" {
+		instructions = append(instructions, req.System)
+	}
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case modelgateway.RoleSystem, modelgateway.RoleDeveloper:
+			instructions = append(instructions, msg.Content)
+		case modelgateway.RoleUser:
+			input = append(input, map[string]any{"role": "user", "content": msg.Content})
+		case modelgateway.RoleAssistant:
+			if msg.Content != "" {
+				input = append(input, map[string]any{"role": "assistant", "content": msg.Content})
+			}
+			for _, call := range msg.ToolCalls {
+				input = append(input, map[string]any{"type": "function_call", "call_id": call.ID, "name": call.Name, "arguments": string(call.Arguments)})
+			}
+		case modelgateway.RoleTool:
+			input = append(input, map[string]any{"type": "function_call_output", "call_id": msg.ToolCallID, "output": msg.Content})
+		default:
+			return nil, fmt.Errorf("unsupported OpenAI message role: %q", msg.Role)
+		}
+	}
+	tools := make([]map[string]any, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		tools = append(tools, map[string]any{"type": "function", "name": tool.Name, "description": tool.Description, "parameters": tool.Parameters, "strict": false})
+	}
+	payload := map[string]any{"model": modelName, "input": input, "tools": tools}
+	if len(instructions) > 0 {
+		payload["instructions"] = strings.Join(instructions, "\n\n")
+	}
+	if req.MaxOutputTokens > 0 {
+		payload["max_output_tokens"] = req.MaxOutputTokens
+	}
+	if req.Temperature != nil {
+		payload["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		payload["top_p"] = *req.TopP
+	}
+	if strings.TrimSpace(req.ToolChoice) != "" {
+		payload["tool_choice"] = req.ToolChoice
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := strings.TrimRight(a.baseURL, "/") + "/responses"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+a.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := a.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(httpReq)
+	if err != nil {
+		return nil, normalizeOpenAIError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		return nil, fmt.Errorf("OpenAI Responses API failed (HTTP %d)", response.StatusCode)
+	}
+	var decoded nativeResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("decode OpenAI Responses API response: %w", err)
+	}
+	result := &modelgateway.GenerateResponse{ID: decoded.ID, ProviderID: providerID, ModelID: req.ModelID, Model: decoded.Model, Usage: modelgateway.Usage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens}}
+	for _, item := range decoded.Output {
+		if item.Type == "function_call" {
+			args := json.RawMessage(item.Arguments)
+			result.ToolCalls = append(result.ToolCalls, modelgateway.ToolCall{ID: item.CallID, Name: item.Name, Arguments: args})
+		}
+		if item.Type == "message" {
+			for _, part := range item.Content {
+				if part.Type == "output_text" || part.Type == "text" {
+					result.Content += part.Text
+				}
+			}
+		}
+	}
+	if len(result.ToolCalls) > 0 {
+		result.FinishReason = modelgateway.FinishReasonToolCall
+	} else {
+		result.FinishReason = modelgateway.FinishReasonStop
+	}
+	result.Normalize()
+	return result, nil
 }

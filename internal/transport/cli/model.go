@@ -24,10 +24,11 @@ type GenerateMessage struct {
 }
 
 type GenerateRequest struct {
-	Messages    []GenerateMessage `json:"messages"`
-	MaxTokens   int64             `json:"max_tokens,omitempty"`
-	Temperature *float64          `json:"temperature,omitempty"`
-	TopP        *float64          `json:"top_p,omitempty"`
+	ModelID         string            `json:"model_id"`
+	Messages        []GenerateMessage `json:"messages"`
+	MaxOutputTokens int64             `json:"max_output_tokens,omitempty"`
+	Temperature     *float64          `json:"temperature,omitempty"`
+	TopP            *float64          `json:"top_p,omitempty"`
 }
 
 type GenerateUsage struct {
@@ -226,6 +227,7 @@ Example:
 			}
 
 			request := GenerateRequest{
+				ModelID: args[0],
 				Messages: []GenerateMessage{
 					{
 						Role:    "user",
@@ -235,7 +237,7 @@ Example:
 			}
 
 			if cmd.Flags().Changed("max-tokens") {
-				request.MaxTokens = maxTokens
+				request.MaxOutputTokens = maxTokens
 			}
 
 			if cmd.Flags().Changed("temperature") {
@@ -248,10 +250,7 @@ Example:
 
 			var response GenerateResponse
 
-			path := fmt.Sprintf(
-				"models/%s/generate",
-				escapePathSegment(args[0]),
-			)
+			path := "generate"
 
 			if err := client.Post(
 				cmd.Context(),
@@ -325,21 +324,19 @@ func newModelTestCommand(opts *rootOptions) *cobra.Command {
 			}
 
 			request := GenerateRequest{
+				ModelID: args[0],
 				Messages: []GenerateMessage{
 					{
 						Role:    "user",
 						Content: "Reply with exactly: AgentMesh OK",
 					},
 				},
-				MaxTokens: 32,
+				MaxOutputTokens: 32,
 			}
 
 			var response GenerateResponse
 
-			path := fmt.Sprintf(
-				"models/%s/generate",
-				escapePathSegment(args[0]),
-			)
+			path := "generate"
 
 			if err := client.Post(
 				cmd.Context(),

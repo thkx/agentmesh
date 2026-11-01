@@ -1,9 +1,16 @@
 package geminiadapter
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -16,23 +23,35 @@ import (
 const providerID provider.ID = provider.IDGemini
 
 type Adapter struct {
-	client *genai.Client
+	client     *genai.Client
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
 }
 
 func New(ctx context.Context, apiKey string) (*Adapter, error) {
+	return NewWithBaseURL(ctx, apiKey, "https://generativelanguage.googleapis.com/")
+}
+
+// NewWithBaseURL creates an isolated Gemini client with an explicit endpoint.
+func NewWithBaseURL(ctx context.Context, apiKey, baseURL string) (*Adapter, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("gemini api key is required")
 	}
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = "https://generativelanguage.googleapis.com/"
+	}
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
+		APIKey:      apiKey,
+		Backend:     genai.BackendGeminiAPI,
+		HTTPOptions: genai.HTTPOptions{BaseURL: baseURL},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create Gemini client: %w", err)
 	}
 
-	return &Adapter{client: client}, nil
+	return &Adapter{client: client, apiKey: apiKey, baseURL: strings.TrimRight(baseURL, "/"), httpClient: &http.Client{Timeout: 0, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func NewWithClient(client *genai.Client) (*Adapter, error) {
@@ -48,6 +67,9 @@ func (a *Adapter) Generate(
 	ctx context.Context,
 	req modelgateway.GenerateRequest,
 ) (*modelgateway.GenerateResponse, error) {
+	if len(req.Tools) > 0 && a.SupportsNativeToolCalling() {
+		return a.generateNative(ctx, req)
+	}
 	modelName, contents, config, err := buildRequest(req)
 	if err != nil {
 		return nil, err
@@ -68,6 +90,9 @@ func (a *Adapter) Stream(
 	ctx context.Context,
 	req modelgateway.GenerateRequest,
 ) (<-chan modelgateway.StreamEvent, error) {
+	if len(req.Tools) > 0 {
+		return nil, errors.New("Gemini native tool streaming is not implemented")
+	}
 	modelName, contents, config, err := buildRequest(req)
 	if err != nil {
 		return nil, err
@@ -311,4 +336,142 @@ func normalizeError(err error) error {
 	}
 
 	return provider.NewError(providerID, provider.ErrorCodeProvider, "Gemini request failed", err)
+}
+
+type nativeGeminiResponse struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text         string `json:"text"`
+				FunctionCall *struct {
+					Name string         `json:"name"`
+					Args map[string]any `json:"args"`
+				} `json:"functionCall"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+	UsageMetadata struct {
+		PromptTokenCount     int64 `json:"promptTokenCount"`
+		CandidatesTokenCount int64 `json:"candidatesTokenCount"`
+	} `json:"usageMetadata"`
+}
+
+func (a *Adapter) SupportsNativeToolCalling() bool {
+	return strings.TrimSpace(a.apiKey) != "" && strings.TrimSpace(a.baseURL) != ""
+}
+func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
+	if strings.TrimSpace(req.ProviderModel) == "" {
+		return nil, errors.New("Gemini model is required")
+	}
+	contents := make([]map[string]any, 0, len(req.Messages))
+	system := make([]string, 0)
+	if strings.TrimSpace(req.System) != "" {
+		system = append(system, req.System)
+	}
+	for _, msg := range req.Messages {
+		switch msg.Role {
+		case modelgateway.RoleSystem, modelgateway.RoleDeveloper:
+			system = append(system, msg.Content)
+		case modelgateway.RoleUser:
+			contents = append(contents, map[string]any{"role": "user", "parts": []any{map[string]any{"text": msg.Content}}})
+		case modelgateway.RoleAssistant:
+			parts := make([]any, 0)
+			if msg.Content != "" {
+				parts = append(parts, map[string]any{"text": msg.Content})
+			}
+			for _, call := range msg.ToolCalls {
+				var args map[string]any
+				if err := json.Unmarshal(call.Arguments, &args); err != nil {
+					return nil, modelgateway.ErrInvalidToolCall
+				}
+				parts = append(parts, map[string]any{"functionCall": map[string]any{"name": call.Name, "args": args}})
+			}
+			if len(parts) > 0 {
+				contents = append(contents, map[string]any{"role": "model", "parts": parts})
+			}
+		case modelgateway.RoleTool:
+			var response map[string]any
+			if err := json.Unmarshal([]byte(msg.Content), &response); err != nil {
+				response = map[string]any{"result": msg.Content}
+			}
+			contents = append(contents, map[string]any{"role": "user", "parts": []any{map[string]any{"functionResponse": map[string]any{"name": msg.Name, "response": response}}}})
+		default:
+			return nil, fmt.Errorf("unsupported Gemini role: %q", msg.Role)
+		}
+	}
+	declarations := make([]map[string]any, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		declarations = append(declarations, map[string]any{"name": tool.Name, "description": tool.Description, "parameters": tool.Parameters})
+	}
+	payload := map[string]any{"contents": contents, "tools": []any{map[string]any{"functionDeclarations": declarations}}}
+	if len(system) > 0 {
+		payload["systemInstruction"] = map[string]any{"parts": []any{map[string]any{"text": strings.Join(system, "\n\n")}}}
+	}
+	generation := map[string]any{}
+	if req.MaxOutputTokens > 0 {
+		generation["maxOutputTokens"] = req.MaxOutputTokens
+	}
+	if req.Temperature != nil {
+		generation["temperature"] = *req.Temperature
+	}
+	if req.TopP != nil {
+		generation["topP"] = *req.TopP
+	}
+	if len(generation) > 0 {
+		payload["generationConfig"] = generation
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := strings.TrimRight(a.baseURL, "/") + "/v1beta/models/" + url.PathEscape(req.ProviderModel) + ":generateContent?key=" + url.QueryEscape(a.apiKey)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	client := a.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(httpReq)
+	if err != nil {
+		return nil, normalizeError(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
+		return nil, fmt.Errorf("Gemini generateContent API failed (HTTP %d)", response.StatusCode)
+	}
+	var decoded nativeGeminiResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&decoded); err != nil {
+		return nil, fmt.Errorf("decode Gemini response: %w", err)
+	}
+	result := &modelgateway.GenerateResponse{ProviderID: providerID, ModelID: req.ModelID, Model: req.ProviderModel, Usage: modelgateway.Usage{InputTokens: decoded.UsageMetadata.PromptTokenCount, OutputTokens: decoded.UsageMetadata.CandidatesTokenCount}}
+	for _, candidate := range decoded.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if part.Text != "" {
+				result.Content += part.Text
+			}
+			if part.FunctionCall != nil {
+				args, err := json.Marshal(part.FunctionCall.Args)
+				if err != nil {
+					return nil, err
+				}
+				randomID := make([]byte, 12)
+				id := fmt.Sprintf("gemini-%d", time.Now().UnixNano())
+				if _, err := rand.Read(randomID); err == nil {
+					id = "gemini-" + hex.EncodeToString(randomID)
+				}
+				result.ToolCalls = append(result.ToolCalls, modelgateway.ToolCall{ID: id, Name: part.FunctionCall.Name, Arguments: args})
+			}
+		}
+	}
+	if len(result.ToolCalls) > 0 {
+		result.FinishReason = modelgateway.FinishReasonToolCall
+	} else {
+		result.FinishReason = modelgateway.FinishReasonStop
+	}
+	result.Normalize()
+	return result, nil
 }

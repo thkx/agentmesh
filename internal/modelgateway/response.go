@@ -24,6 +24,7 @@ type GenerateResponse struct {
 	Model      string      `json:"model"`
 
 	Content      string       `json:"content"`
+	ToolCalls    []ToolCall   `json:"tool_calls,omitempty"`
 	FinishReason FinishReason `json:"finish_reason"`
 
 	Usage Usage `json:"usage"`

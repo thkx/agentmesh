@@ -99,3 +99,31 @@ func (r *Registry) Providers() []provider.ID {
 
 	return result
 }
+
+// Replace atomically publishes a new adapter for future requests. Get returns an
+// interface value holding the old adapter, so requests already in flight continue
+// using that adapter safely. Adapters must not be closed on replacement unless a
+// separate reference-counted retirement mechanism is introduced.
+func (r *Registry) Replace(providerID provider.ID, adapter Model) error {
+	if providerID == "" {
+		return provider.ErrInvalidProviderID
+	}
+	if adapter == nil {
+		return ErrNilAdapter
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.adapters[providerID] = adapter
+	return nil
+}
+
+// Unregister removes one provider-instance adapter.
+func (r *Registry) Unregister(providerID provider.ID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.adapters[providerID]; !ok {
+		return fmt.Errorf("%w: %s", ErrAdapterNotFound, providerID)
+	}
+	delete(r.adapters, providerID)
+	return nil
+}
