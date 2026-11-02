@@ -27,3 +27,17 @@ func TestCompileRejectsUnreachable(t *testing.T) {
 		t.Fatal("expected unreachable error")
 	}
 }
+
+func TestCompilePureStartNode(t *testing.T) {
+	d := wf.Definition{ID: "start-node", Name: "start-node", Version: 1, Entry: "start", Nodes: []wf.Node{{ID: "start", Type: wf.NodeStart}, {ID: "left", Type: wf.NodeEnd}, {ID: "right", Type: wf.NodeEnd}}, Edges: []wf.Edge{{From: "start", To: "left"}, {From: "start", To: "right"}}}
+	if _, err := Compile(d); err != nil {
+		t.Fatalf("expected pure start node with fan-out to compile: %v", err)
+	}
+}
+
+func TestCompileStartNodeMustBeEntry(t *testing.T) {
+	d := wf.Definition{ID: "bad-start", Name: "bad-start", Version: 1, Entry: "end", Nodes: []wf.Node{{ID: "start", Type: wf.NodeStart}, {ID: "end", Type: wf.NodeEnd}}, Edges: []wf.Edge{{From: "start", To: "end"}}}
+	if _, err := Compile(d); err == nil {
+		t.Fatal("expected non-entry start node to be rejected")
+	}
+}

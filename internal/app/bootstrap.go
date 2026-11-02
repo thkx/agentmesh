@@ -19,15 +19,20 @@ import (
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/execution"
 	"github.com/thkx/agentmesh/internal/domain/provider"
+	goalservice "github.com/thkx/agentmesh/internal/goal"
+	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 	anthropicadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/anthropic"
 	geminiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/gemini"
 	ollamaadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/ollama"
 	openaiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/openai"
+	"github.com/thkx/agentmesh/internal/planning"
+	"github.com/thkx/agentmesh/internal/planworkflow"
 	"github.com/thkx/agentmesh/internal/platform/credentialstore"
 	"github.com/thkx/agentmesh/internal/platform/cryptography"
 	"github.com/thkx/agentmesh/internal/platform/database"
 	"github.com/thkx/agentmesh/internal/platform/logger"
+	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	"github.com/thkx/agentmesh/internal/tools/builtin"
@@ -303,6 +308,42 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		}(worker)
 	}
 
+	goalRepo, err := database.NewGoalRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize goal repository: %w", err)
+	}
+	planRepo, err := database.NewPlanRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize plan repository: %w", err)
+	}
+	goalService, err := goalservice.NewService(goalRepo)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize goal service: %w", err)
+	}
+	llmPlanner, err := planning.NewLLMPlanner(gateway, 0)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize LLM planner: %w", err)
+	}
+	planningService, err := planning.NewService(goalService, llmPlanner, planRepo)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize planning service: %w", err)
+	}
+
 	workflowStore, err := workflowcheckpoint.NewSQLite(sqliteDB.DB)
 	if err != nil {
 		workerCancel()
@@ -316,6 +357,66 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		workerWG.Wait()
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize workflow engine: %w", err)
+	}
+	planExecutionRepo, err := planworkflow.NewSQLiteRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize plan execution repository: %w", err)
+	}
+	profileValidator := planworkflow.ProfileValidatorFuncs{
+		ModelExists:     func(id string) bool { _, ok := models.Get(id); return ok },
+		WorkspaceExists: func(id string) bool { _, resolveErr := workspaceManager.Resolve(id); return resolveErr == nil },
+	}
+	planExecutionService, err := planworkflow.NewService(goalService, planningService, planExecutionRepo, workflowEngine, profileValidator, cfg.Scheduler.MaxAttempts)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize plan execution service: %w", err)
+	}
+	evaluationRepo, err := database.NewGoalEvaluationRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize goal evaluation repository: %w", err)
+	}
+	goalEvaluator, err := goalevaluation.NewLLMEvaluator(gateway, 0)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize goal evaluator: %w", err)
+	}
+	goalEvaluationService, err := goalevaluation.NewService(goalService, workflowEngine, evaluationRepo, goalEvaluator)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize goal evaluation service: %w", err)
+	}
+	reflectionRepo, err := database.NewReflectionRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize reflection repository: %w", err)
+	}
+	llmReflector, err := reflection.NewLLMReflector(gateway, 0)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize LLM reflector: %w", err)
+	}
+	reflectionService, err := reflection.NewService(goalService, workflowEngine, goalEvaluationService, reflectionRepo, llmReflector)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize reflection service: %w", err)
 	}
 	workflowWorkers := make([]*wfruntime.Worker, 0, workerCount)
 	for i := 0; i < workerCount; i++ {
@@ -342,13 +443,13 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	go func() { workerWG.Wait(); close(workerDone) }()
 
 	container := &Container{
-		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo,
+		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
 		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
 	})
 	return container, nil
 }

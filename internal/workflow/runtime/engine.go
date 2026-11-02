@@ -287,7 +287,7 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 			}
 			continue
 		}
-		if node.Type == wf.NodeCondition || node.Type == wf.NodeEnd {
+		if node.Type == wf.NodeStart || node.Type == wf.NodeCondition || node.Type == wf.NodeEnd {
 			if ledgerStatus == "running" || ledgerStatus == "failed" {
 				if err = ledger.ResetNode(ctx, r.ID, nodeID); err != nil {
 					return err
@@ -809,6 +809,8 @@ func (e *Engine) policyCheck(ctx context.Context, runID, nodeID string) error {
 }
 func (e *Engine) executeNode(ctx context.Context, n wf.Node, contextData map[string]any, taskID string) (json.RawMessage, any, string, error) {
 	switch n.Type {
+	case wf.NodeStart:
+		return json.RawMessage(`{}`), nil, "", nil
 	case wf.NodeAgent:
 		cfg := *n.Agent
 		cfg.ApprovedTools = append([]string(nil), cfg.ApprovedTools...)

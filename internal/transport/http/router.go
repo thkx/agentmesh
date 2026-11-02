@@ -12,7 +12,12 @@ import (
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
+	goalservice "github.com/thkx/agentmesh/internal/goal"
+	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"github.com/thkx/agentmesh/internal/planning"
+	"github.com/thkx/agentmesh/internal/planworkflow"
+	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
@@ -21,24 +26,29 @@ import (
 )
 
 type Dependencies struct {
-	DB                   *sql.DB
-	Providers            *provider.ProviderRegistry
-	Models               *provider.ModelRegistry
-	Adapters             *modelgateway.Registry
-	ProviderRuntime      *modelgateway.ProviderRuntime
-	Repository           provider.CatalogRepository
-	Gateway              *modelgateway.Gateway
-	CredentialManager    appcredential.Manager
-	AgentExecutor        executor.AgentExecutor
-	AgentRuntime         *agentruntime.Runtime
-	WorkflowEngine       *wfruntime.Engine
-	SchedulerStore       scheduler.Store
-	SchedulerMaxAttempts int
-	WorkflowMaxAttempts  int
-	Workspaces           *workspace.Manager
-	ToolRegistry         *tools.Registry
-	ToolEngine           *tools.Engine
-	ToolAudit            *audit.Memory
+	DB                    *sql.DB
+	Providers             *provider.ProviderRegistry
+	Models                *provider.ModelRegistry
+	Adapters              *modelgateway.Registry
+	ProviderRuntime       *modelgateway.ProviderRuntime
+	Repository            provider.CatalogRepository
+	Gateway               *modelgateway.Gateway
+	CredentialManager     appcredential.Manager
+	AgentExecutor         executor.AgentExecutor
+	AgentRuntime          *agentruntime.Runtime
+	WorkflowEngine        *wfruntime.Engine
+	GoalService           *goalservice.Service
+	PlanningService       *planning.Service
+	PlanExecutionService  *planworkflow.Service
+	GoalEvaluationService *goalevaluation.Service
+	ReflectionService     *reflection.Service
+	SchedulerStore        scheduler.Store
+	SchedulerMaxAttempts  int
+	WorkflowMaxAttempts   int
+	Workspaces            *workspace.Manager
+	ToolRegistry          *tools.Registry
+	ToolEngine            *tools.Engine
+	ToolAudit             *audit.Memory
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -79,6 +89,18 @@ func NewRouter(deps Dependencies) http.Handler {
 		agentHandler := handlers.NewAgentHandler(deps.AgentRuntime, deps.SchedulerStore)
 		agentHandler.SetMaxAttempts(deps.SchedulerMaxAttempts)
 		agentHandler.RegisterRoutes(api)
+	}
+	if deps.GoalService != nil && deps.PlanningService != nil {
+		handlers.NewGoalHandler(deps.GoalService, deps.PlanningService).RegisterRoutes(api)
+	}
+	if deps.PlanExecutionService != nil {
+		handlers.NewPlanExecutionHandler(deps.PlanExecutionService).RegisterRoutes(api)
+	}
+	if deps.GoalEvaluationService != nil {
+		handlers.NewGoalEvaluationHandler(deps.GoalEvaluationService).RegisterRoutes(api)
+	}
+	if deps.ReflectionService != nil {
+		handlers.NewReflectionHandler(deps.ReflectionService).RegisterRoutes(api)
 	}
 	if deps.WorkflowEngine != nil {
 		workflowHandler := handlers.NewWorkflowHandler(deps.WorkflowEngine)

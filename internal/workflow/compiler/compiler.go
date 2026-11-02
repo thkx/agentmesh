@@ -16,6 +16,7 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 		return nil, err
 	}
 	c := &Compiled{Definition: d, Nodes: map[string]workflow.Node{}, Outgoing: map[string][]workflow.Edge{}}
+	startCount := 0
 	for _, n := range d.Nodes {
 		if n.ID == "" {
 			return nil, fmt.Errorf("%w: node id is empty", workflow.ErrInvalidDefinition)
@@ -24,6 +25,11 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 			return nil, fmt.Errorf("%w: duplicate node %q", workflow.ErrInvalidDefinition, n.ID)
 		}
 		switch n.Type {
+		case workflow.NodeStart:
+			startCount++
+			if n.ID != d.Entry {
+				return nil, fmt.Errorf("%w: start node %s must be the entry", workflow.ErrInvalidDefinition, n.ID)
+			}
 		case workflow.NodeAgent:
 			if n.Agent == nil || n.Agent.ModelID == "" || n.Agent.WorkspaceID == "" || n.Agent.Prompt == "" {
 				return nil, fmt.Errorf("%w: agent node %s requires model_id, workspace_id and prompt", workflow.ErrInvalidDefinition, n.ID)
@@ -41,6 +47,9 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 			return nil, fmt.Errorf("%w: unsupported node type %q", workflow.ErrInvalidDefinition, n.Type)
 		}
 		c.Nodes[n.ID] = n
+	}
+	if startCount > 1 {
+		return nil, fmt.Errorf("%w: workflow can contain only one start node", workflow.ErrInvalidDefinition)
 	}
 	if _, ok := c.Nodes[d.Entry]; !ok {
 		return nil, fmt.Errorf("%w: entry node does not exist", workflow.ErrInvalidDefinition)

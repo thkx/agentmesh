@@ -598,7 +598,7 @@ func (s *Store) ClaimRun(ctx context.Context, owner string, lease time.Duration)
 			} else if nodeTypes[nodeID] == workflow.NodeAgent && ((nodeErr == nil && (nodeStatus == "running" || nodeStatus == "failed")) || errors.Is(nodeErr, sql.ErrNoRows)) {
 				// Agent snapshots are reconciled by the Workflow Engine.
 				hasRecoverableAgent = true
-			} else if (nodeTypes[nodeID] == workflow.NodeCondition || nodeTypes[nodeID] == workflow.NodeEnd) && ((nodeErr == nil && (nodeStatus == "running" || nodeStatus == "failed")) || errors.Is(nodeErr, sql.ErrNoRows)) {
+			} else if (nodeTypes[nodeID] == workflow.NodeStart || nodeTypes[nodeID] == workflow.NodeCondition || nodeTypes[nodeID] == workflow.NodeEnd) && ((nodeErr == nil && (nodeStatus == "running" || nodeStatus == "failed")) || errors.Is(nodeErr, sql.ErrNoRows)) {
 				hasRecoverablePure = true
 			} else {
 				state.Status = workflow.NodeInterrupted

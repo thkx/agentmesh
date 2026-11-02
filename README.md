@@ -1,127 +1,46 @@
 # AgentMesh
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+AgentMesh is a Go-based multi-provider model gateway and Agent execution platform. The current baseline includes Provider / Model registries, Model Gateway, encrypted credentials, Coding Agent adapters, Tool System, native tool calling, durable Agent scheduling, versioned Workflow DAGs, event history, fencing tokens, and M11 reliability acceptance. M12 adds Goal Management and structured planning; M13 compiles immutable Plans into the existing durable Workflow Runtime.
 
-**AgentMesh** is a Go-based, multi-provider model gateway and agent execution runtime. It provides a unified interface for model providers, a policy-enforcing Model Gateway, local coding-agent process adapters, a reusable Tool System, durable Agent scheduling, and versioned Workflow execution.
+## Prerequisites
 
-The project is developed in milestones. This README summarizes the capabilities and operational boundaries documented for **M1–M11**. Detailed design decisions, API contracts, migrations, and acceptance commands are maintained in the milestone documents under [`docs/milestones/`](docs/milestones/).
+- Go 1.27.3 (`darwin/arm64`)
+- sqlc v1.31.1
 
-## Contents
-
-- [Capabilities](#capabilities)
-- [Architecture at a glance](#architecture-at-a-glance)
-- [Requirements](#requirements)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Model providers and Gateway](#model-providers-and-gateway)
-- [HTTP API overview](#http-api-overview)
-- [Security and operational boundaries](#security-and-operational-boundaries)
-- [Database and migrations](#database-and-migrations)
-- [Milestone status](#milestone-status)
-- [Development and verification](#development-and-verification)
-- [Documentation](#documentation)
-
-## Capabilities
-
-| Area | Capability |
-|---|---|
-| Model providers | OpenAI, Anthropic, Gemini, and Ollama adapters |
-| Provider instances | Multiple independently configured instances of the same provider type |
-| Model Gateway | Model resolution, capability checks, output-token limits, normalized errors and stream events |
-| Credential management | Environment/stored credential resolution, encrypted SQLite storage, safe status APIs, adapter hot reload |
-| Coding agents | Process adapters for Claude Code, Codex CLI, Gemini CLI, and OpenCode |
-| Tool System | Registry, execution engine, permission checks, approval gates, bounded inputs/outputs, built-in tools |
-| Agent Runtime | Native tool calling, bounded Agent Loop, cancellation, task state and message persistence |
-| Durable scheduler | SQLite-backed jobs, owner-bound leases, heartbeats, retry boundaries, tool invocation ledger |
-| Workflow Runtime | Versioned DAG workflows, parallel fan-out/join, approval nodes, durable checkpoints |
-| Observability | Workflow event history, SSE event stream, node execution history and operator recovery |
-| Reliability | Fencing tokens, stale-worker write rejection, bounded SSE delivery, multi-process and crash acceptance tests |
-
-## Architecture at a glance
-
-```text
-                 ┌────────────────────────────┐
-                 │        HTTP / CLI          │
-                 └─────────────┬──────────────┘
-                               │
-             ┌─────────────────▼─────────────────┐
-             │          Application API           │
-             └──────────┬───────────────┬─────────┘
-                        │               │
-              ┌─────────▼──────┐  ┌─────▼──────────┐
-              │  Model Gateway │  │ Agent / Workflow│
-              └─────────┬──────┘  │    Runtime      │
-                        │         └─────┬──────────┘
-              ┌─────────▼──────┐        │
-              │ Provider Runtime│  ┌────▼──────────┐
-              │ + Adapter Factory│  │  Tool Engine  │
-              └─────────┬──────┘  └────┬──────────┘
-                        │              │
-          ┌─────────────▼──────┐   ┌───▼────────────┐
-          │ OpenAI / Anthropic │   │ Built-in Tools │
-          │ Gemini / Ollama    │   │ + Tool Registry│
-          └────────────────────┘   └────────────────┘
-
-                 SQLite persistence
-       catalog · credentials · tasks · jobs
-       tool ledger · workflow runs · checkpoints
-       workflow events · execution history
-```
-
-The Model Gateway owns provider-neutral model execution policy. Agent and Workflow runtimes build on that gateway and the shared Tool Engine. SQLite provides local persistence and coordination; it is not presented as a multi-host distributed database.
-
-## Requirements
-
-- Go **1.27.3**, matching the version currently documented for this project.
-- [`sqlc`](https://sqlc.dev/) **v1.31.1** for regenerating database query code.
-- SQLite is provided by `modernc.org/sqlite`; **CGO and GCC are not required**.
-
-Install sqlc:
+Install sqlc if needed:
 
 ```bash
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 sqlc version
 ```
 
-## Quick start
+## Database and SQLC (M1-D)
 
-1. Clone the repository and enter the project directory.
-2. Copy the example configuration.
-3. Set any provider credentials required by the models you intend to call.
-4. Start AgentMesh.
+- SQLite is provided by `modernc.org/sqlite`; no CGO or GCC is required.
+- Runtime migrations are embedded from `internal/platform/database/migrations`.
+- SQLC schema input points to the same migration `*.up.sql` files.
+- Provider and Model catalog synchronization is transactional.
+- API keys are not stored in SQLite. `credential_ref` stores only an environment variable name.
 
-```bash
-cp configs/config.example.yaml configs/config.yaml
-
-# Optional: configure a provider credential through its environment variable.
-export OPENAI_PRIMARY_API_KEY="your-api-key"
-
-go run ./cmd/agentmesh --config configs/config.yaml
-```
-
-The server listens on the configured `server.host` and `server.port`; the documented default is `127.0.0.1:8080`.
-
-Health checks:
+Regenerate query code and run validation:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
-curl http://127.0.0.1:8080/readyz
+sqlc generate
+go test ./...
+go test -race ./internal/platform/database ./internal/integration ./internal/modelgateway
+go build ./...
 ```
 
-The exact configuration fields and API request/response contracts are described in the relevant milestone documents. Keep the listener on loopback: the HTTP API does not currently provide authentication and authorization.
+## Provider instances and model registry (M1-A / M1-B)
 
-## Configuration
+AgentMesh separates a provider vendor type from a configured provider instance:
 
-The example configuration is [`configs/config.example.yaml`](configs/config.example.yaml). Copy it to `configs/config.yaml` and adjust it for the local environment.
+- `type`: vendor adapter family (`openai`, `anthropic`, `gemini`, `ollama`).
+- `id`: a unique AgentMesh instance ID (`openai-primary`, `openai-backup`).
+- `models[].provider_id`: references the instance ID, never the vendor type.
+- `models[].id`: the stable model ID used by AgentMesh clients.
 
-### Provider and model identity
-
-AgentMesh distinguishes a provider vendor type from a configured provider instance:
-
-- `providers[].type` identifies the adapter family: `openai`, `anthropic`, `gemini`, or `ollama`.
-- `providers[].id` identifies one configured instance, such as `openai-primary` or `openai-backup`.
-- `models[].provider_id` references the provider **instance ID**, not the vendor type.
-- `models[].id` is the stable model ID presented to AgentMesh clients.
+Copy `configs/config.example.yaml`. Cloud providers may start without credentials and remain registered but unavailable until configured. Configure keys through environment variables (`api_key_env`) or the Credential HTTP API. API key values are not stored in YAML or included in provider JSON output. Each instance gets its own SDK client and Base URL. The OpenAI and Anthropic SDK clients are explicitly configured with their instance endpoint; Gemini receives an explicit `HTTPOptions.BaseURL`; Ollama receives its instance URL and HTTP client.
 
 Example:
 
@@ -134,7 +53,6 @@ providers:
     base_url: https://api.openai.com/v1
     api_key_env: OPENAI_PRIMARY_API_KEY
     enabled: true
-
   - id: openai-backup
     name: OpenAI Backup
     type: openai
@@ -151,177 +69,219 @@ models:
     enabled: true
 ```
 
-Each provider instance has its own adapter client and endpoint configuration. This allows two instances of the same vendor type to use different Base URLs and credentials.
-
-Cloud providers can remain registered when credentials are missing, but they are not executable until a credential is available. Environment credentials take precedence over encrypted stored credentials. Secret values are not returned by provider or credential status APIs.
-
-### Credential key management
-
-Stored credentials are encrypted with AES-256-GCM. The portable `FileKeyProvider` stores a 32-byte key in a file with restrictive permissions (`0600` file inside a `0700` directory).
-
-- Keep the key outside the SQLite database directory.
-- Do not commit the key to source control.
-- Back it up securely. If the key is lost, stored credentials cannot be decrypted.
-- The file provider is a portable fallback, not an OS keychain or KMS integration.
-
-See [`M2-A`](docs/milestones/M2-A.md), [`M2-B`](docs/milestones/M2-B.md), and [`M2-C`](docs/milestones/M2-C.md).
-
-## Model providers and Gateway
-
-The Gateway is the policy boundary between callers and provider adapters. It:
-
-- Resolves the caller's `model_id` to a registered model definition.
-- Rejects disabled models and, when provider validation is enabled, missing or disabled provider instances.
-- Enforces the model's configured `max_output_tokens` ceiling. A request value of zero retains provider-default behavior.
-- Rejects streaming requests for models that do not advertise streaming support.
-- Normalizes response, stream-event, and provider-error identities to AgentMesh provider-instance and model IDs.
-- Normalizes cancellation, deadlines, HTTP status errors, network timeouts, and provider errors.
-- Exposes retryable error classifications for rate limits, request timeouts, server failures, and network timeouts. It does **not** automatically retry requests.
-- Stops forwarding after terminal `completed` or `error` stream events and normalizes unknown event types as stream errors.
-
-The Gateway does not estimate prompt token usage. Accurate input-token counting requires provider/model-specific tokenizers; character-count approximations are intentionally avoided.
-
-## HTTP API overview
-
-The API is versioned under `/api/v1`. This is a capability index, not a replacement for the detailed contracts in the milestone documents.
-
-| Area | Endpoint(s) | Purpose |
-|---|---|---|
-| Health | `GET /healthz`, `GET /readyz` | Liveness and readiness |
-| Model execution | `POST /api/v1/generate`, `POST /api/v1/generate/stream` | Non-streaming and SSE generation |
-| Provider credentials | `GET/PUT/DELETE /api/v1/providers/{id}/credential` | Read safe status, set, or delete a stored credential |
-| Provider connection | `POST /api/v1/providers/{id}/test` | Bounded upstream connection test; may incur usage charges |
-| Coding agent | `POST /api/v1/executions`, `DELETE /api/v1/executions/{id}` | Start/cancel a coding-agent execution |
-| Workspace | `POST /api/v1/workspaces`, `DELETE /api/v1/workspaces/{id}` | Create/remove a local workspace |
-| Tools | `GET /api/v1/tools`, `POST /api/v1/tools/{name}/invoke` | List and invoke tools |
-| Tool audit | `GET /api/v1/tools/audit?limit=100` | Inspect the bounded in-memory audit trail |
-| Agent Runtime | `POST /api/v1/agents/run` | Run an Agent task synchronously |
-| Agent task | `GET /api/v1/agents/tasks/{id}`, `POST /api/v1/agents/tasks/{id}/cancel` | Inspect/cancel a task |
-| Agent messages | `GET /api/v1/agents/tasks/{id}/messages` | Read persisted conversation messages |
-| Agent queue | `POST /api/v1/agents/queue` | Enqueue an asynchronous task |
-| Agent job | `GET /api/v1/agents/jobs/{id}`, `POST /api/v1/agents/jobs/{id}/retry` | Inspect/retry an eligible failed job |
-| Workflow definitions | `PUT/GET /api/v1/workflows/{id}` | Create/update and retrieve a versioned workflow definition |
-| Workflow runs | `POST /api/v1/workflows/{id}/runs`, `GET /api/v1/workflows/{id}/runs` | Start/list workflow runs |
-| Workflow run detail | `GET /api/v1/workflows/runs/{run_id}` | Inspect a workflow run |
-| Workflow approval | `POST /api/v1/workflows/runs/{run_id}/approve`, `POST /api/v1/workflows/runs/{run_id}/reject` | Continue or reject an approval node |
-| Workflow events | `GET /api/v1/workflows/runs/{run_id}/events` | Read persisted run events |
-| Workflow event stream | `GET /api/v1/workflows/runs/{run_id}/events/stream` | Reconnectable SSE event stream |
-| Workflow history | `GET /api/v1/workflows/runs/{run_id}/history`, `GET /api/v1/workflows/runs/{run_id}/nodes` | Inspect run and node execution history |
-| Operator recovery | `POST /api/v1/workflows/runs/{run_id}/nodes/{node_id}/recover` | Audited node retry/skip operation |
-
-For exact payloads, status codes, validation rules, and safety conditions, use the corresponding milestone documentation.
-
-## Security and operational boundaries
-
-These constraints are important when running AgentMesh:
-
-1. **No HTTP authentication/authorization:** keep the server bound to loopback. Do not expose it to a LAN or public network.
-2. **Tool execution is privileged:** `shell.exec` requires an exact executable allowlist entry; the default allowlist is empty. Write and execute permissions require explicit per-invocation approval under the default policy.
-3. **Workspace isolation matters:** built-in file tools reject absolute paths, path traversal, and symlink escapes. Do not treat this as a substitute for OS-level sandboxing.
-4. **SQLite is single-host coordination:** do not place a WAL-mode database on a network filesystem or treat it as a multi-host distributed queue.
-5. **At-least-once boundaries:** durable intent and invocation ledgers prevent blind replay in ambiguous cases, but cannot guarantee exactly-once effects in arbitrary third-party systems.
-6. **Workflow recovery is guarded:** unknown outcomes and potentially completed external side effects are not blindly replayed. Operator recovery is constrained and audited.
-7. **Credential encryption depends on key custody:** protect and back up the encryption key independently of the database.
-8. **Connection tests can cost money:** provider test requests may consume upstream tokens or incur charges.
-
-## Database and migrations
-
-- SQLite uses `modernc.org/sqlite`; CGO/GCC are not needed.
-- Runtime migrations are embedded from `internal/platform/database/migrations`.
-- SQLC schema input uses the same migration `*.up.sql` files.
-- Provider and Model catalog synchronization is transactional.
-- Provider credentials are encrypted before being persisted.
-- Agent tasks, scheduler jobs, tool invocation records, workflow checkpoints, and workflow events are persisted in SQLite.
-
-The root-level PoC `migrations/` directory has been removed; runtime and SQLC use the same migration source. At startup, YAML catalog entries are upserted transactionally and the persisted catalog is then loaded. Database rows not declared in YAML are retained for management workflows.
-
-Regenerate SQLC code:
+Environment variables are optional. They take precedence over encrypted credentials stored through the HTTP API:
 
 ```bash
-sqlc generate
+export OPENAI_PRIMARY_API_KEY="..." # optional
+go run ./cmd/agentmesh --config configs/config.yaml
 ```
 
-See [`M1-D`](docs/milestones/M1-D.md) for schema and catalog synchronization details.
+The in-memory `ProviderRegistry` and `ModelRegistry` are hydrated from the persisted catalog and exposed by the application container. `ProviderRuntime.ApplyProvider` builds an adapter before publishing an in-memory provider update; `ProviderRuntime.RemoveProvider` removes the in-memory provider instance and adapter. The `RuntimeRepository` provides transactional persistence operations and enforces the provider/model foreign-key relationship. HTTP CRUD endpoints and coordinated persistence of live runtime mutations remain in M1-E.
 
-## Milestone status
+## Gateway execution policy (M1-C)
 
-The following summarizes the implementation described by this repository's milestone notes.
+The Gateway is the policy boundary between callers and provider adapters:
 
-| Milestone | Scope | Document |
-|---|---|---|
-| M1-A | Provider and Model registries | — |
-| M1-B | Isolated provider runtime and adapter factory | — |
-| M1-C | Gateway execution policy | — |
-| M1-D | SQLite persistence for Provider/Model catalog | [M1-D](docs/milestones/M1-D.md) |
-| M1-E | HTTP runtime and catalog/generation APIs | — |
-| M1-F | Integration tests and acceptance coverage | [M1-F](docs/milestones/M1-F.md) |
-| M2-A–M2-C | Credential domain, encryption/storage, runtime integration | [M2-A](docs/milestones/M2-A.md) · [M2-B](docs/milestones/M2-B.md) · [M2-C](docs/milestones/M2-C.md) |
-| M2-D–M2-F | Credential API, adapter hot reload, provider connection testing | [M2-D](docs/milestones/M2-D.md) · [M2-E](docs/milestones/M2-E.md) · [M2-F](docs/milestones/M2-F.md) |
-| M2-G–M2-H | Reliability and acceptance | [M2-G](docs/milestones/M2-G.md) · [M2-H](docs/milestones/M2-H.md) |
-| M3 | Coding Agent adapters and workspaces | [M3](docs/milestones/M3.md) |
-| M4 | Tool System and built-in tools | [M4](docs/milestones/M4.md) |
-| M5 | Agent Runtime | [M5](docs/milestones/M5.md) |
-| M6 | Native tool calling and Agent state persistence | [M6](docs/milestones/M6.md) |
-| M7 | Durable Agent scheduler and recovery | [M7](docs/milestones/M7.md) |
-| M8 | Versioned Workflow Graph Runtime | [M8](docs/milestones/M8.md) |
-| M9 | Workflow events, observability, and operator recovery | [M9](docs/milestones/M9.md) |
-| M10 | Workflow fencing and bounded SSE delivery | [M10](docs/milestones/M10.md) |
-| M11 | Reliability acceptance tests | [M11](docs/milestones/M11.md) |
+- Resolves the caller-facing `model_id` to a registered model definition.
+- Rejects disabled models and, when constructed with `NewGatewayWithProviders`, missing or disabled provider instances.
+- Rejects `max_output_tokens` values above the model's configured `max_output_tokens` ceiling. A zero request value remains provider-default behavior; the Gateway does not silently invent a default.
+- Rejects streaming requests when the model does not advertise streaming support.
+- Rewrites response, stream-event, and normalized provider-error identities to the resolved AgentMesh provider-instance ID and model ID.
+- Normalizes cancellation, deadline, HTTP status, network timeout, and provider errors. Retryable classifications are exposed for rate limits, request timeouts, server failures, and network timeouts; automatic retries are intentionally not performed by the Gateway.
+- Stops forwarding a stream after its terminal `completed` or `error` event, and converts unknown event types into normalized stream errors.
 
-### Reliability acceptance
+The Gateway enforces configured output-token ceilings but does not estimate prompt token usage. Accurate input-token counting requires provider/model-specific tokenizers and is not approximated with character counts.
 
-M11 adds acceptance tests without changing runtime behavior or the database schema. The documented scenarios include:
+## M1-D persistence
 
-- Four independent OS processes contending for one Workflow job.
-- Killing a lease-owning worker and verifying recovery.
-- Rejecting stale writes using fencing tokens.
-- Refusing to replay ambiguous third-party tool calls.
-- Exercising provider idempotency keys.
-- Verifying heartbeat renewal during a long-running node.
+See [`docs/milestones/M1-D.md`](docs/milestones/M1-D.md) for the migration layout, schema constraints, runtime synchronization flow, and acceptance commands. The root `migrations/` PoC directory has been removed so runtime and SQLC no longer use separate schemas. At startup, YAML entries are upserted transactionally and then the full persisted catalog is loaded; rows not declared in YAML are retained for future management APIs.
 
-Run the acceptance script with the Go version required by `go.mod`:
+## HTTP Runtime (M1-E)
 
-```bash
-./scripts/reliability/m11.sh
+The server starts with `go run ./cmd/agentmesh --config configs/config.yaml` and listens on the configured `server.host:server.port` (default `127.0.0.1:8080`). Liveness/readiness endpoints are `/healthz` and `/readyz`; the versioned API is under `/api/v1`.
+
+Provider and Model catalog endpoints support list/create/get/update/enable-disable/delete. Model execution is available at `POST /api/v1/generate`; streaming uses `POST /api/v1/generate/stream` (SSE). The existing CLI now sends the Gateway request shape to these endpoints.
+
+**Security:** M1-E does not include API authentication. Keep the server bound to loopback; do not expose it to a LAN or public network.
+
+## Milestone M1-F — Integration Tests and Acceptance
+
+M1-F adds regression coverage for same-vendor Provider Instance isolation, failed Adapter replacement safety, Gateway stream cancellation, concurrent catalog writes, and the HTTP Generate/SSE path. See [`docs/milestones/M1-F.md`](docs/milestones/M1-F.md) for the acceptance matrix and local verification commands.
+
+Catalog mutations are serialized within the HTTP handler to prevent concurrent snapshot-based persistence from losing Provider or Model updates. This is an in-process consistency guarantee; multi-process writers are not supported by the current single-process server design.
+
+## M2-A — Credential Domain & Abstraction
+
+M2-A introduces the credential domain and application contracts without changing M1 runtime behavior yet. Credential sources are `environment` and `stored`; safe status values are `unconfigured`, `configured`, and `invalid`. `domain/credential.Secret` keeps the secret value private and redacts standard formatting, while `Record` contains metadata only.
+
+The application contracts are defined in `internal/credential`: `Store`, `EnvironmentLookup`, `Resolver`, and `Manager`. Credential resolution uses Environment > Stored precedence. Missing credentials are represented as an unconfigured provider state and do not prevent startup. `Provider.CredentialRef` / YAML `api_key_env` remains the environment-variable compatibility field. M2-C wires the resolver and encrypted SQLite store into Provider Runtime; an enabled cloud provider without a credential remains registered but has no executable adapter. The credential encryption key is kept outside SQLite at `<database-directory>/keys/credential.key` using restrictive filesystem permissions. Back up this key securely: stored credentials cannot be decrypted if it is lost.
+
+See [`docs/milestones/M2-A.md`](docs/milestones/M2-A.md). Encryption, SQLite credential storage, OS keychain integration, runtime hot reload, and credential HTTP APIs are intentionally deferred to subsequent M2 milestones.
+
+## M2-B — Credential Encryption & Storage
+
+M2-B adds AES-256-GCM authenticated encryption and encrypted SQLite persistence for provider-instance credentials. The encryption key is provided independently from SQLite through `cryptography.KeyProvider`; `FileKeyProvider` is the portable fallback and creates a 32-byte key in a `0600` file inside a `0700` directory. Keep this key file backed up and access-controlled: losing it makes stored credentials unrecoverable. The key file must not be placed inside the SQLite database directory or committed to source control.
+
+`credentialstore.SQLiteStore` implements the M2-A `credential.Store` contract. Stored values are encrypted before persistence using a fresh random GCM nonce; rows carry an encryption version for future format migrations. The `provider_credentials` table references provider instances with `ON DELETE CASCADE`. No HTTP endpoints or runtime adapter reload behavior are introduced in M2-B; those remain M2-D/M2-E.
+
+The file key provider is a portable fallback, not an OS keychain integration. Production deployments should use a platform keychain/KMS-backed implementation of `cryptography.KeyProvider` where available.
+
+
+### M2-C — Provider Runtime Credential Integration
+
+See [`docs/milestones/M2-C.md`](docs/milestones/M2-C.md) for runtime resolution rules and startup behavior. Missing cloud credentials no longer prevent AgentMesh from starting.
+
+### M2-D — Credential HTTP API
+
+- `GET /api/v1/providers/{id}/credential` — safe credential status metadata.
+- `PUT /api/v1/providers/{id}/credential` — set/update `{"api_key":"..."}`.
+- `DELETE /api/v1/providers/{id}/credential` — delete the stored credential.
+
+The API never returns the secret. Stored values are encrypted before SQLite persistence. See [`docs/milestones/M2-D.md`](docs/milestones/M2-D.md).
+
+### M2-E — Adapter Hot Reload
+
+Credential changes rebuild and atomically replace the provider-instance adapter without restarting AgentMesh. Requests already using the previous adapter can finish. See [`docs/milestones/M2-E.md`](docs/milestones/M2-E.md).
+
+### M2-F — Provider Connection Testing
+
+`POST /api/v1/providers/{id}/test` performs a bounded upstream generation request using an enabled model. This can incur provider usage/charges. See [`docs/milestones/M2-F.md`](docs/milestones/M2-F.md).
+
+### M2-G / M2-H — Reliability and Acceptance
+
+See [`docs/milestones/M2-G.md`](docs/milestones/M2-G.md) and [`docs/milestones/M2-H.md`](docs/milestones/M2-H.md) for rollback, in-flight request, security, integration test, and acceptance details. The HTTP API has no authentication; keep the listener bound to loopback.
+
+
+## M3 — Coding Agent Adapter
+
+M3 adds a unified `AgentExecutor` for locally installed Claude Code, Codex CLI, Gemini CLI, and OpenCode. AgentMesh manages process execution, cancellation, timeouts, output normalization, and workspaces; the external coding agents retain their own Agent Loop.
+
+- `POST /api/v1/executions` starts a synchronous coding-agent execution.
+- `DELETE /api/v1/executions/:id` cancels an active execution.
+- `POST /api/v1/workspaces` creates a private local workspace; `DELETE /api/v1/workspaces/:id` removes it.
+- Permission defaults to `read-only`; `workspace-write` must be explicit.
+- Configure `agent.workspace_root` and `agent.cli.*` in YAML. The four CLI programs must be installed and authenticated separately.
+
+See [`docs/milestones/M3.md`](docs/milestones/M3.md) for the API contract, adapter command mappings, security model, and acceptance tests. The HTTP API remains unauthenticated and configuration validation now restricts the listener to loopback addresses.
+
+
+## M4 — Tool System
+
+M4 introduces a standalone Tool System shared by future API Agent Runtime and Coding Agent workflows. `internal/domain/tool` defines tool specifications, JSON argument schemas, permission classes, and stable errors. `internal/tools` provides a thread-safe Registry and an Engine with input/output limits, per-tool timeouts, policy checks, explicit approval gates, workspace context propagation, and audit events.
+
+Built-in tools are registered in `internal/tools/builtin`: `file.read`, `file.write`, `file.list`, `shell.exec`, and `git.run`. File operations reject absolute paths, traversal, and symlink escapes. Writes use a temporary file and atomic rename. `shell.exec` invokes an executable directly without a shell and requires an exact allowlist entry in `agent.tools.allowed_commands`; the default allowlist is empty. `git.run` is restricted to inspection-oriented subcommands. Write and execute permissions require explicit per-invocation approval under the default policy.
+
+HTTP endpoints:
+- `GET /api/v1/tools` — list tool schemas and permission metadata.
+- `POST /api/v1/tools/{name}/invoke` — invoke a tool with `workspace_id`, `arguments`, and explicit `approved` boolean.
+- `GET /api/v1/tools/audit?limit=100` — inspect the bounded in-memory audit trail.
+
+Tool audit is intentionally in-memory in M4 and is lost on restart; durable audit storage is deferred. The HTTP API remains unauthenticated and must stay bound to loopback. Never expose the tool invocation endpoint to an untrusted network. Approval is an explicit local API assertion, not a multi-user approval workflow. See `docs/milestones/M4.md`.
+
+## M5 — Agent Runtime
+
+M5 introduces the application-owned Agent Loop using the existing ModelGateway and Tool Engine. It supports JSON-based tool-call/final control messages, bounded steps and tool calls, repeated-call protection, context character-budget trimming, cancellation, per-task timeouts, and a concurrency limit.
+
+HTTP endpoints:
+
+- `POST /api/v1/agents/run`
+- `GET /api/v1/agents/tasks/:id`
+- `POST /api/v1/agents/tasks/:id/cancel`
+
+See [`docs/milestones/M5.md`](docs/milestones/M5.md) for the execution protocol, safety boundaries, and limitations.
+
+## M6 — Native Tool Calling & Agent State Persistence
+
+M6 adds provider-neutral `ToolDefinition` / `ToolCall` / `Tool Result` structures to ModelGateway. OpenAI Responses API, Anthropic Messages API, Gemini generateContent, and Ollama Chat implement native function calling. Agent Runtime routes native calls through the existing M4 Tool Engine, preserving policy, approval, timeout and audit behavior.
+
+Migration `000006_create_agent_task_states` stores task/result snapshots and the full conversation transcript in SQLite. The model receives a bounded context window, while persisted history is not truncated. `GET /api/v1/agents/tasks/:id/messages` retrieves persisted messages. Completed and failed tasks remain inspectable after restart; automatic resume of interrupted tasks is intentionally deferred until tool idempotency and durable scheduler ownership are implemented. See [`docs/milestones/M6.md`](docs/milestones/M6.md).
+
+## M7 — Durable Agent Scheduler & Recovery
+
+M7 adds a SQLite-backed asynchronous task queue and worker runtime:
+
+- `POST /api/v1/agents/queue` durably enqueues a task and returns `202 Accepted`.
+- `GET /api/v1/agents/jobs/:id` returns queue state, attempts and lease metadata.
+- `POST /api/v1/agents/jobs/:id/retry` retries only failed tasks with no recorded tool invocation.
+- Worker claims are transactional and protected by owner-bound leases and periodic heartbeats.
+- Jobs whose lease expires before execution starts can be requeued. Jobs that expire after execution starts become `interrupted` and are never blindly replayed.
+- Model/runtime failures are retried with exponential backoff only while the task has no durable tool invocation intent.
+- A SQLite tool invocation ledger persists an intent before each tool side effect and stores completed results. Completed calls are deduplicated; an invocation left in an indeterminate state is refused rather than executed again.
+- Existing synchronous `POST /api/v1/agents/run` remains available for compatibility.
+
+Example configuration:
+
+```yaml
+scheduler:
+  workers: 1
+  worker_id: ""
+  poll_interval: 500ms
+  lease_duration: 30s
+  max_attempts: 3
 ```
 
-See [`M11`](docs/milestones/M11.md) for the acceptance scope and deployment caveats. A passing acceptance suite is evidence for those tested scenarios; it is not a guarantee of exactly-once external side effects or unlimited production scale.
+SQLite provides durable single-host coordination. Do not put a WAL-mode SQLite database on a network filesystem. HTTP remains loopback-only until authentication and authorization are implemented. See `docs/milestones/M7.md` for delivery semantics and recovery boundaries.
 
-## Development and verification
+Validation note: M7 scheduler/config sources and test source compilation were checked in an isolated Go 1.23-compatible module; config tests and SQLite migration/recovery SQL smoke checks passed. The actual Go SQLite integration tests and full-project build/tests remain unverified because this environment has Go 1.23.2 while the project requires Go 1.27.3, and toolchain download was unavailable.
 
-Common local checks:
+## Workflow Graph (M8)
 
-```bash
-# Regenerate generated database code after query/schema changes.
-sqlc generate
+M8 adds versioned Agent Workflows on top of the existing Agent Runtime. Definitions support `agent`, `condition`, `approval`, and `end` nodes, including parallel DAG fan-out/join. Runs are durably enqueued to SQLite-backed Workflow Workers; owner-bound leases, heartbeats, node idempotency records, checkpoint reconciliation, and approval continuation survive process restarts. Independent nodes in a ready graph wave execute concurrently (bounded to 8 per run). Unknown Agent outcomes and possible external side effects are marked indeterminate and are never blindly replayed. See [`docs/milestones/M8.md`](docs/milestones/M8.md) for the API, JSON example, delivery semantics, and recovery limits.
 
-# Run all package tests.
-go test ./...
+## M9 Workflow observability and operator recovery
 
-# Run race checks on the key persistence and execution packages.
-go test -race ./internal/platform/database ./internal/integration ./internal/modelgateway
+M9 adds an append-only per-run event history, reconnectable SSE delivery, node-level execution observations, and audited operator recovery. See [`docs/milestones/M9.md`](docs/milestones/M9.md) for the API contract, recovery safety rules, migration details, and test commands.
 
-# Static analysis.
-go vet ./...
+New endpoints:
 
-# Build all packages.
-go build ./...
-```
+- `GET /api/v1/workflows/runs/:run_id/events?after=0&limit=100`
+- `GET /api/v1/workflows/runs/:run_id/events/stream?after=0` (SSE; supports `Last-Event-ID`)
+- `GET /api/v1/workflows/runs/:run_id/history`
+- `GET /api/v1/workflows/runs/:run_id/nodes`
+- `POST /api/v1/workflows/runs/:run_id/nodes/:node_id/recover` (`retry` or `skip`)
 
-Run the M11 reliability acceptance script separately:
+Migration `000010_create_workflow_events` is applied automatically by the existing migration runner.
 
-```bash
-./scripts/reliability/m11.sh
-```
+## M10 — Workflow distributed execution boundaries
 
-Use the milestone document for the acceptance commands relevant to a specific change. Do not interpret a source-compilation check or SQL smoke test as a substitute for the full integration test suite.
+M10 adds monotonic workflow job fencing tokens. Every claim increments `workflow_jobs.fencing_token`; heartbeat, completion, node-ledger writes and run checkpoints validate the current owner and token. Worker heartbeat renews both the run lease and all running node leases. The SSE endpoint uses bounded pull-based batches (32 events), per-write deadlines and cursor advancement after successful writes, so slow subscribers do not create unbounded in-memory queues. See `docs/milestones/M10.md` for guarantees, tests and operational limits.
 
-## Documentation
+Migration: `000011_workflow_fencing`.
 
-- [`docs/milestones/`](docs/milestones/) — milestone design, API contracts, implementation notes, and acceptance criteria.
-- [`configs/config.example.yaml`](configs/config.example.yaml) — example runtime configuration.
-- [`scripts/reliability/m11.sh`](scripts/reliability/m11.sh) — M11 reliability acceptance script.
+## M11 — Reliability acceptance
 
----
+M11 adds acceptance tests only (no runtime behavior or schema changes): four independent OS processes contend for one Workflow job, the lease owner is killed and recovered, stale fencing writes are rejected, ambiguous third-party tool calls are not replayed, provider idempotency keys are exercised, and a long-running node is held beyond its original lease while heartbeat renewal is verified. Run `./scripts/reliability/m11.sh` with the Go version required by `go.mod`. See `docs/milestones/M11.md` for test guarantees and deployment caveats.
 
-**Project status:** M1–M11 capabilities and their boundaries are documented above. Consult the milestone notes and the current source tree before relying on any endpoint or operational behavior in a deployment.
+
+## M12 — Goal & Planning Core
+
+M12 introduces structured Goals, success criteria, a provider-independent Planner contract, an LLM Planner backed by Model Gateway, deterministic Plan validation, immutable per-goal Plan versions, SQLite persistence, and Goal/Plan HTTP APIs. Plans are validated and persisted but are not executed in M12; Plan-to-Workflow compilation is deferred to M13. See [`docs/milestones/M12.md`](docs/milestones/M12.md) for schema, API routes, lifecycle rules, and verification commands.
+
+### M13 — Plan → Workflow Compiler
+
+M13 compiles immutable M12 Goal Plans into the existing durable Workflow DAG and submits them through the M8–M11 runtime. It adds Plan-version execution reservations and deterministic run IDs, condition/approval/agent/end node mapping, explicit Agent Profile bindings, and multi-root support through a pure Workflow start node. It does not add a second queue or claim per-node retries or exactly-once external effects. See [`docs/milestones/M13.md`](docs/milestones/M13.md).
+
+### M14 — Goal Outcome Evaluation & Completion
+
+M14 closes the Goal lifecycle by evaluating terminal Workflow Runs against declared success criteria. It collects successful node outputs, requires exact evidence quotes tied to real node IDs, stores append-only per-run evaluations, and atomically completes a Goal only when the Workflow Run succeeded and every required criterion is satisfied. Failed Workflow Runs cannot complete a Goal. See [`docs/milestones/M14.md`](docs/milestones/M14.md).
+
+New endpoints:
+
+- `POST /api/v1/goals/:id/evaluations` with `{"run_id":"...","model_id":"..."}`
+- `GET /api/v1/goals/:id/evaluations`
+- `GET /api/v1/goals/:id/evaluations/:run_id`
+
+Migration: `000014_goal_evaluations`.
+
+
+### M15 — Reflection & Evidence-Grounded Learning
+
+M15 adds a reflection layer after M14 Goal Evaluation. It reviews the Goal, immutable evaluation, and workflow node observations to extract success patterns, failure causes, improvement opportunities, and risks. Every insight must cite an exact quote from a real node output or error; references are validated before persistence. Reflection records are append-only and idempotent per Goal/Run. M15 does not automatically modify Plans, tool policies, Agent Profiles, or long-term memory. See `docs/milestones/M15.md`.
+
+New endpoints:
+
+- `POST /api/v1/goals/:id/reflections` with `{"run_id":"...","model_id":"..."}`
+- `GET /api/v1/goals/:id/reflections`
+- `GET /api/v1/goals/:id/reflections/:run_id`
+
+Migration: `000015_goal_reflections`.

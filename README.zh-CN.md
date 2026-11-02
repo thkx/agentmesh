@@ -2,7 +2,7 @@
 
 **AgentMesh** 是一个基于 Go 构建的多模型提供商网关与 AI Agent 执行平台。它提供统一的模型接入接口、具备策略约束的 Model Gateway、本地 Coding Agent 进程适配器、可复用的 Tool System、持久化 Agent 任务调度，以及版本化 Workflow 执行引擎。
 
-项目采用里程碑方式持续开发。本文档概述 **M1–M11** 已记录的能力与运行边界。详细设计决策、API 契约、数据库迁移和验收命令，请参阅 [`docs/milestones/`](docs/milestones/) 下的里程碑文档。
+项目采用里程碑方式持续开发。本文档概述 **M1–M15** 已记录的能力与运行边界。详细设计决策、API 契约、数据库迁移和验收命令，请参阅 [`docs/milestones/`](docs/milestones/) 下的里程碑文档。
 
 > English documentation: [`README.md`](README.md)
 
@@ -212,6 +212,9 @@ Gateway 负责模型解析、能力检查、输出 Token 限制、统一错误�
 | M9 | Workflow Event History、SSE、执行历史、人工恢复与可观测性 |
 | M10 | Fencing Token、Lease Renewal、过期 Worker 写入保护与 SSE 背压控制 |
 | M11 | 多进程竞争、Worker 崩溃恢复、过期写入拒绝及长任务 Lease 续期可靠性验收 |
+| M12 | Goal 管理、成功条件、LLM Planner、Plan DAG 校验与不可变版本持久化 |
+| M13 | Plan → Workflow 编译、Agent Profile 绑定、执行幂等预留与现有 Workflow Runtime 桥接 |
+| M14 | Workflow 结果证据收集、成功条件评估、追加式评估记录与 Goal 完成状态 |
 
 ### M11 可靠性验收
 
@@ -267,3 +270,38 @@ bash scripts/reliability/m11.sh
 ---
 
 **AgentMesh** 的目标是提供统一的模型接入、可控的工具执行、可恢复的 Agent 任务调度，以及具备持久化与可观测性的 Workflow Runtime。
+
+## M12 — Goal & Planning Core
+
+M12 增加结构化 Goal、目标约束与成功条件、独立的 Planner 接口、基于 Model Gateway 的 LLM Planner、严格 JSON 输出解析、Plan DAG 校验、按 Goal 递增的不可变 Plan 版本、SQLite 持久化，以及 Goal/Plan HTTP API。
+
+M12 只负责生成、校验和保存 Plan，不会执行 Plan Step，也不会创建 Workflow Run。Plan → Workflow DAG 的编译与执行桥接留给 M13。详细数据结构、API 路由、生命周期和验收命令见 [`docs/milestones/M12.md`](docs/milestones/M12.md)。
+
+### M13 — Plan → Workflow Compiler
+
+M13 将 M12 的不可变 Plan 版本编译为现有 M8 Workflow DAG，并通过 M8–M11 的持久化 Runtime 提交执行。新增 Plan 版本执行预留、确定性 Run ID、Agent/Condition/Approval/End 节点映射、显式 Agent Profile 绑定，以及通过纯 Start 节点支持多根 DAG。不会新增第二套队列，也不宣称支持节点级自动重试或任意外部副作用的 exactly-once。详见 [`docs/milestones/M13.md`](docs/milestones/M13.md)。
+
+### M14 — Goal Outcome Evaluation & Completion
+
+M14 补齐 Goal 生命周期闭环：读取终态 Workflow Run，将成功节点输出作为证据交给 LLM，对 Goal 的成功条件逐项评估；证据必须引用真实节点 ID 和节点输出中的精确文本；评估记录追加保存；只有 Workflow Run 成功且所有必需条件均满足时，才会在同一 SQLite 事务中将 Goal 标记为完成。失败、拒绝或取消的 Workflow Run 不会完成 Goal。详见 [`docs/milestones/M14.md`](docs/milestones/M14.md)。
+
+新增接口：
+
+- `POST /api/v1/goals/:id/evaluations`，请求体 `{"run_id":"...","model_id":"..."}`
+- `GET /api/v1/goals/:id/evaluations`
+- `GET /api/v1/goals/:id/evaluations/:run_id`
+
+数据库迁移：`000014_goal_evaluations`。
+
+
+## M15 — Reflection & Evidence-Grounded Learning
+
+M15 在 M14 Goal Evaluation 之后增加 Reflection 层。它综合 Goal、不可变 Evaluation 和 Workflow 节点执行观察，提炼成功模式、失败原因、改进机会和风险。每条 Insight 都必须引用真实节点输出或错误中的精确文本，并在持久化前进行校验。Reflection 按 Goal + Run 幂等保存，并通过 SQLite Trigger 保持追加写入。M15 不会自动修改 Plan、Tool Policy、Agent Profile，也不等同于长期 Memory。
+
+新增 API：
+
+- `POST /api/v1/goals/:id/reflections`，请求体 `{"run_id":"...","model_id":"..."}`
+- `GET /api/v1/goals/:id/reflections`
+- `GET /api/v1/goals/:id/reflections/:run_id`
+
+数据库迁移：`000015_goal_reflections`。详细设计见 `docs/milestones/M15.md`。

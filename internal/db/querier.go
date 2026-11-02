@@ -9,20 +9,29 @@ import (
 )
 
 type Querier interface {
+	CancelAgentGoal(ctx context.Context, arg CancelAgentGoalParams) (int64, error)
+	CreateAgentGoal(ctx context.Context, arg CreateAgentGoalParams) error
+	CreateAgentPlan(ctx context.Context, arg CreateAgentPlanParams) (int64, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) error
 	DeleteModel(ctx context.Context, id string) error
 	DeleteProvider(ctx context.Context, id string) error
 	DeleteProviderCredential(ctx context.Context, providerID string) error
 	DeleteUser(ctx context.Context, id int64) error
+	GetAgentGoal(ctx context.Context, id string) (AgentGoal, error)
+	GetAgentPlan(ctx context.Context, arg GetAgentPlanParams) (AgentPlan, error)
+	GetLatestAgentPlan(ctx context.Context, goalID string) (AgentPlan, error)
 	GetModel(ctx context.Context, id string) (Model, error)
 	GetProvider(ctx context.Context, id string) (Provider, error)
 	GetProviderCredential(ctx context.Context, providerID string) (ProviderCredential, error)
 	GetUser(ctx context.Context, id int64) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	ListAgentGoals(ctx context.Context, limit int64) ([]AgentGoal, error)
+	ListAgentPlans(ctx context.Context, arg ListAgentPlansParams) ([]AgentPlan, error)
 	ListModels(ctx context.Context) ([]Model, error)
 	ListProviders(ctx context.Context) ([]Provider, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ProviderCredentialExists(ctx context.Context, providerID string) (bool, error)
+	UpdateAgentGoal(ctx context.Context, arg UpdateAgentGoalParams) (int64, error)
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) (int64, error)
 	UpsertModel(ctx context.Context, arg UpsertModelParams) error
 	UpsertProvider(ctx context.Context, arg UpsertProviderParams) error

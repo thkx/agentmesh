@@ -386,3 +386,26 @@ func TestWorkflowQueuedApprovalContinuation(t *testing.T) {
 		t.Fatalf("expected success, got %s (%s)", r.Status, r.Error)
 	}
 }
+
+func TestWorkflowPureStartNodeFansOut(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	engine, err := New(store, &fakeAgent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := wf.Definition{ID: "multi-root", Name: "multi-root", Version: 1, Entry: "start", Nodes: []wf.Node{{ID: "start", Type: wf.NodeStart}, {ID: "left", Type: wf.NodeEnd}, {ID: "right", Type: wf.NodeEnd}}, Edges: []wf.Edge{{From: "start", To: "left"}, {From: "start", To: "right"}}}
+	if err = engine.PutDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	run, err := engine.Start(ctx, definition.ID, "multi-root-run", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != wf.RunSucceeded {
+		t.Fatalf("expected succeeded, got %s (%s)", run.Status, run.Error)
+	}
+	if run.Nodes["start"].Status != wf.NodeSucceeded || run.Nodes["left"].Status != wf.NodeSucceeded || run.Nodes["right"].Status != wf.NodeSucceeded {
+		t.Fatalf("expected start node and both roots to succeed: %+v", run.Nodes)
+	}
+}

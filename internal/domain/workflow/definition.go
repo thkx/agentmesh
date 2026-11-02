@@ -17,6 +17,7 @@ var (
 type NodeType string
 
 const (
+	NodeStart     NodeType = "start"
 	NodeAgent     NodeType = "agent"
 	NodeCondition NodeType = "condition"
 	NodeApproval  NodeType = "approval"

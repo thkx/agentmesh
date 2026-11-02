@@ -4,6 +4,50 @@
 
 package db
 
+import (
+	"database/sql"
+)
+
+type AgentGoal struct {
+	ID                  string `json:"id"`
+	Description         string `json:"description"`
+	ConstraintsJson     string `json:"constraints_json"`
+	SuccessCriteriaJson string `json:"success_criteria_json"`
+	ContextJson         string `json:"context_json"`
+	Status              string `json:"status"`
+	CreatedAt           int64  `json:"created_at"`
+	UpdatedAt           int64  `json:"updated_at"`
+	CanceledAt          int64  `json:"canceled_at"`
+	CompletedAt         int64  `json:"completed_at"`
+}
+
+type AgentJob struct {
+	ID               string         `json:"id"`
+	TaskID           string         `json:"task_id"`
+	TaskJson         string         `json:"task_json"`
+	Status           string         `json:"status"`
+	Attempts         int64          `json:"attempts"`
+	MaxAttempts      int64          `json:"max_attempts"`
+	AvailableAt      int64          `json:"available_at"`
+	LeaseOwner       sql.NullString `json:"lease_owner"`
+	LeaseUntil       sql.NullInt64  `json:"lease_until"`
+	ExecutionStarted int64          `json:"execution_started"`
+	LastError        sql.NullString `json:"last_error"`
+	CreatedAt        int64          `json:"created_at"`
+	UpdatedAt        int64          `json:"updated_at"`
+}
+
+type AgentPlan struct {
+	ID        string `json:"id"`
+	GoalID    string `json:"goal_id"`
+	Version   int64  `json:"version"`
+	Objective string `json:"objective"`
+	StepsJson string `json:"steps_json"`
+	Status    string `json:"status"`
+	ModelID   string `json:"model_id"`
+	CreatedAt int64  `json:"created_at"`
+}
+
 type AgentTaskState struct {
 	TaskID    string `json:"task_id"`
 	StateJson string `json:"state_json"`
@@ -11,11 +55,46 @@ type AgentTaskState struct {
 	UpdatedAt int64  `json:"updated_at"`
 }
 
+type AgentToolInvocation struct {
+	IdempotencyKey string         `json:"idempotency_key"`
+	TaskID         string         `json:"task_id"`
+	ToolCallID     string         `json:"tool_call_id"`
+	ToolName       string         `json:"tool_name"`
+	Status         string         `json:"status"`
+	ResultJson     sql.NullString `json:"result_json"`
+	ErrorText      sql.NullString `json:"error_text"`
+	CreatedAt      int64          `json:"created_at"`
+	UpdatedAt      int64          `json:"updated_at"`
+}
+
 type AppMetadatum struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
+}
+
+type GoalEvaluation struct {
+	ID              string `json:"id"`
+	GoalID          string `json:"goal_id"`
+	RunID           string `json:"run_id"`
+	ModelID         string `json:"model_id"`
+	ExecutionStatus string `json:"execution_status"`
+	Status          string `json:"status"`
+	Summary         string `json:"summary"`
+	CriteriaJson    string `json:"criteria_json"`
+	CreatedAt       int64  `json:"created_at"`
+}
+
+type GoalReflection struct {
+	ID           string `json:"id"`
+	GoalID       string `json:"goal_id"`
+	RunID        string `json:"run_id"`
+	EvaluationID string `json:"evaluation_id"`
+	ModelID      string `json:"model_id"`
+	Summary      string `json:"summary"`
+	InsightsJson string `json:"insights_json"`
+	CreatedAt    int64  `json:"created_at"`
 }
 
 type Model struct {
@@ -29,6 +108,17 @@ type Model struct {
 	Enabled           int64  `json:"enabled"`
 	CreatedAt         int64  `json:"created_at"`
 	UpdatedAt         int64  `json:"updated_at"`
+}
+
+type PlanExecution struct {
+	GoalID          string `json:"goal_id"`
+	PlanID          string `json:"plan_id"`
+	PlanVersion     int64  `json:"plan_version"`
+	WorkflowID      string `json:"workflow_id"`
+	WorkflowVersion int64  `json:"workflow_version"`
+	RunID           string `json:"run_id"`
+	InputHash       string `json:"input_hash"`
+	CreatedAt       int64  `json:"created_at"`
 }
 
 type Provider struct {
@@ -56,4 +146,64 @@ type User struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"display_name"`
 	CreatedAt   int64  `json:"created_at"`
+}
+
+type Workflow struct {
+	ID             string `json:"id"`
+	Version        int64  `json:"version"`
+	Name           string `json:"name"`
+	DefinitionJson string `json:"definition_json"`
+	CreatedAt      int64  `json:"created_at"`
+}
+
+type WorkflowEvent struct {
+	ID         int64          `json:"id"`
+	RunID      string         `json:"run_id"`
+	Sequence   int64          `json:"sequence"`
+	EventType  string         `json:"event_type"`
+	NodeID     sql.NullString `json:"node_id"`
+	WorkerID   sql.NullString `json:"worker_id"`
+	OccurredAt int64          `json:"occurred_at"`
+	DataJson   string         `json:"data_json"`
+}
+
+type WorkflowJob struct {
+	ID           string         `json:"id"`
+	RunID        string         `json:"run_id"`
+	Status       string         `json:"status"`
+	Attempts     int64          `json:"attempts"`
+	MaxAttempts  int64          `json:"max_attempts"`
+	AvailableAt  int64          `json:"available_at"`
+	LeaseOwner   sql.NullString `json:"lease_owner"`
+	LeaseUntil   sql.NullInt64  `json:"lease_until"`
+	LastError    sql.NullString `json:"last_error"`
+	CreatedAt    int64          `json:"created_at"`
+	UpdatedAt    int64          `json:"updated_at"`
+	FencingToken int64          `json:"fencing_token"`
+}
+
+type WorkflowNodeExecution struct {
+	RunID          string         `json:"run_id"`
+	NodeID         string         `json:"node_id"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	Status         string         `json:"status"`
+	Owner          sql.NullString `json:"owner"`
+	LeaseUntil     sql.NullInt64  `json:"lease_until"`
+	OutputJson     sql.NullString `json:"output_json"`
+	ErrorText      sql.NullString `json:"error_text"`
+	Attempt        int64          `json:"attempt"`
+	StartedAt      int64          `json:"started_at"`
+	FinishedAt     sql.NullInt64  `json:"finished_at"`
+	FencingToken   int64          `json:"fencing_token"`
+}
+
+type WorkflowRun struct {
+	ID              string         `json:"id"`
+	WorkflowID      string         `json:"workflow_id"`
+	WorkflowVersion int64          `json:"workflow_version"`
+	Status          string         `json:"status"`
+	CurrentNode     sql.NullString `json:"current_node"`
+	StateJson       string         `json:"state_json"`
+	CreatedAt       int64          `json:"created_at"`
+	UpdatedAt       int64          `json:"updated_at"`
 }
