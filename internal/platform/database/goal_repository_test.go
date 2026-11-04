@@ -13,7 +13,7 @@ import (
 
 func newGoalTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:goal_repository_test?mode=memory&cache=shared")
+	db, err := sql.Open("sqlite", "file:goal_repository_test?mode=memory&cache=shared&_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}

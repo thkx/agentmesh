@@ -308,4 +308,4 @@ M15 在 M14 Goal Evaluation 之后增加 Reflection 层。它综合 Goal、不�
 
 ## M16 — Memory System（记忆系统）
 
-M16 增加有证据来源的情景记忆（Episodic）、语义记忆（Semantic）和程序记忆（Procedural）。M15 Reflection 经验首先进入不可检索的 Candidate 状态，必须显式审核晋升后才能被 Agent 检索；候选可以拒绝，已激活记忆可以归档。SQLite 保存来源、生命周期和不可变的原始经验内容。首版使用确定性的词项检索，不引入向量数据库，并将有长度限制、明确标记为非指令的记忆上下文注入新创建的 M13 Workflow Run；Agent Scope 记忆按 Agent Profile 分别注入对应节点，不会跨 Profile 混用。详细规则见 `docs/milestones/M16.md`。
+M16 增加有证据来源的情景记忆（Episodic）、语义记忆（Semantic）和程序记忆（Procedural）。M15 Reflection 经验首先进入不可检索的 Candidate 状态，必须显式审核晋升后才能被 Agent 检索；候选可以拒绝，已激活记忆可以归档。SQLite 保存来源、生命周期和不可变的原始经验内容。首版使用确定性的词项检索，不引入向量数据库，并将有长度限制、明确标记为非指令的记忆上下文注入新创建的 M13 Workflow Run；Agent Scope 记忆按 Agent Profile 分别注入对应节点，不会跨 Profile 混用。数据库迁移为 `000016_memory_system` 和 `000017_memory_source_integrity`。详细规则、验收覆盖和限制见 `docs/milestones/M16.md`。

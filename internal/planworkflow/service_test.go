@@ -2,6 +2,7 @@ package planworkflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -132,5 +133,85 @@ func TestStartInjectsRetrievedMemoryIntoRunContext(t *testing.T) {
 	}
 	if mem.goalID != "g1" || len(mem.agentIDs) != 1 || mem.agentIDs[0] != "developer" {
 		t.Fatalf("unexpected retrieval scope: %#v", mem)
+	}
+}
+
+type snapshotWorkflowFake struct {
+	workflowFake
+	persisted wf.Run
+}
+
+func (f *snapshotWorkflowFake) GetRun(_ context.Context, runID string) (wf.Run, error) {
+	if f.persisted.ID == "" {
+		return wf.Run{}, wf.ErrNotFound
+	}
+	if f.persisted.ID != runID {
+		return wf.Run{}, wf.ErrNotFound
+	}
+	return f.persisted, nil
+}
+
+func (f *snapshotWorkflowFake) StartQueued(_ context.Context, workflowID, runID string, input map[string]any, _ int) (wf.Run, error) {
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return wf.Run{}, err
+	}
+	f.input = input
+	f.starts++
+	f.persisted = wf.Run{ID: runID, WorkflowID: workflowID, Status: wf.RunQueued, Input: encoded}
+	return f.persisted, nil
+}
+
+type changingMemoryFake struct {
+	calls int
+}
+
+func (f *changingMemoryFake) Retrieve(context.Context, string, string, []string, int) (string, error) {
+	f.calls++
+	return "memory snapshot v1", nil
+}
+
+func TestStartKeepsPersistedMemorySnapshotOnIdempotentRetry(t *testing.T) {
+	goal := goaldom.Goal{ID: "snapshot-goal", Description: "Build a reliable API", Status: goaldom.StatusActive}
+	plan := pland.Plan{
+		ID: "snapshot-plan", GoalID: goal.ID, Version: 1, Objective: "Implement retry handling",
+		Status: pland.PlanValidated,
+		Steps: []pland.Step{
+			{ID: "work", Name: "Work", Description: "Implement retries", Type: pland.StepAgent, AgentProfile: "developer"},
+			{ID: "done", Name: "Done", Description: "Done", Type: pland.StepEnd, Dependencies: []string{"work"}},
+		},
+	}
+	repo, engine, mem := &repoFake{}, &snapshotWorkflowFake{}, &changingMemoryFake{}
+	svc, err := NewService(goalReaderFake{goal}, planReaderFake{plan}, repo, engine, nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetMemoryRetriever(mem)
+	req := StartRequest{Profiles: map[string]AgentProfile{"developer": {ModelID: "model", WorkspaceID: "workspace"}}}
+	first, err := svc.Start(context.Background(), goal.ID, 1, req)
+	if err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	firstSnapshot := string(engine.persisted.Input)
+	if firstSnapshot == "" {
+		t.Fatal("workflow engine did not persist the run input snapshot")
+	}
+
+	second, err := svc.Start(context.Background(), goal.ID, 1, req)
+	if err != nil {
+		t.Fatalf("idempotent retry: %v", err)
+	}
+	if first.Run.ID != second.Run.ID {
+		t.Fatalf("expected stable run ID, first=%s second=%s", first.Run.ID, second.Run.ID)
+	}
+	if mem.calls != 1 {
+		t.Fatalf("memory must be retrieved once for an immutable run snapshot, got %d calls", mem.calls)
+	}
+	if string(engine.persisted.Input) != firstSnapshot {
+		t.Fatalf("idempotent retry changed persisted memory snapshot: first=%s second=%s", firstSnapshot, string(engine.persisted.Input))
+	}
+	byProfile, ok := engine.input["_agentmesh_memory_by_profile"].(map[string]any)
+	if !ok || byProfile["developer"] != "memory snapshot v1" {
+		t.Fatalf("persisted profile memory was not restored: %#v", engine.input)
 	}
 }
