@@ -106,7 +106,7 @@ func Compile(ctx context.Context, goal goaldom.Goal, plan pland.Plan, opts Compi
 				fmt.Fprintf(&prompt, "\nStructured step input (JSON):\n%s", string(inputJSON))
 			}
 			node.Type = wf.NodeAgent
-			node.Agent = &wf.AgentConfig{ModelID: binding.ModelID, WorkspaceID: binding.WorkspaceID, Prompt: prompt.String()}
+			node.Agent = &wf.AgentConfig{AgentProfile: step.AgentProfile, ModelID: binding.ModelID, WorkspaceID: binding.WorkspaceID, Prompt: prompt.String()}
 		case pland.StepCondition:
 			inputKey, okKey := step.Input["input_key"].(string)
 			trueNext, okTrue := step.Input["true_next"].(string)

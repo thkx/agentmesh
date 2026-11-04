@@ -37,6 +37,32 @@ type AgentJob struct {
 	UpdatedAt        int64          `json:"updated_at"`
 }
 
+type AgentMemory struct {
+	ID                 string  `json:"id"`
+	MemoryType         string  `json:"memory_type"`
+	Status             string  `json:"status"`
+	ScopeType          string  `json:"scope_type"`
+	ScopeID            string  `json:"scope_id"`
+	GoalID             string  `json:"goal_id"`
+	SourceReflectionID string  `json:"source_reflection_id"`
+	SourceRunID        string  `json:"source_run_id"`
+	SourceIndex        int64   `json:"source_index"`
+	Title              string  `json:"title"`
+	Content            string  `json:"content"`
+	Recommendation     string  `json:"recommendation"`
+	Confidence         float64 `json:"confidence"`
+	EvidenceJson       string  `json:"evidence_json"`
+	TagsJson           string  `json:"tags_json"`
+	PromotionReason    string  `json:"promotion_reason"`
+	RejectionReason    string  `json:"rejection_reason"`
+	CreatedAt          int64   `json:"created_at"`
+	UpdatedAt          int64   `json:"updated_at"`
+	PromotedAt         int64   `json:"promoted_at"`
+	ArchivedAt         int64   `json:"archived_at"`
+	LastAccessedAt     int64   `json:"last_accessed_at"`
+	AccessCount        int64   `json:"access_count"`
+}
+
 type AgentPlan struct {
 	ID        string `json:"id"`
 	GoalID    string `json:"goal_id"`

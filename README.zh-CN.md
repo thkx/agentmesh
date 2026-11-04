@@ -2,7 +2,7 @@
 
 **AgentMesh** 是一个基于 Go 构建的多模型提供商网关与 AI Agent 执行平台。它提供统一的模型接入接口、具备策略约束的 Model Gateway、本地 Coding Agent 进程适配器、可复用的 Tool System、持久化 Agent 任务调度，以及版本化 Workflow 执行引擎。
 
-项目采用里程碑方式持续开发。本文档概述 **M1–M15** 已记录的能力与运行边界。详细设计决策、API 契约、数据库迁移和验收命令，请参阅 [`docs/milestones/`](docs/milestones/) 下的里程碑文档。
+项目采用里程碑方式持续开发。本文档概述 **M1–M16** 已记录的能力与运行边界。详细设计决策、API 契约、数据库迁移和验收命令，请参阅 [`docs/milestones/`](docs/milestones/) 下的里程碑文档。
 
 > English documentation: [`README.md`](README.md)
 
@@ -305,3 +305,7 @@ M15 在 M14 Goal Evaluation 之后增加 Reflection 层。它综合 Goal、不�
 - `GET /api/v1/goals/:id/reflections/:run_id`
 
 数据库迁移：`000015_goal_reflections`。详细设计见 `docs/milestones/M15.md`。
+
+## M16 — Memory System（记忆系统）
+
+M16 增加有证据来源的情景记忆（Episodic）、语义记忆（Semantic）和程序记忆（Procedural）。M15 Reflection 经验首先进入不可检索的 Candidate 状态，必须显式审核晋升后才能被 Agent 检索；候选可以拒绝，已激活记忆可以归档。SQLite 保存来源、生命周期和不可变的原始经验内容。首版使用确定性的词项检索，不引入向量数据库，并将有长度限制、明确标记为非指令的记忆上下文注入新创建的 M13 Workflow Run；Agent Scope 记忆按 Agent Profile 分别注入对应节点，不会跨 Profile 混用。详细规则见 `docs/milestones/M16.md`。

@@ -42,6 +42,7 @@ type Node struct {
 	Approval  *ApprovalConfig  `json:"approval,omitempty"`
 }
 type AgentConfig struct {
+	AgentProfile  string   `json:"agent_profile,omitempty"`
 	ModelID       string   `json:"model_id"`
 	WorkspaceID   string   `json:"workspace_id"`
 	Prompt        string   `json:"prompt"`

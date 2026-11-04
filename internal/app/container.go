@@ -15,6 +15,7 @@ import (
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
 	"github.com/thkx/agentmesh/internal/goalevaluation"
+	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/planning"
 	planworkflow "github.com/thkx/agentmesh/internal/planworkflow"
@@ -46,6 +47,7 @@ type Container struct {
 	PlanExecutionService  *planworkflow.Service
 	GoalEvaluationService *goalevaluation.Service
 	ReflectionService     *reflection.Service
+	MemoryService         *memoryservice.Service
 	WorkflowWorkers       []*wfruntime.Worker
 	SchedulerStore        *scheduler.SQLiteStore
 	SchedulerWorker       *scheduler.Worker

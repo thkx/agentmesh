@@ -14,6 +14,7 @@ import (
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
 	"github.com/thkx/agentmesh/internal/goalevaluation"
+	"github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
@@ -42,6 +43,7 @@ type Dependencies struct {
 	PlanExecutionService  *planworkflow.Service
 	GoalEvaluationService *goalevaluation.Service
 	ReflectionService     *reflection.Service
+	MemoryService         *memory.Service
 	SchedulerStore        scheduler.Store
 	SchedulerMaxAttempts  int
 	WorkflowMaxAttempts   int
@@ -101,6 +103,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.ReflectionService != nil {
 		handlers.NewReflectionHandler(deps.ReflectionService).RegisterRoutes(api)
+	}
+	if deps.MemoryService != nil {
+		handlers.NewMemoryHandler(deps.MemoryService).RegisterRoutes(api)
 	}
 	if deps.WorkflowEngine != nil {
 		workflowHandler := handlers.NewWorkflowHandler(deps.WorkflowEngine)

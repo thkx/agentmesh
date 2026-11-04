@@ -17,6 +17,7 @@ sql:
       - "internal/platform/database/migrations/000013_create_plan_executions.up.sql"
       - "internal/platform/database/migrations/000014_goal_evaluations.up.sql"
       - "internal/platform/database/migrations/000015_goal_reflections.up.sql"
+      - "internal/platform/database/migrations/000016_memory_system.up.sql"
     queries: "queries"
     gen:
       go:

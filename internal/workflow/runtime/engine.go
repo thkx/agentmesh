@@ -817,7 +817,7 @@ func (e *Engine) executeNode(ctx context.Context, n wf.Node, contextData map[str
 		if err := e.capabilities.Apply(cfg.Capabilities, &cfg); err != nil {
 			return nil, nil, "", err
 		}
-		task := agentdom.Task{ID: taskID, ModelID: cfg.ModelID, WorkspaceID: cfg.WorkspaceID, Prompt: render(cfg.Prompt, contextData), MaxSteps: cfg.MaxSteps, MaxToolCalls: cfg.MaxToolCalls, ApprovedTools: cfg.ApprovedTools}
+		task := agentdom.Task{ID: taskID, ModelID: cfg.ModelID, WorkspaceID: cfg.WorkspaceID, Prompt: render(cfg.Prompt, agentRenderContext(contextData, cfg.AgentProfile)), MaxSteps: cfg.MaxSteps, MaxToolCalls: cfg.MaxToolCalls, ApprovedTools: cfg.ApprovedTools}
 		result, err := e.agent.Run(ctx, task)
 		if err != nil {
 			return nil, nil, "", err
@@ -949,6 +949,26 @@ func split(s string) []string {
 	}
 	return out
 }
+func agentRenderContext(contextData map[string]any, profile string) map[string]any {
+	out := make(map[string]any, len(contextData)+1)
+	for key, value := range contextData {
+		if key == "_agentmesh_memory_by_profile" || key == "_agentmesh_memory_context" {
+			continue
+		}
+		out[key] = value
+	}
+	if profile != "" {
+		if byProfile, ok := contextData["_agentmesh_memory_by_profile"].(map[string]any); ok {
+			if value, ok := byProfile[profile].(string); ok && value != "" {
+				out["_agentmesh_memory_context"] = value
+			}
+		}
+	} else if value, ok := contextData["_agentmesh_memory_context"]; ok {
+		out["_agentmesh_memory_context"] = value
+	}
+	return out
+}
+
 func render(s string, m map[string]any) string {
 	b, _ := json.Marshal(m)
 	return fmt.Sprintf("%s\n\nWorkflow context: %s", s, string(b))

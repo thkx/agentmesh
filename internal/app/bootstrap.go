@@ -21,6 +21,7 @@ import (
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
 	"github.com/thkx/agentmesh/internal/goalevaluation"
+	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 	anthropicadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/anthropic"
 	geminiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/gemini"
@@ -418,6 +419,21 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize reflection service: %w", err)
 	}
+	memoryRepo, err := database.NewMemoryRepository(sqliteDB.DB)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize memory repository: %w", err)
+	}
+	memoryService, err := memoryservice.NewService(memoryRepo, reflectionRepo)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize memory service: %w", err)
+	}
+	planExecutionService.SetMemoryRetriever(memoryService)
 	workflowWorkers := make([]*wfruntime.Worker, 0, workerCount)
 	for i := 0; i < workerCount; i++ {
 		workerID := cfg.Scheduler.WorkerID
@@ -443,13 +459,13 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	go func() { workerWG.Wait(); close(workerDone) }()
 
 	container := &Container{
-		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService,
+		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
 		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
 	})
 	return container, nil
 }
