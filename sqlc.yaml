@@ -18,6 +18,10 @@ sql:
       - "internal/platform/database/migrations/000014_goal_evaluations.up.sql"
       - "internal/platform/database/migrations/000015_goal_reflections.up.sql"
       - "internal/platform/database/migrations/000016_memory_system.up.sql"
+      - "internal/platform/database/migrations/000017_memory_source_integrity.up.sql"
+      - "internal/platform/database/migrations/000018_ai_resource_pool.up.sql"
+      - "internal/platform/database/migrations/000019_agent_runtime_and_tools.up.sql"
+      - "internal/platform/database/migrations/000020_context_and_workflow_authoring.up.sql"
     queries: "queries"
     gen:
       go:

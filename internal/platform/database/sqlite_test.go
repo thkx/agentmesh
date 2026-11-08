@@ -82,3 +82,25 @@ func TestProviderCredentialsMigration(t *testing.T) {
 		t.Fatalf("expected provider_credentials table, got %d", count)
 	}
 }
+
+func TestAIResourcePoolMigration(t *testing.T) {
+	cfg := config.Defaults().Database
+	cfg.DSN = filepath.Join(t.TempDir(), "ai-resource.db")
+	sqliteDB, err := OpenSQLite(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqliteDB.Close()
+	if err := RunMigrations(sqliteDB.DB); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"ai_providers", "ai_endpoints", "ai_credentials", "ai_models", "ai_credential_models", "ai_routing_policies", "ai_credential_health", "ai_request_logs", "ai_usage_records"} {
+		var count int
+		if err := sqliteDB.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s, found %d", table, count)
+		}
+	}
+}

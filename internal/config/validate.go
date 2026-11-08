@@ -48,6 +48,20 @@ func Validate(c Config) error {
 	if strings.TrimSpace(c.Agent.WorkspaceRoot) == "" {
 		return fmt.Errorf("agent.workspace_root is required")
 	}
+	if len(c.Agent.Tools.SandboxImage) > 256 {
+		return fmt.Errorf("agent.tools.sandbox_image is too long")
+	}
+	for i, command := range c.Agent.Tools.AllowedCommands {
+		if strings.TrimSpace(command) == "" || strings.ContainsAny(command, "\r\n\x00") {
+			return fmt.Errorf("agent.tools.allowed_commands[%d] is invalid", i)
+		}
+	}
+	for i, domain := range c.Agent.Tools.AllowedHTTPDomains {
+		domain = strings.TrimSpace(domain)
+		if domain == "" || strings.Contains(domain, "://") || strings.ContainsAny(domain, "/\\:@?#") || strings.Contains(domain, "*") {
+			return fmt.Errorf("agent.tools.allowed_http_domains[%d] must be a plain hostname", i)
+		}
+	}
 	if c.Agent.Runtime.MaxSteps < 1 || c.Agent.Runtime.MaxSteps > 64 {
 		return fmt.Errorf("agent.runtime.max_steps must be between 1 and 64")
 	}
@@ -56,6 +70,9 @@ func Validate(c Config) error {
 	}
 	if c.Agent.Runtime.MaxContextChars < 1000 || c.Agent.Runtime.MaxContextChars > 1000000 {
 		return fmt.Errorf("agent.runtime.max_context_chars must be between 1000 and 1000000")
+	}
+	if c.Agent.Runtime.MaxContextTokens < 0 || c.Agent.Runtime.MaxContextTokens > 1000000 {
+		return fmt.Errorf("agent.runtime.max_context_tokens must be between 0 and 1000000")
 	}
 	if c.Agent.Runtime.MaxConcurrent < 1 || c.Agent.Runtime.MaxConcurrent > 32 {
 		return fmt.Errorf("agent.runtime.max_concurrent must be between 1 and 32")

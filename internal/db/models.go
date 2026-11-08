@@ -8,6 +8,31 @@ import (
 	"database/sql"
 )
 
+type AgentDefinition struct {
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	SystemPrompt      string  `json:"system_prompt"`
+	ModelID           string  `json:"model_id"`
+	Temperature       float64 `json:"temperature"`
+	MaxSteps          int64   `json:"max_steps"`
+	MaxToolCalls      int64   `json:"max_tool_calls"`
+	MaxOutputTokens   int64   `json:"max_output_tokens"`
+	TimeoutSeconds    int64   `json:"timeout_seconds"`
+	ApprovedToolsJson string  `json:"approved_tools_json"`
+	Enabled           int64   `json:"enabled"`
+	Version           int64   `json:"version"`
+	CreatedAt         int64   `json:"created_at"`
+	UpdatedAt         int64   `json:"updated_at"`
+}
+
+type AgentDefinitionVersion struct {
+	DefinitionID string `json:"definition_id"`
+	Version      int64  `json:"version"`
+	SnapshotJson string `json:"snapshot_json"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
 type AgentGoal struct {
 	ID                  string `json:"id"`
 	Description         string `json:"description"`
@@ -74,6 +99,18 @@ type AgentPlan struct {
 	CreatedAt int64  `json:"created_at"`
 }
 
+type AgentRun struct {
+	ID           string         `json:"id"`
+	DefinitionID string         `json:"definition_id"`
+	TaskID       string         `json:"task_id"`
+	Status       string         `json:"status"`
+	ResultJson   sql.NullString `json:"result_json"`
+	ErrorText    string         `json:"error_text"`
+	CreatedAt    int64          `json:"created_at"`
+	UpdatedAt    int64          `json:"updated_at"`
+	FinishedAt   sql.NullInt64  `json:"finished_at"`
+}
+
 type AgentTaskState struct {
 	TaskID    string `json:"task_id"`
 	StateJson string `json:"state_json"`
@@ -93,11 +130,145 @@ type AgentToolInvocation struct {
 	UpdatedAt      int64          `json:"updated_at"`
 }
 
+type AiCredential struct {
+	ID               string `json:"id"`
+	ProviderID       string `json:"provider_id"`
+	EndpointID       string `json:"endpoint_id"`
+	Name             string `json:"name"`
+	SecretCiphertext []byte `json:"secret_ciphertext"`
+	Status           string `json:"status"`
+	Priority         int64  `json:"priority"`
+	Weight           int64  `json:"weight"`
+	MaxConcurrency   int64  `json:"max_concurrency"`
+	CreatedAt        int64  `json:"created_at"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type AiCredentialHealth struct {
+	CredentialID        string `json:"credential_id"`
+	State               string `json:"state"`
+	FailureCount        int64  `json:"failure_count"`
+	ConsecutiveFailures int64  `json:"consecutive_failures"`
+	CooldownUntil       int64  `json:"cooldown_until"`
+	LastError           string `json:"last_error"`
+	LastStatusCode      int64  `json:"last_status_code"`
+	LastLatencyMs       int64  `json:"last_latency_ms"`
+	LastSuccessAt       int64  `json:"last_success_at"`
+	LastFailureAt       int64  `json:"last_failure_at"`
+	UpdatedAt           int64  `json:"updated_at"`
+}
+
+type AiCredentialModel struct {
+	CredentialID  string `json:"credential_id"`
+	ModelID       string `json:"model_id"`
+	UpstreamModel string `json:"upstream_model"`
+	Enabled       int64  `json:"enabled"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
+}
+
+type AiEndpoint struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"provider_id"`
+	Name       string `json:"name"`
+	BaseUrl    string `json:"base_url"`
+	Priority   int64  `json:"priority"`
+	TimeoutMs  int64  `json:"timeout_ms"`
+	Enabled    int64  `json:"enabled"`
+	CreatedAt  int64  `json:"created_at"`
+	UpdatedAt  int64  `json:"updated_at"`
+}
+
+type AiModel struct {
+	ID                string `json:"id"`
+	ModelKey          string `json:"model_key"`
+	DisplayName       string `json:"display_name"`
+	Enabled           int64  `json:"enabled"`
+	SupportsStreaming int64  `json:"supports_streaming"`
+	CreatedAt         int64  `json:"created_at"`
+	UpdatedAt         int64  `json:"updated_at"`
+}
+
+type AiProvider struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Protocol  string `json:"protocol"`
+	Enabled   int64  `json:"enabled"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+}
+
+type AiRequestLog struct {
+	ID           string `json:"id"`
+	ModelID      string `json:"model_id"`
+	CredentialID string `json:"credential_id"`
+	ProviderID   string `json:"provider_id"`
+	EndpointID   string `json:"endpoint_id"`
+	Status       string `json:"status"`
+	StatusCode   int64  `json:"status_code"`
+	LatencyMs    int64  `json:"latency_ms"`
+	ErrorCode    string `json:"error_code"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
+type AiRoutingPolicy struct {
+	ModelID          string `json:"model_id"`
+	Strategy         string `json:"strategy"`
+	MaxRetries       int64  `json:"max_retries"`
+	FailureThreshold int64  `json:"failure_threshold"`
+	CooldownSeconds  int64  `json:"cooldown_seconds"`
+	UpdatedAt        int64  `json:"updated_at"`
+}
+
+type AiUsageRecord struct {
+	ID           string `json:"id"`
+	RequestID    string `json:"request_id"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	TotalTokens  int64  `json:"total_tokens"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
 type AppMetadatum struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
+}
+
+type Conversation struct {
+	ID           string `json:"id"`
+	Title        string `json:"title"`
+	ScopeType    string `json:"scope_type"`
+	ScopeID      string `json:"scope_id"`
+	MetadataJson string `json:"metadata_json"`
+	CreatedAt    int64  `json:"created_at"`
+	UpdatedAt    int64  `json:"updated_at"`
+	ArchivedAt   int64  `json:"archived_at"`
+}
+
+type ConversationMessage struct {
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	Sequence       int64  `json:"sequence"`
+	Role           string `json:"role"`
+	Name           string `json:"name"`
+	Content        string `json:"content"`
+	ToolCallsJson  string `json:"tool_calls_json"`
+	ToolCallID     string `json:"tool_call_id"`
+	TokenEstimate  int64  `json:"token_estimate"`
+	MetadataJson   string `json:"metadata_json"`
+	CreatedAt      int64  `json:"created_at"`
+}
+
+type ConversationSummary struct {
+	ID             string `json:"id"`
+	ConversationID string `json:"conversation_id"`
+	FromSequence   int64  `json:"from_sequence"`
+	ToSequence     int64  `json:"to_sequence"`
+	Summary        string `json:"summary"`
+	TokenEstimate  int64  `json:"token_estimate"`
+	CreatedAt      int64  `json:"created_at"`
 }
 
 type GoalEvaluation struct {
@@ -167,6 +338,17 @@ type ProviderCredential struct {
 	UpdatedAt         int64  `json:"updated_at"`
 }
 
+type ToolExecutionAudit struct {
+	ID         string `json:"id"`
+	ToolName   string `json:"tool_name"`
+	Workspace  string `json:"workspace"`
+	Allowed    int64  `json:"allowed"`
+	Approved   int64  `json:"approved"`
+	StartedAt  int64  `json:"started_at"`
+	DurationNs int64  `json:"duration_ns"`
+	ErrorText  string `json:"error_text"`
+}
+
 type User struct {
 	ID          int64  `json:"id"`
 	Email       string `json:"email"`
@@ -232,4 +414,13 @@ type WorkflowRun struct {
 	StateJson       string         `json:"state_json"`
 	CreatedAt       int64          `json:"created_at"`
 	UpdatedAt       int64          `json:"updated_at"`
+}
+
+type WorkflowTemplate struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description"`
+	DefinitionJson string `json:"definition_json"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }

@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,15 +15,20 @@ import (
 	"time"
 	"unicode/utf8"
 
+	dockersandbox "github.com/thkx/agentmesh/internal/workspace/sandbox/docker"
+
 	dom "github.com/thkx/agentmesh/internal/domain/tool"
 	"github.com/thkx/agentmesh/internal/tools"
 )
 
 type Config struct {
-	MaxFileBytes    int64
-	MaxOutputBytes  int
-	AllowedCommands []string
-	CommandTimeout  time.Duration
+	MaxFileBytes          int64
+	MaxOutputBytes        int
+	AllowedCommands       []string
+	AllowedHTTPDomains    []string
+	SandboxImage          string
+	SandboxNetworkEnabled bool
+	CommandTimeout        time.Duration
 }
 type inputPath struct {
 	Path string `json:"path"`
@@ -35,6 +43,12 @@ type shellInput struct {
 }
 type gitInput struct {
 	Args []string `json:"args"`
+}
+type httpInput struct {
+	Method  string            `json:"method"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Body    string            `json:"body,omitempty"`
 }
 type result struct {
 	Path     string   `json:"path,omitempty"`
@@ -150,9 +164,79 @@ func Register(r *tools.Registry, cfg Config) error {
 			if _, err := os.Stat(root); err != nil {
 				return nil, err
 			}
-			cmd := exec.CommandContext(ctx, in.Command, in.Args...)
-			cmd.Dir = root
-			return run(cmd, cfg.MaxOutputBytes)
+			if strings.TrimSpace(cfg.SandboxImage) == "" {
+				return nil, errors.New("shell execution is disabled: configure agent.tools.sandbox_image")
+			}
+			runner := dockersandbox.Runner{Image: cfg.SandboxImage, NetworkEnabled: cfg.SandboxNetworkEnabled}
+			out, err := runner.Run(ctx, root, in.Command, in.Args...)
+			if len(out) > cfg.MaxOutputBytes {
+				return nil, errors.New("sandbox output exceeds limit")
+			}
+			return map[string]any{"output": string(out)}, err
+		})},
+		{Spec: dom.Spec{Name: "http.request", Description: "Make an HTTPS request to an explicitly allowlisted public host", Permission: dom.PermissionExecute, Timeout: cfg.CommandTimeout, Input: dom.Schema{Type: "object", Properties: map[string]dom.Property{"method": {Type: "string", Enum: []string{"GET", "POST", "PUT", "PATCH", "DELETE"}}, "url": {Type: "string"}, "headers": {Type: "object"}, "body": {Type: "string"}}, Required: []string{"method", "url"}}}, Handler: tools.HandlerFunc(func(ctx context.Context, b json.RawMessage) (any, error) {
+			var in httpInput
+			if err := json.Unmarshal(b, &in); err != nil {
+				return nil, err
+			}
+			parsed, err := url.ParseRequestURI(in.URL)
+			if err != nil || parsed.Scheme != "https" || parsed.User != nil {
+				return nil, errors.New("only HTTPS URLs without userinfo are allowed")
+			}
+			host := strings.ToLower(parsed.Hostname())
+			if !hostAllowed(cfg.AllowedHTTPDomains, host) {
+				return nil, errors.New("HTTP host is not allowlisted")
+			}
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			if len(ips) == 0 {
+				return nil, errors.New("HTTP host did not resolve")
+			}
+			for _, ip := range ips {
+				if ip.IP.IsPrivate() || ip.IP.IsLoopback() || ip.IP.IsLinkLocalUnicast() || ip.IP.IsLinkLocalMulticast() || ip.IP.IsUnspecified() {
+					return nil, errors.New("private or local HTTP destinations are blocked")
+				}
+			}
+			transport := &http.Transport{DialContext: func(dctx context.Context, network, address string) (net.Conn, error) {
+				_, port, splitErr := net.SplitHostPort(address)
+				if splitErr != nil {
+					return nil, splitErr
+				}
+				for _, ip := range ips {
+					conn, dialErr := (&net.Dialer{Timeout: 5 * time.Second}).DialContext(dctx, network, net.JoinHostPort(ip.IP.String(), port))
+					if dialErr == nil {
+						return conn, nil
+					}
+				}
+				return nil, errors.New("unable to connect to allowlisted host")
+			}}
+			client := &http.Client{Transport: transport, Timeout: cfg.CommandTimeout, CheckRedirect: func(req *http.Request, via []*http.Request) error { return errors.New("HTTP redirects are disabled") }}
+			defer transport.CloseIdleConnections()
+			req, err := http.NewRequestWithContext(ctx, in.Method, in.URL, strings.NewReader(in.Body))
+			if err != nil {
+				return nil, err
+			}
+			for k, v := range in.Headers {
+				if strings.EqualFold(k, "host") || strings.EqualFold(k, "authorization") || strings.ContainsAny(k, "\r\n") || strings.ContainsAny(v, "\r\n") {
+					return nil, errors.New("unsafe HTTP header")
+				}
+				req.Header.Set(k, v)
+			}
+			resp, err := client.Do(req)
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+			data, err := io.ReadAll(io.LimitReader(resp.Body, int64(cfg.MaxOutputBytes)+1))
+			if err != nil {
+				return nil, err
+			}
+			if len(data) > cfg.MaxOutputBytes {
+				return nil, errors.New("HTTP response exceeds output limit")
+			}
+			return map[string]any{"status_code": resp.StatusCode, "headers": resp.Header, "body": string(data)}, nil
 		})},
 		{Spec: dom.Spec{Name: "git.run", Description: "Run a safe Git inspection command in the active workspace", Permission: dom.PermissionExecute, Timeout: cfg.CommandTimeout, Input: dom.Schema{Type: "object", Properties: map[string]dom.Property{"args": {Type: "array"}}, Required: []string{"args"}}}, Handler: tools.HandlerFunc(func(ctx context.Context, b json.RawMessage) (any, error) {
 			var in gitInput
@@ -167,6 +251,24 @@ func Register(r *tools.Registry, cfg Config) error {
 			cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_PAGER=cat", "GIT_EXTERNAL_DIFF=")
 			return run(cmd, cfg.MaxOutputBytes)
 		})},
+	}
+	if strings.TrimSpace(cfg.SandboxImage) != "" {
+		runner := dockersandbox.Runner{Image: cfg.SandboxImage, NetworkEnabled: cfg.SandboxNetworkEnabled}
+		for _, item := range []struct {
+			name string
+			args []string
+			desc string
+		}{{"go.test", []string{"test", "./..."}, "Run go test ./... in an isolated Docker sandbox"}, {"go.build", []string{"build", "./..."}, "Run go build ./... in an isolated Docker sandbox"}, {"go.vet", []string{"vet", "./..."}, "Run go vet ./... in an isolated Docker sandbox"}, {"go.fmt", []string{"fmt", "./..."}, "Run go fmt ./... in an isolated Docker sandbox"}} {
+			item := item
+			specs = append(specs, tools.Tool{Spec: dom.Spec{Name: item.name, Description: item.desc, Permission: dom.PermissionExecute, Timeout: cfg.CommandTimeout, Input: dom.Schema{Type: "object", Properties: map[string]dom.Property{}, AdditionalProperties: false}}, Handler: tools.HandlerFunc(func(ctx context.Context, _ json.RawMessage) (any, error) {
+				root := cfgRoot(ctx)
+				out, err := runner.Run(ctx, root, "go", item.args...)
+				if len(out) > cfg.MaxOutputBytes {
+					return nil, errors.New("sandbox output exceeds limit")
+				}
+				return map[string]any{"output": string(out)}, err
+			})})
+		}
 	}
 	for _, t := range specs {
 		if err := r.Register(t); err != nil {
@@ -284,4 +386,15 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return b.Builder.Write(p)
+}
+
+func hostAllowed(allowlist []string, host string) bool {
+	for _, raw := range allowlist {
+		d := strings.ToLower(strings.TrimSpace(raw))
+		d = strings.TrimPrefix(d, ".")
+		if d != "" && (host == d || strings.HasSuffix(host, "."+d)) {
+			return true
+		}
+	}
+	return false
 }

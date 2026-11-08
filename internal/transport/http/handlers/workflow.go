@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
+	"github.com/thkx/agentmesh/internal/workflow/yamlcodec"
 	"net/http"
 	"strconv"
 	"time"
@@ -42,6 +43,10 @@ func (h *WorkflowHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g := r.Group("/workflows")
 	g.PUT("/:id", h.put)
 	g.GET("/:id", h.get)
+	g.PUT("/:id/yaml", h.putYAML)
+	g.GET("/:id/yaml", h.getYAML)
+	g.GET("/:id/graph", h.getGraph)
+	g.PUT("/:id/graph", h.putGraph)
 	g.POST("/:id/runs", h.start)
 	g.GET("/:id/runs", h.listRuns)
 	g.GET("/runs/:run_id", h.getRun)
@@ -84,6 +89,89 @@ func (h *WorkflowHandler) get(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, d)
 }
+func (h *WorkflowHandler) putYAML(c *gin.Context) {
+	body, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_yaml"})
+		return
+	}
+	d, err := yamlcodec.Import(body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workflow_yaml", "message": err.Error()})
+		return
+	}
+	if d.ID != c.Param("id") {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "workflow_id_mismatch"})
+		return
+	}
+	if err = h.engine.PutDefinition(c.Request.Context(), d); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "workflow_save_failed", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"definition": d})
+}
+func (h *WorkflowHandler) getYAML(c *gin.Context) {
+	version := 0
+	if v := c.Query("version"); v != "" {
+		if _, err := fmt.Sscanf(v, "%d", &version); err != nil {
+			c.JSON(400, gin.H{"code": "invalid_version"})
+			return
+		}
+	}
+	d, err := h.engine.Definition(c.Request.Context(), c.Param("id"), version)
+	if err != nil {
+		c.JSON(404, gin.H{"code": "workflow_not_found"})
+		return
+	}
+	b, err := yamlcodec.Export(d)
+	if err != nil {
+		c.JSON(500, gin.H{"code": "workflow_yaml_export_failed"})
+		return
+	}
+	c.Data(http.StatusOK, "application/yaml; charset=utf-8", b)
+}
+func (h *WorkflowHandler) getGraph(c *gin.Context) {
+	version := 0
+	if v := c.Query("version"); v != "" {
+		if _, err := fmt.Sscanf(v, "%d", &version); err != nil {
+			c.JSON(400, gin.H{"code": "invalid_version"})
+			return
+		}
+	}
+	d, err := h.engine.Definition(c.Request.Context(), c.Param("id"), version)
+	if err != nil {
+		c.JSON(404, gin.H{"code": "workflow_not_found"})
+		return
+	}
+	g, err := yamlcodec.ToGraph(d)
+	if err != nil {
+		c.JSON(500, gin.H{"code": "workflow_graph_failed"})
+		return
+	}
+	c.JSON(200, g)
+}
+func (h *WorkflowHandler) putGraph(c *gin.Context) {
+	var g yamlcodec.Graph
+	if err := c.ShouldBindJSON(&g); err != nil {
+		c.JSON(400, gin.H{"code": "invalid_graph"})
+		return
+	}
+	if g.ID != c.Param("id") {
+		c.JSON(400, gin.H{"code": "workflow_id_mismatch"})
+		return
+	}
+	d, err := yamlcodec.FromGraph(g)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "invalid_workflow_graph", "message": err.Error()})
+		return
+	}
+	if err = h.engine.PutDefinition(c.Request.Context(), d); err != nil {
+		c.JSON(400, gin.H{"code": "workflow_save_failed", "message": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"definition": d})
+}
+
 func (h *WorkflowHandler) start(c *gin.Context) {
 	var in struct {
 		RunID string         `json:"run_id"`

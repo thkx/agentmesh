@@ -43,6 +43,7 @@ type Config struct {
 	DefaultMaxSteps     int
 	DefaultMaxToolCalls int
 	MaxContextChars     int
+	MaxContextTokens    int
 	MaxConcurrent       int
 	DefaultTimeout      time.Duration
 }
@@ -55,6 +56,7 @@ type Runtime struct {
 	mu         sync.RWMutex
 	tasks      map[string]dom.Result
 	cancels    map[string]context.CancelFunc
+	controls   map[string]*runControl
 	completed  []string
 	stateStore agentstate.Store
 	toolLedger ToolLedger
@@ -79,7 +81,7 @@ func New(model Model, tool ToolCaller, workspaces WorkspaceManager, cfg Config) 
 	if cfg.DefaultTimeout <= 0 {
 		cfg.DefaultTimeout = 15 * time.Minute
 	}
-	return &Runtime{model: model, tool: tool, workspaces: workspaces, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrent), tasks: map[string]dom.Result{}, cancels: map[string]context.CancelFunc{}, completed: make([]string, 0, 1000)}, nil
+	return &Runtime{model: model, tool: tool, workspaces: workspaces, cfg: cfg, sem: make(chan struct{}, cfg.MaxConcurrent), tasks: map[string]dom.Result{}, cancels: map[string]context.CancelFunc{}, controls: map[string]*runControl{}, completed: make([]string, 0, 1000)}, nil
 }
 
 // SetToolLedger enables durable tool-call idempotency. Configure before serving requests.
@@ -90,6 +92,11 @@ func (r *Runtime) SetStateStore(store agentstate.Store) {
 	r.mu.Lock()
 	r.stateStore = store
 	r.mu.Unlock()
+}
+
+type runControl struct {
+	paused bool
+	resume chan struct{}
 }
 
 type control struct {
@@ -156,6 +163,7 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 	}
 	r.tasks[task.ID] = result
 	r.cancels[task.ID] = cancel
+	r.controls[task.ID] = &runControl{}
 	if retrying {
 		filtered := r.completed[:0]
 		for _, completedID := range r.completed {
@@ -184,6 +192,7 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 		r.mu.Lock()
 		r.tasks[task.ID] = result
 		delete(r.cancels, task.ID)
+		delete(r.controls, task.ID)
 		r.completed = append(r.completed, task.ID)
 		if len(r.completed) > 1000 {
 			oldest := r.completed[0]
@@ -211,7 +220,11 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 		maxCalls = task.MaxToolCalls
 	}
 	guard := loopguard.New(maxSteps, maxCalls)
-	messages := []modelgateway.Message{{Role: modelgateway.RoleSystem, Content: r.systemPrompt(task.WorkspaceID, task.ApprovedTools, false)}, {Role: modelgateway.RoleUser, Content: task.Prompt}}
+	systemPrompt := r.systemPrompt(task.WorkspaceID, task.ApprovedTools, false)
+	if strings.TrimSpace(task.SystemPrompt) != "" {
+		systemPrompt = task.SystemPrompt + "\n\n" + systemPrompt
+	}
+	messages := []modelgateway.Message{{Role: modelgateway.RoleSystem, Content: systemPrompt}, {Role: modelgateway.RoleUser, Content: task.Prompt}}
 	persistSnapshot = func() error {
 		r.mu.RLock()
 		store := r.stateStore
@@ -220,6 +233,11 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 			return nil
 		}
 		current := result
+		r.mu.RLock()
+		if ctl, ok := r.controls[task.ID]; ok && ctl.paused {
+			current.Status = dom.StatusPaused
+		}
+		r.mu.RUnlock()
 		current.Error = sanitizePersistedError(current.Error)
 		return store.Save(context.Background(), agentstate.Snapshot{Version: 1, Task: task, Result: current, Messages: append([]modelgateway.Message(nil), messages...), UpdatedAt: time.Now().UTC()})
 	}
@@ -238,11 +256,18 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 	}
 	if nativeTools {
 		messages[0].Content = r.systemPrompt(task.WorkspaceID, task.ApprovedTools, true)
+		if strings.TrimSpace(task.SystemPrompt) != "" {
+			messages[0].Content = task.SystemPrompt + "\n\n" + messages[0].Content
+		}
 		if err = persistSnapshot(); err != nil {
 			return
 		}
 	}
 	for step := 1; ; step++ {
+		if e := r.waitIfPaused(runCtx, task.ID); e != nil {
+			err = e
+			return
+		}
 		if e := runCtx.Err(); e != nil {
 			err = e
 			return
@@ -253,6 +278,14 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 		}
 		result.Steps = step
 		modelMessages := contextmanager.Trim(messages, r.cfg.MaxContextChars)
+		if r.cfg.MaxContextTokens > 0 {
+			budgeted, budgetErr := contextmanager.NewManager(nil).Fit(modelMessages, contextmanager.Budget{ModelWindow: r.cfg.MaxContextTokens, OutputReserve: task.MaxOutputTokens, SafetyMargin: 128})
+			if budgetErr != nil {
+				err = budgetErr
+				return
+			}
+			modelMessages = budgeted.Messages
+		}
 		r.mu.Lock()
 		if current, ok := r.tasks[task.ID]; ok {
 			current.Steps = result.Steps
@@ -260,13 +293,17 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 			r.tasks[task.ID] = current
 		}
 		r.mu.Unlock()
-		resp, e := r.model.Generate(runCtx, modelgateway.GenerateRequest{ModelID: task.ModelID, Messages: modelMessages, MaxOutputTokens: task.MaxOutputTokens, Tools: func() []modelgateway.ToolDefinition {
+		resp, e := r.model.Generate(runCtx, modelgateway.GenerateRequest{ModelID: task.ModelID, Messages: modelMessages, Temperature: task.Temperature, MaxOutputTokens: task.MaxOutputTokens, Tools: func() []modelgateway.ToolDefinition {
 			if nativeTools {
 				return r.toolDefinitions()
 			}
 			return nil
 		}()})
 		if e != nil {
+			err = e
+			return
+		}
+		if e := r.waitIfPaused(runCtx, task.ID); e != nil {
 			err = e
 			return
 		}
@@ -291,6 +328,10 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 				}
 				if _, e := r.tool.Registry().Get(call.Name); e != nil {
 					err = e
+					return
+				}
+				if waitErr := r.waitIfPaused(runCtx, task.ID); waitErr != nil {
+					err = waitErr
 					return
 				}
 				toolResult, invokeErr := r.invokeTool(runCtx, task.ID, call.ID, call.Name, call.Arguments, ws.Path, approved[call.Name])
@@ -381,6 +422,77 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 		}
 	}
 }
+func (r *Runtime) Pause(id string) error {
+	r.mu.Lock()
+	ctl, ok := r.controls[id]
+	if !ok {
+		r.mu.Unlock()
+		return dom.ErrTaskNotFound
+	}
+	if !ctl.paused {
+		ctl.paused = true
+		ctl.resume = make(chan struct{})
+		if current, exists := r.tasks[id]; exists {
+			current.Status = dom.StatusPaused
+			r.tasks[id] = current
+		}
+	}
+	store := r.stateStore
+	r.mu.Unlock()
+	if store != nil {
+		if snapshot, err := store.Load(context.Background(), id); err == nil {
+			snapshot.Result.Status = dom.StatusPaused
+			snapshot.UpdatedAt = time.Now().UTC()
+			_ = store.Save(context.Background(), snapshot)
+		}
+	}
+	return nil
+}
+func (r *Runtime) Resume(id string) error {
+	r.mu.Lock()
+	ctl, ok := r.controls[id]
+	if !ok {
+		r.mu.Unlock()
+		return dom.ErrTaskNotFound
+	}
+	if ctl.paused {
+		ctl.paused = false
+		close(ctl.resume)
+		ctl.resume = nil
+		if current, exists := r.tasks[id]; exists {
+			current.Status = dom.StatusRunning
+			r.tasks[id] = current
+		}
+	}
+	store := r.stateStore
+	r.mu.Unlock()
+	if store != nil {
+		if snapshot, err := store.Load(context.Background(), id); err == nil {
+			snapshot.Result.Status = dom.StatusRunning
+			snapshot.UpdatedAt = time.Now().UTC()
+			_ = store.Save(context.Background(), snapshot)
+		}
+	}
+	return nil
+}
+func (r *Runtime) waitIfPaused(ctx context.Context, id string) error {
+	for {
+		r.mu.RLock()
+		ctl, ok := r.controls[id]
+		if !ok || !ctl.paused {
+			r.mu.RUnlock()
+			return nil
+		}
+		resume := ctl.resume
+		r.mu.RUnlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-resume:
+		}
+	}
+}
+
 func (r *Runtime) Cancel(id string) error {
 	r.mu.RLock()
 	cancel, ok := r.cancels[id]

@@ -8,6 +8,7 @@ import (
 	"github.com/thkx/agentmesh/internal/workspace"
 	"path/filepath"
 	"testing"
+	"time"
 
 	dom "github.com/thkx/agentmesh/internal/domain/agent"
 	toolDomain "github.com/thkx/agentmesh/internal/domain/tool"
@@ -234,5 +235,59 @@ func TestRuntimeDoesNotRetryTaskAfterToolInvocation(t *testing.T) {
 	}
 	if _, err := rt.Run(context.Background(), task); err == nil {
 		t.Fatal("expected retry to be rejected after tool invocation")
+	}
+}
+
+type pausableModel struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (m pausableModel) Generate(ctx context.Context, _ modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
+	close(m.started)
+	select {
+	case <-m.release:
+		return &modelgateway.GenerateResponse{Content: `{"type":"final","content":"resumed"}`}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+func TestRuntimePauseResume(t *testing.T) {
+	reg := tools.NewRegistry()
+	engine := tools.NewEngine(reg, allowRead{}, nil)
+	wm, err := workspace.NewManager(filepath.Join(t.TempDir(), "workspaces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = wm.Create(context.Background(), "ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	rt, err := New(pausableModel{started: started, release: release}, engine, wm, Config{DefaultMaxSteps: 2, DefaultMaxToolCalls: 2, MaxContextChars: 1000, MaxConcurrent: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan dom.Result, 1)
+	go func() {
+		v, _ := rt.Run(context.Background(), dom.Task{ID: "pause-me", ModelID: "m", WorkspaceID: "ws-1", Prompt: "wait"})
+		done <- v
+	}()
+	<-started
+	if err = rt.Pause("pause-me"); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	select {
+	case <-done:
+		t.Fatal("run completed while paused")
+	case <-time.After(30 * time.Millisecond):
+	}
+	if err = rt.Resume("pause-me"); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if got.Status != dom.StatusSucceeded || got.Content != "resumed" {
+		t.Fatalf("unexpected resumed result: %+v", got)
 	}
 }

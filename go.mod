@@ -14,6 +14,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	google.golang.org/genai v1.77.0
 	modernc.org/sqlite v1.61.0
+	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (
@@ -78,7 +79,6 @@ require (
 	go.opentelemetry.io/otel v1.44.0 // indirect
 	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/arch v0.22.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect

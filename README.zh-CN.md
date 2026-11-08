@@ -309,3 +309,74 @@ M15 在 M14 Goal Evaluation 之后增加 Reflection 层。它综合 Goal、不�
 ## M16 — Memory System（记忆系统）
 
 M16 增加有证据来源的情景记忆（Episodic）、语义记忆（Semantic）和程序记忆（Procedural）。M15 Reflection 经验首先进入不可检索的 Candidate 状态，必须显式审核晋升后才能被 Agent 检索；候选可以拒绝，已激活记忆可以归档。SQLite 保存来源、生命周期和不可变的原始经验内容。首版使用确定性的词项检索，不引入向量数据库，并将有长度限制、明确标记为非指令的记忆上下文注入新创建的 M13 Workflow Run；Agent Scope 记忆按 Agent Profile 分别注入对应节点，不会跨 Profile 混用。数据库迁移为 `000016_memory_system` 和 `000017_memory_source_integrity`。详细规则、验收覆盖和限制见 `docs/milestones/M16.md`。
+
+## M17–M22：AI Resource Pool & Gateway
+
+M17–M22 在现有 Provider/Model Gateway 旁边新增独立的多账号资源池，不改变 M1–M16 的 Provider/Model ID 语义：
+
+- Provider：协议类型（`openai-compatible`、`anthropic`、`gemini`）。
+- Endpoint：实际 Base URL、超时和优先级。
+- Credential：单个 API Key，使用与现有 credential store 相同的 AES-256-GCM 主密钥加密；列表只返回脱敏 Key。
+- Model：AgentMesh 对外模型别名；每个 Credential 通过 `ai_credential_models` 映射到真实上游模型 ID。
+- Router：按模型过滤可用 Credential，支持 priority、round-robin、weighted-round-robin、least-connections，执行有界故障切换和并发限制。
+- Health / Usage：记录失败、冷却、延迟、请求和 Token 用量。
+
+新增 migration：`000018_ai_resource_pool`。`sqlc.yaml` 已包含 000017 和 000018，查询定义位于 `queries/ai_resources.sql`。AI Resource repository 目前使用参数化 `database/sql` 查询，以便将密文解密、候选资源组合和一次请求的健康/用量写入事务；原有 M1–M16 sqlc 访问层保持不变。
+
+### 管理 API
+
+管理 API：`/api/v1/resources`
+
+- `POST/GET /providers`、`PUT/DELETE /providers/:id`
+- `POST/GET /endpoints`、`PUT/DELETE /endpoints/:id`
+- `POST/GET /credentials`、`PUT /credentials/:id`（轮换密钥）
+- `POST /credentials/bulk`（原子批量导入，最多 500 条）
+- `PATCH /credentials/:id/status`、`DELETE /credentials/:id`、`POST /credentials/:id/test`
+- `POST/GET /models`、`PUT/DELETE /models/:id`
+- `PUT/GET /bindings`
+- `PUT /policies/:model_id`、`GET /policies`
+- `GET /health`、`POST /health/check/:id`、`GET /usage`、`GET /requests`
+
+统一推理入口：`POST /v1/chat/completions` 和简化的 `POST /v1/responses`。当前同步推理支持 OpenAI-compatible、Anthropic Messages、Gemini generateContent；`stream=true` 明确返回不支持错误，不会伪装成流式响应。已有 M1–M16 Gateway 的流式调用保持不变。协议原生工具调用、多模态和各厂商特有参数不由此兼容层承诺。
+
+如果设置 `AGENTMESH_API_TOKEN`，上述资源管理与新 Gateway 路由都要求 `Authorization: Bearer <token>`。不设置时按 Local-first 本地访问部署；不要在未配置 Token 的情况下将监听地址暴露到公网。
+
+### 初始资源导入顺序
+
+1. 创建 Provider，例如 `ctaigw`，协议按实际渠道选择 `openai-compatible`。
+2. 创建 Endpoint，例如 `https://ai.ctaigw.cn/v1`。
+3. 通过 `/credentials/bulk` 导入已轮换的 Key；每条记录必须有唯一 ID、Provider、Endpoint、名称、API Key、权重和并发上限。
+4. 创建模型别名 `glm-5.3-flash` 和 `deepseek-v4.1-flash`。
+5. 对每个已验证 Credential 分别创建两条 Binding，`upstream_model` 填服务商实际要求的模型 ID。
+6. 通过 `/credentials/:id/test` 验证 Endpoint 可达，再调用 `/v1/chat/completions`。
+
+不要将聊天中曾经暴露的旧 Key 直接导入；先在对应服务商轮换，再使用新 Key。不要把 API Key 放进 YAML、Git、日志或截图。
+
+### Weighted routing 示例
+
+```json
+{
+  "strategy": "weighted_round_robin",
+  "max_retries": 2,
+  "failure_threshold": 5,
+  "cooldown_seconds": 30
+}
+```
+
+策略配置通过 `PUT /api/v1/resources/policies/{model_id}` 设置。429 会按冷却时间暂时跳过；401 将 Credential 标记为 invalid；网络错误及 5xx 按阈值熔断。已经开始向客户端输出的流式请求不做跨 Key 续传；新资源 Gateway 当前只提供同步响应。
+
+
+## M23–M28 Agent Runtime 与 Tool System
+
+请先阅读 [`M23-M28-STATUS.md`](M23-M28-STATUS.md)。新增 Agent Definition API 位于 `/api/v1/agent-definitions`。Shell 与 Go 工具必须配置 Docker Sandbox 镜像；HTTPS 工具必须显式配置 `agent.tools.allowed_http_domains`，默认拒绝所有目标域名。
+
+## M29–M34：上下文与工作流智能化
+
+M29–M34 的实现范围、API、配置、验证状态和已知限制见 [`M29-M34-STATUS.md`](M29-M34-STATUS.md)。
+
+- 对话上下文：`/api/v1/conversations`
+- 上下文组装与预算：`POST /api/v1/conversations/:id/context`
+- Workflow YAML：`/api/v1/workflows/:id/yaml`
+- Workflow Graph：`/api/v1/workflows/:id/graph`
+- Workflow 可视化编辑器：`/workflow-editor`
+- Workflow 模板：`/api/v1/workflow-templates`

@@ -289,3 +289,35 @@ Migration: `000015_goal_reflections`.
 ## M16 — Memory System
 
 M16 adds evidence-grounded Episodic, Semantic, and Procedural memory. M15 Reflection insights enter as non-retrievable candidates; explicit promotion is required before a memory can be retrieved. Candidates can be rejected, and active memories can be archived. SQLite keeps source provenance, lifecycle transitions, and immutable source content. Retrieval uses deterministic lexical matching (no vector database dependency) and injects a bounded, clearly labeled memory context into newly created M13 Workflow Runs. Agent-scoped memories are selected per Agent Profile at prompt-render time. Migrations `000016_memory_system` and `000017_memory_source_integrity` enforce lifecycle and source provenance. See `docs/milestones/M16.md` for APIs, lifecycle rules, verification, and limitations.
+
+## M17–M22: AI Resource Pool & Gateway
+
+The M17–M22 resource pool is additive to the M1–M16 Provider/Model catalog:
+
+- Provider: protocol family (`openai-compatible`, `anthropic`, `gemini`).
+- Endpoint: concrete Base URL, timeout and priority.
+- Credential: one API key, encrypted with AES-256-GCM using the existing local credential master key. List APIs return masked values only.
+- Model: AgentMesh model alias. `ai_credential_models` maps each credential/model pair to the upstream model identifier.
+- Router: filters eligible credentials per model and supports priority, round-robin, weighted round-robin and least-connections, bounded failover and concurrency caps.
+- Health/Usage: request outcomes, cooldowns, latency, request counts and token usage.
+
+Migration `000018_ai_resource_pool` is added. `sqlc.yaml` includes migrations 000017 and 000018; query definitions are in `queries/ai_resources.sql`. The new AI resource store currently uses parameterized `database/sql` statements for atomic encrypted-secret and request-health/usage operations. The existing M1–M16 sqlc access layer remains unchanged.
+
+Management endpoints are under `/api/v1/resources`; inference endpoints are `POST /v1/chat/completions` and simplified `POST /v1/responses`. Synchronous generation supports OpenAI-compatible Chat Completions, Anthropic Messages and Gemini `generateContent`. `stream=true` returns an explicit unsupported error; it is not silently downgraded. Existing M1–M16 Gateway streaming remains unchanged. Provider-native tool calling, multimodal content and vendor-specific extensions are not promised by this compatibility surface.
+
+Set `AGENTMESH_API_TOKEN` to require `Authorization: Bearer <token>` on the new management and inference routes. Without it, deploy Local-first on loopback only; do not expose an unauthenticated listener to the public Internet.
+
+To import the 19 keys: create each provider and endpoint, then POST a `{"items":[...]}` payload to `/api/v1/resources/credentials/bulk` (1–500 records, atomic), create model aliases `glm-5.3-flash` and `deepseek-v4.1-flash`, and bind each validated credential to both models with the provider's exact upstream model IDs. Rotate keys previously pasted into chat before importing; never commit secrets to YAML or Git.
+
+
+## Import AI resource pool JSON into SQLite
+
+Use the local CLI importer to write a resource manifest into the SQLite database configured by `configs/config.yaml`. The importer runs database migrations first, uses the runtime's existing `data/keys/credential.key` AES-GCM key, and commits the provider, endpoint, encrypted credentials, models, bindings and routing policies in one transaction. Re-running the same manifest updates matching IDs instead of duplicating rows.
+
+```bash
+go run ./cmd/agentmesh-cli resource import \
+  --config configs/config.yaml \
+  --file configs/ai-resource-import.json
+```
+
+The manifest contains plaintext API keys and must be kept private. The importer never prints key values; credential secrets are encrypted before they are written to SQLite. After a successful import, securely remove the plaintext manifest if you do not need it for future imports. Back up the SQLite database and the adjacent `keys/credential.key` together; without that key, encrypted credentials cannot be decrypted.

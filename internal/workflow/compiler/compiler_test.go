@@ -41,3 +41,23 @@ func TestCompileStartNodeMustBeEntry(t *testing.T) {
 		t.Fatal("expected non-entry start node to be rejected")
 	}
 }
+
+func TestCompileConditionOperators(t *testing.T) {
+	d := validDefinition()
+	d.Nodes[0].Condition.Operator = "gte"
+	d.Nodes[0].Condition.Value = 3
+	if _, err := Compile(d); err != nil {
+		t.Fatalf("supported condition operator rejected: %v", err)
+	}
+	d.Nodes[0].Condition.Operator = "regex"
+	if _, err := Compile(d); err == nil {
+		t.Fatal("unsupported operator should be rejected")
+	}
+}
+
+func TestCompileSubworkflowNode(t *testing.T) {
+	d := wf.Definition{ID: "parent", Name: "parent", Version: 1, Entry: "start", Nodes: []wf.Node{{ID: "start", Type: wf.NodeStart}, {ID: "child", Type: wf.NodeSubworkflow, Subworkflow: &wf.SubworkflowConfig{WorkflowID: "child-workflow", InputFromContext: true}}, {ID: "end", Type: wf.NodeEnd}}, Edges: []wf.Edge{{From: "start", To: "child"}, {From: "child", To: "end"}}}
+	if _, err := Compile(d); err != nil {
+		t.Fatalf("valid subworkflow graph rejected: %v", err)
+	}
+}

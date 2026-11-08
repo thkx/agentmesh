@@ -67,6 +67,7 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(newVersionCommand())
 	cmd.AddCommand(newProviderCommand(opts))
 	cmd.AddCommand(newModelCommand(opts))
+	cmd.AddCommand(newResourceCommand())
 
 	cmd.SetFlagErrorFunc(func(command *cobra.Command, err error) error {
 		return fmt.Errorf("%w", err)

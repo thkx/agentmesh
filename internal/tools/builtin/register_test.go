@@ -54,3 +54,34 @@ func TestShellCommandAllowlist(t *testing.T) {
 		t.Fatal("expected allowlist rejection")
 	}
 }
+
+func TestHTTPToolRequiresExplicitAllowlist(t *testing.T) {
+	r := tools.NewRegistry()
+	if err := Register(r, Config{}); err != nil {
+		t.Fatal(err)
+	}
+	e := tools.NewEngine(r, allowPolicy{}, nil)
+	_, err := e.Invoke(context.Background(), "http.request", json.RawMessage(`{"method":"GET","url":"https://example.com"}`), t.TempDir(), true)
+	if err == nil {
+		t.Fatal("expected HTTP allowlist rejection")
+	}
+}
+func TestShellExecutionRequiresDockerSandbox(t *testing.T) {
+	r := tools.NewRegistry()
+	if err := Register(r, Config{AllowedCommands: []string{"echo"}}); err != nil {
+		t.Fatal(err)
+	}
+	e := tools.NewEngine(r, allowPolicy{}, nil)
+	_, err := e.Invoke(context.Background(), "shell.exec", json.RawMessage(`{"command":"echo","args":["hello"]}`), t.TempDir(), true)
+	if err == nil {
+		t.Fatal("expected shell execution to be disabled without Docker sandbox")
+	}
+}
+func TestHTTPHostAllowlistMatchesSubdomainsOnly(t *testing.T) {
+	if !hostAllowed([]string{"example.com"}, "api.example.com") {
+		t.Fatal("expected subdomain to be allowed")
+	}
+	if hostAllowed([]string{"example.com"}, "evil-example.com") {
+		t.Fatal("unexpected suffix match")
+	}
+}

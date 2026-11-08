@@ -77,11 +77,18 @@ agent:
     # Empty by default: shell.exec cannot launch arbitrary executables.
     # Add exact executable names only when explicitly needed.
     allowed_commands: []
+    # Shell and Go build tools are disabled unless a Docker sandbox image is configured.
+    sandbox_image: golang:1.27.3
+    sandbox_network_enabled: false
+    # http.request is disabled unless at least one public HTTPS domain is allowlisted.
+    allowed_http_domains: []
 
   runtime:
     max_steps: 12
     max_tool_calls: 8
     max_context_chars: 24000
+    # 0 disables token-budget enforcement; set per deployment/model.
+    max_context_tokens: 0
     max_concurrent: 4
     timeout_seconds: 900
 

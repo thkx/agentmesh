@@ -17,11 +17,12 @@ var (
 type NodeType string
 
 const (
-	NodeStart     NodeType = "start"
-	NodeAgent     NodeType = "agent"
-	NodeCondition NodeType = "condition"
-	NodeApproval  NodeType = "approval"
-	NodeEnd       NodeType = "end"
+	NodeStart       NodeType = "start"
+	NodeAgent       NodeType = "agent"
+	NodeCondition   NodeType = "condition"
+	NodeApproval    NodeType = "approval"
+	NodeSubworkflow NodeType = "subworkflow"
+	NodeEnd         NodeType = "end"
 )
 
 type Definition struct {
@@ -34,12 +35,13 @@ type Definition struct {
 	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 type Node struct {
-	ID        string           `json:"id"`
-	Type      NodeType         `json:"type"`
-	Name      string           `json:"name,omitempty"`
-	Agent     *AgentConfig     `json:"agent,omitempty"`
-	Condition *ConditionConfig `json:"condition,omitempty"`
-	Approval  *ApprovalConfig  `json:"approval,omitempty"`
+	ID          string             `json:"id"`
+	Type        NodeType           `json:"type"`
+	Name        string             `json:"name,omitempty"`
+	Agent       *AgentConfig       `json:"agent,omitempty"`
+	Condition   *ConditionConfig   `json:"condition,omitempty"`
+	Approval    *ApprovalConfig    `json:"approval,omitempty"`
+	Subworkflow *SubworkflowConfig `json:"subworkflow,omitempty"`
 }
 type AgentConfig struct {
 	AgentProfile  string   `json:"agent_profile,omitempty"`
@@ -53,12 +55,19 @@ type AgentConfig struct {
 }
 type ConditionConfig struct {
 	InputKey    string `json:"input_key"`
-	Equals      any    `json:"equals"`
+	Operator    string `json:"operator,omitempty"`
+	Value       any    `json:"value,omitempty"`
+	Equals      any    `json:"equals,omitempty"` // Backward-compatible alias for operator=equals.
 	TrueHandle  string `json:"true_handle,omitempty"`
 	FalseHandle string `json:"false_handle,omitempty"`
 }
 type ApprovalConfig struct {
 	Message string `json:"message"`
+}
+type SubworkflowConfig struct {
+	WorkflowID       string         `json:"workflow_id"`
+	Input            map[string]any `json:"input,omitempty"`
+	InputFromContext bool           `json:"input_from_context,omitempty"`
 }
 type Edge struct {
 	From   string `json:"from"`

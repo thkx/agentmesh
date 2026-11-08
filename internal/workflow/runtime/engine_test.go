@@ -409,3 +409,26 @@ func TestWorkflowPureStartNodeFansOut(t *testing.T) {
 		t.Fatalf("expected start node and both roots to succeed: %+v", run.Nodes)
 	}
 }
+
+func TestEvaluateConditionOperators(t *testing.T) {
+	tests := []struct {
+		name   string
+		actual any
+		cfg    *wf.ConditionConfig
+		want   bool
+	}{
+		{"equals", float64(4), &wf.ConditionConfig{Operator: "equals", Value: float64(4)}, true},
+		{"not equals", float64(4), &wf.ConditionConfig{Operator: "not_equals", Value: float64(3)}, true},
+		{"exists", true, &wf.ConditionConfig{Operator: "exists"}, true},
+		{"not exists", nil, &wf.ConditionConfig{Operator: "not_exists"}, true},
+		{"contains", []any{"a", "b"}, &wf.ConditionConfig{Operator: "contains", Value: "b"}, true},
+		{"greater", float64(5), &wf.ConditionConfig{Operator: "gt", Value: float64(3)}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := evaluateCondition(tt.actual, tt.cfg); got != tt.want {
+				t.Fatalf("got %v want %v", got, tt.want)
+			}
+		})
+	}
+}

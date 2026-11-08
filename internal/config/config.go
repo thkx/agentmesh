@@ -71,17 +71,21 @@ type AgentConfig struct {
 	Runtime       AgentRuntimeConfig `koanf:"runtime"`
 }
 type AgentRuntimeConfig struct {
-	MaxSteps        int `koanf:"max_steps"`
-	MaxToolCalls    int `koanf:"max_tool_calls"`
-	MaxContextChars int `koanf:"max_context_chars"`
-	MaxConcurrent   int `koanf:"max_concurrent"`
-	TimeoutSeconds  int `koanf:"timeout_seconds"`
+	MaxSteps         int `koanf:"max_steps"`
+	MaxToolCalls     int `koanf:"max_tool_calls"`
+	MaxContextChars  int `koanf:"max_context_chars"`
+	MaxContextTokens int `koanf:"max_context_tokens"`
+	MaxConcurrent    int `koanf:"max_concurrent"`
+	TimeoutSeconds   int `koanf:"timeout_seconds"`
 }
 type ToolConfig struct {
-	MaxFileBytes    int64         `koanf:"max_file_bytes"`
-	MaxOutputBytes  int           `koanf:"max_output_bytes"`
-	AllowedCommands []string      `koanf:"allowed_commands"`
-	CommandTimeout  time.Duration `koanf:"command_timeout"`
+	MaxFileBytes          int64         `koanf:"max_file_bytes"`
+	MaxOutputBytes        int           `koanf:"max_output_bytes"`
+	AllowedCommands       []string      `koanf:"allowed_commands"`
+	AllowedHTTPDomains    []string      `koanf:"allowed_http_domains"`
+	SandboxImage          string        `koanf:"sandbox_image"`
+	SandboxNetworkEnabled bool          `koanf:"sandbox_network_enabled"`
+	CommandTimeout        time.Duration `koanf:"command_timeout"`
 }
 type CLIConfig struct {
 	Claude   string `koanf:"claude"`

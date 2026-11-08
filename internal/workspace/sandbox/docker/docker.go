@@ -27,7 +27,7 @@ func (r Runner) Run(ctx context.Context, workspace string, command string, args 
 	if r.NetworkEnabled {
 		network = "bridge"
 	}
-	argv := []string{"run", "--rm", "--network", network, "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "-v", workspace + ":/workspace:rw", "-w", "/workspace", r.Image, command}
+	argv := []string{"run", "--rm", "--network", network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=2g", "--cpus=2", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "-v", workspace + ":/workspace:rw", "-w", "/workspace", r.Image, command}
 	argv = append(argv, args...)
 	out, err := exec.CommandContext(ctx, bin, argv...).CombinedOutput()
 	if err != nil {

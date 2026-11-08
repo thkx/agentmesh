@@ -38,9 +38,22 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 			if n.Condition == nil || n.Condition.InputKey == "" {
 				return nil, fmt.Errorf("%w: condition node %s requires input_key", workflow.ErrInvalidDefinition, n.ID)
 			}
+			op := n.Condition.Operator
+			if op == "" {
+				op = "equals"
+			}
+			switch op {
+			case "equals", "not_equals", "exists", "not_exists", "contains", "gt", "gte", "lt", "lte":
+			default:
+				return nil, fmt.Errorf("%w: unsupported condition operator %q", workflow.ErrInvalidDefinition, op)
+			}
 		case workflow.NodeApproval:
 			if n.Approval == nil {
 				return nil, fmt.Errorf("%w: approval node %s requires approval config", workflow.ErrInvalidDefinition, n.ID)
+			}
+		case workflow.NodeSubworkflow:
+			if n.Subworkflow == nil || n.Subworkflow.WorkflowID == "" {
+				return nil, fmt.Errorf("%w: subworkflow node %s requires workflow_id", workflow.ErrInvalidDefinition, n.ID)
 			}
 		case workflow.NodeEnd:
 		default:

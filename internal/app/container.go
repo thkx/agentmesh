@@ -7,6 +7,8 @@ import (
 	"net/http"
 
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
+	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/airesource"
 
 	"github.com/thkx/agentmesh/internal/agent/executor"
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
@@ -41,6 +43,7 @@ type Container struct {
 	ProviderRuntime       *modelgateway.ProviderRuntime
 	AgentExecutor         executor.AgentExecutor
 	AgentRuntime          *agentruntime.Runtime
+	AgentDefinitions      *agentcatalog.Service
 	WorkflowEngine        *wfruntime.Engine
 	GoalService           *goalservice.Service
 	PlanningService       *planning.Service
@@ -56,7 +59,9 @@ type Container struct {
 	Workspaces            *workspace.Manager
 	ToolRegistry          *tools.Registry
 	ToolEngine            *tools.Engine
-	ToolAudit             *audit.Memory
+	ToolAudit             audit.Store
+	AIResources           *airesource.Service
+	AIRouter              *airesource.Router
 	HTTPHandler           http.Handler
 }
 

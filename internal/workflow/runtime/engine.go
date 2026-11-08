@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,6 +52,8 @@ type Store interface {
 	GetRun(context.Context, string) (wf.Run, error)
 	ListRuns(context.Context, string, int) ([]wf.Run, error)
 }
+type subworkflowDepthKey struct{}
+
 type Engine struct {
 	store        Store
 	agent        AgentRunner
@@ -826,19 +829,117 @@ func (e *Engine) executeNode(ctx context.Context, n wf.Node, contextData map[str
 		return b, map[string]any{"content": result.Content, "status": result.Status, "task_id": result.TaskID}, "", err
 	case wf.NodeCondition:
 		actual := lookup(contextData, n.Condition.InputKey)
-		matched := reflect.DeepEqual(actual, n.Condition.Equals)
+		matched := evaluateCondition(actual, n.Condition)
 		branch := "false"
 		if matched {
 			branch = "true"
 		}
 		b, err := json.Marshal(map[string]any{"matched": matched})
 		return b, nil, branch, err
+	case wf.NodeSubworkflow:
+		depth, _ := ctx.Value(subworkflowDepthKey{}).(int)
+		if depth >= 8 {
+			return nil, nil, "", errors.New("subworkflow nesting limit exceeded")
+		}
+		input := map[string]any{}
+		if n.Subworkflow.InputFromContext {
+			for k, v := range contextData {
+				input[k] = v
+			}
+		} else {
+			for k, v := range n.Subworkflow.Input {
+				input[k] = v
+			}
+		}
+		nestedCtx := context.WithValue(ctx, subworkflowDepthKey{}, depth+1)
+		nested, err := e.Start(nestedCtx, n.Subworkflow.WorkflowID, stableTaskID(taskID, "subworkflow"), input)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		if nested.Status != wf.RunSucceeded {
+			return nil, nil, "", fmt.Errorf("subworkflow %s ended with status %s", n.Subworkflow.WorkflowID, nested.Status)
+		}
+		b, err := json.Marshal(map[string]any{"run_id": nested.ID, "workflow_id": nested.WorkflowID, "workflow_version": nested.WorkflowVersion, "context": nested.Context})
+		return b, map[string]any{"run_id": nested.ID, "context": nested.Context}, "", err
 	case wf.NodeEnd:
 		return json.RawMessage(`{}`), nil, "", nil
 	default:
 		return nil, nil, "", fmt.Errorf("unsupported node type %s", n.Type)
 	}
 }
+func evaluateCondition(actual any, cfg *wf.ConditionConfig) bool {
+	op := cfg.Operator
+	if op == "" {
+		op = "equals"
+	}
+	want := cfg.Value
+	if want == nil {
+		want = cfg.Equals
+	}
+	switch op {
+	case "exists":
+		return actual != nil
+	case "not_exists":
+		return actual == nil
+	case "equals":
+		return reflect.DeepEqual(actual, want)
+	case "not_equals":
+		return !reflect.DeepEqual(actual, want)
+	case "contains":
+		switch value := actual.(type) {
+		case string:
+			target, ok := want.(string)
+			return ok && strings.Contains(value, target)
+		case []any:
+			for _, item := range value {
+				if reflect.DeepEqual(item, want) {
+					return true
+				}
+			}
+		case map[string]any:
+			key, ok := want.(string)
+			if !ok {
+				return false
+			}
+			_, exists := value[key]
+			return exists
+		}
+	case "gt", "gte", "lt", "lte":
+		a, aok := numeric(actual)
+		b, bok := numeric(want)
+		if !aok || !bok {
+			return false
+		}
+		switch op {
+		case "gt":
+			return a > b
+		case "gte":
+			return a >= b
+		case "lt":
+			return a < b
+		case "lte":
+			return a <= b
+		}
+	}
+	return false
+}
+func numeric(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case json.Number:
+		f, e := n.Float64()
+		return f, e == nil
+	}
+	return 0, false
+}
+
 func cachedNodeResult(n wf.Node, b json.RawMessage) (json.RawMessage, any, string, error) {
 	if n.Type == wf.NodeAgent {
 		var result agentdom.Result

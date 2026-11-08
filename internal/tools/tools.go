@@ -106,13 +106,15 @@ func NewEngine(r *Registry, p Policy, a Auditor) *Engine {
 	return &Engine{registry: r, policy: p, auditor: a, maxInput: 1 << 20, maxOutput: 4 << 20}
 }
 func (e *Engine) Registry() *Registry { return e.registry }
-func (e *Engine) Invoke(ctx context.Context, name string, args json.RawMessage, workspace string, approved bool) (any, error) {
+func (e *Engine) Invoke(ctx context.Context, name string, args json.RawMessage, workspace string, approved bool) (value any, retErr error) {
 	started := time.Now()
 	ev := AuditEvent{ID: fmt.Sprintf("tool-%d", started.UnixNano()), Tool: name, Workspace: workspace, Approved: approved, StartedAt: started}
 	defer func() {
 		ev.Duration = time.Since(started)
 		if e.auditor != nil {
-			_ = e.auditor.Record(context.Background(), ev)
+			if auditErr := e.auditor.Record(context.Background(), ev); auditErr != nil && retErr == nil {
+				retErr = fmt.Errorf("persist tool audit event: %w", auditErr)
+			}
 		}
 	}()
 	t, err := e.registry.Get(name)

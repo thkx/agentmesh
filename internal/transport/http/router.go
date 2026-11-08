@@ -2,14 +2,20 @@ package http
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/agent/contextmanager"
 	"github.com/thkx/agentmesh/internal/agent/executor"
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
+	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/airesource"
+	"github.com/thkx/agentmesh/internal/conversation"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
@@ -50,17 +56,39 @@ type Dependencies struct {
 	Workspaces            *workspace.Manager
 	ToolRegistry          *tools.Registry
 	ToolEngine            *tools.Engine
-	ToolAudit             *audit.Memory
+	ToolAudit             audit.Store
+	AIResourceHandler     *airesource.HTTPHandler
+	AgentDefinitions      *agentcatalog.Service
+	APIToken              string
 }
 
 func NewRouter(deps Dependencies) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	if deps.APIToken != "" {
+		router.Use(func(c *gin.Context) {
+			if strings.HasPrefix(c.Request.URL.Path, "/workflow-editor") {
+				c.Next()
+				return
+			}
+			parts := strings.Fields(c.GetHeader("Authorization"))
+			token := ""
+			if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+				token = parts[1]
+			}
+			if token == "" || subtle.ConstantTimeCompare([]byte(token), []byte(deps.APIToken)) != 1 {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": gin.H{"message": "valid Bearer API token required"}})
+				return
+			}
+			c.Next()
+		})
+	}
 	router.Use(func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4<<20)
 		c.Next()
 	})
+	registerWorkflowEditor(router)
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.DB == nil || deps.Providers == nil || deps.Models == nil || deps.Adapters == nil || deps.ProviderRuntime == nil || deps.Gateway == nil || deps.Repository == nil || deps.AgentExecutor == nil || deps.AgentRuntime == nil || deps.Workspaces == nil {
@@ -92,6 +120,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		agentHandler.SetMaxAttempts(deps.SchedulerMaxAttempts)
 		agentHandler.RegisterRoutes(api)
 	}
+	if deps.AgentDefinitions != nil {
+		handlers.NewAgentDefinitionHandler(deps.AgentDefinitions).RegisterRoutes(api)
+	}
 	if deps.GoalService != nil && deps.PlanningService != nil {
 		handlers.NewGoalHandler(deps.GoalService, deps.PlanningService).RegisterRoutes(api)
 	}
@@ -112,8 +143,27 @@ func NewRouter(deps Dependencies) http.Handler {
 		workflowHandler.SetMaxAttempts(deps.WorkflowMaxAttempts)
 		workflowHandler.RegisterRoutes(api)
 	}
+	if deps.DB != nil {
+		if repo, err := conversation.NewSQLiteRepository(deps.DB); err == nil {
+			if service, serviceErr := conversation.NewService(repo); serviceErr == nil {
+				handlers.NewConversationHandler(service).RegisterRoutes(api)
+			}
+			var memoryRetriever contextmanager.MemoryRetriever
+			if deps.MemoryService != nil {
+				memoryRetriever = deps.MemoryService
+			}
+			assembler := contextmanager.NewAssembler(repo, memoryRetriever, deps.Gateway)
+			handlers.NewConversationContextHandler(assembler).RegisterRoutes(api)
+		}
+		if authoringHandler, err := handlers.NewWorkflowAuthoringHandler(deps.DB, deps.WorkflowEngine); err == nil {
+			authoringHandler.RegisterRoutes(api)
+		}
+	}
 	if deps.ToolRegistry != nil && deps.ToolEngine != nil && deps.Workspaces != nil && deps.ToolAudit != nil {
 		handlers.NewToolHandler(deps.ToolEngine, deps.ToolRegistry, deps.Workspaces, deps.ToolAudit).RegisterRoutes(api)
+	}
+	if deps.AIResourceHandler != nil {
+		deps.AIResourceHandler.RegisterRoutes(router)
 	}
 	return router
 }

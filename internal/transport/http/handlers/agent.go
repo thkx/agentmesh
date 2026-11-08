@@ -41,6 +41,8 @@ func (h *AgentHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/tasks/:id", h.get)
 	g.GET("/tasks/:id/messages", h.messages)
 	g.POST("/tasks/:id/cancel", h.cancel)
+	g.POST("/tasks/:id/pause", h.pause)
+	g.POST("/tasks/:id/resume", h.resume)
 }
 func (h *AgentHandler) run(c *gin.Context) {
 	var in dom.Task
@@ -133,4 +135,19 @@ func (h *AgentHandler) retryJob(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, job)
+}
+
+func (h *AgentHandler) pause(c *gin.Context) {
+	if err := h.runtime.Pause(c.Param("id")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "task_not_running"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"status": "paused"})
+}
+func (h *AgentHandler) resume(c *gin.Context) {
+	if err := h.runtime.Resume(c.Param("id")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "task_not_running"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"status": "resumed"})
 }

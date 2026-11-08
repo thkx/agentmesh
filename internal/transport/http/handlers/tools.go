@@ -18,10 +18,10 @@ type ToolHandler struct {
 	engine     *tools.Engine
 	registry   *tools.Registry
 	workspaces *workspace.Manager
-	auditor    *audit.Memory
+	auditor    audit.Store
 }
 
-func NewToolHandler(e *tools.Engine, r *tools.Registry, w *workspace.Manager, a *audit.Memory) *ToolHandler {
+func NewToolHandler(e *tools.Engine, r *tools.Registry, w *workspace.Manager, a audit.Store) *ToolHandler {
 	return &ToolHandler{engine: e, registry: r, workspaces: w, auditor: a}
 }
 func (h *ToolHandler) RegisterRoutes(r *gin.RouterGroup) {

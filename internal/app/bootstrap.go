@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +17,8 @@ import (
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	agentstate "github.com/thkx/agentmesh/internal/agent/state"
+	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/config"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/execution"
@@ -142,6 +146,16 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load application config: %w", err)
 	}
+	apiToken := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
+	if apiToken != "" && len(apiToken) < 32 {
+		return nil, fmt.Errorf("AGENTMESH_API_TOKEN must contain at least 32 characters")
+	}
+	host := strings.Trim(cfg.Server.Host, "[]")
+	ip := net.ParseIP(host)
+	loopback := host == "localhost" || (ip != nil && ip.IsLoopback())
+	if !loopback && apiToken == "" {
+		return nil, fmt.Errorf("AGENTMESH_API_TOKEN is required when server host is not loopback")
+	}
 
 	log, err := logger.New(cfg.Log.Level, cfg.Log.Format)
 	if err != nil {
@@ -217,6 +231,31 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize credential store: %w", err)
 	}
+	resourceKey, err := keyProvider.Key()
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("load AI resource encryption key: %w", err)
+	}
+	resourceCipher, err := cryptography.NewAESGCM(resourceKey)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize AI resource encryption: %w", err)
+	}
+	aiResources, err := airesource.NewService(sqliteDB.DB, resourceCipher)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize AI resource service: %w", err)
+	}
+	aiRouter, err := airesource.NewRouter(aiResources)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize AI router: %w", err)
+	}
+	aiHTTP, err := airesource.NewHTTPHandler(aiResources, aiRouter, apiToken)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize AI resource HTTP handler: %w", err)
+	}
 	credentialResolver, err := appcredential.NewResolver(credentialStore, appcredential.OSEnvironment{})
 	if err != nil {
 		_ = sqliteDB.Close()
@@ -247,14 +286,18 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	agentExec := cliexecutor.New(cliexecutor.DefaultAdapters(cliPaths), cfg.Agent.WorkspaceRoot, workspaceManager)
 	toolRegistry := tools.NewRegistry()
-	if err := builtin.Register(toolRegistry, builtin.Config{MaxFileBytes: cfg.Agent.Tools.MaxFileBytes, MaxOutputBytes: cfg.Agent.Tools.MaxOutputBytes, AllowedCommands: cfg.Agent.Tools.AllowedCommands, CommandTimeout: cfg.Agent.Tools.CommandTimeout}); err != nil {
+	if err := builtin.Register(toolRegistry, builtin.Config{MaxFileBytes: cfg.Agent.Tools.MaxFileBytes, MaxOutputBytes: cfg.Agent.Tools.MaxOutputBytes, AllowedCommands: cfg.Agent.Tools.AllowedCommands, AllowedHTTPDomains: cfg.Agent.Tools.AllowedHTTPDomains, SandboxImage: cfg.Agent.Tools.SandboxImage, SandboxNetworkEnabled: cfg.Agent.Tools.SandboxNetworkEnabled, CommandTimeout: cfg.Agent.Tools.CommandTimeout}); err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("register built-in tools: %w", err)
 	}
-	toolAudit := audit.NewMemory(2000)
+	toolAudit, err := audit.NewSQLite(sqliteDB.DB)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize tool audit store: %w", err)
+	}
 	toolPolicy := toolpolicy.Static{ReadEnabled: true, WriteEnabled: true, ExecuteEnabled: true, RequireApprovalForWrite: true, RequireApprovalForExecute: true}
 	toolEngine := tools.NewEngine(toolRegistry, toolPolicy, toolAudit)
-	agentRuntime, err := agentruntime.New(gateway, toolEngine, workspaceManager, agentruntime.Config{DefaultMaxSteps: cfg.Agent.Runtime.MaxSteps, DefaultMaxToolCalls: cfg.Agent.Runtime.MaxToolCalls, MaxContextChars: cfg.Agent.Runtime.MaxContextChars, MaxConcurrent: cfg.Agent.Runtime.MaxConcurrent, DefaultTimeout: time.Duration(cfg.Agent.Runtime.TimeoutSeconds) * time.Second})
+	agentRuntime, err := agentruntime.New(gateway, toolEngine, workspaceManager, agentruntime.Config{DefaultMaxSteps: cfg.Agent.Runtime.MaxSteps, DefaultMaxToolCalls: cfg.Agent.Runtime.MaxToolCalls, MaxContextChars: cfg.Agent.Runtime.MaxContextChars, MaxContextTokens: cfg.Agent.Runtime.MaxContextTokens, MaxConcurrent: cfg.Agent.Runtime.MaxConcurrent, DefaultTimeout: time.Duration(cfg.Agent.Runtime.TimeoutSeconds) * time.Second})
 	if err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize agent runtime: %w", err)
@@ -277,6 +320,16 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize tool invocation ledger: %w", err)
 	}
 	agentRuntime.SetToolLedger(toolLedger)
+	agentDefinitionRepo, err := agentcatalog.NewSQLiteRepository(sqliteDB.DB)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize agent definition repository: %w", err)
+	}
+	agentDefinitions, err := agentcatalog.NewService(agentDefinitionRepo, agentRuntime)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize agent definition service: %w", err)
+	}
 	workerCount := cfg.Scheduler.Workers
 	if workerCount <= 0 {
 		workerCount = 1
@@ -461,11 +514,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	container := &Container{
 		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
-		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
+		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResources: aiResources, AIRouter: aiRouter,
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResourceHandler: aiHTTP, APIToken: apiToken,
 	})
 	return container, nil
 }

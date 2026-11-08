@@ -1,5 +1,5 @@
 
-.PHONY: run test build tidy migrate-check
+.PHONY: run test build tidy migrate-check sqlc-generate
 
 run:
 	go run ./cmd/agentmesh --config configs/config.yaml
@@ -15,3 +15,6 @@ tidy:
 
 migrate-check:
 	go test ./internal/platform/database -v
+
+sqlc-generate:
+	sqlc generate

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"math"
 	"strings"
 	"time"
 )
@@ -20,6 +21,7 @@ type Status string
 const (
 	StatusPending   Status = "pending"
 	StatusRunning   Status = "running"
+	StatusPaused    Status = "paused"
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
 	StatusCanceled  Status = "canceled"
@@ -30,6 +32,8 @@ type Task struct {
 	ID              string   `json:"id"`
 	ModelID         string   `json:"model_id"`
 	WorkspaceID     string   `json:"workspace_id"`
+	SystemPrompt    string   `json:"system_prompt,omitempty"`
+	Temperature     *float64 `json:"temperature,omitempty"`
 	Prompt          string   `json:"prompt"`
 	MaxSteps        int      `json:"max_steps,omitempty"`
 	MaxToolCalls    int      `json:"max_tool_calls,omitempty"`
@@ -40,6 +44,12 @@ type Task struct {
 
 func (t Task) Validate() error {
 	if strings.TrimSpace(t.ID) == "" || strings.TrimSpace(t.ModelID) == "" || strings.TrimSpace(t.WorkspaceID) == "" || strings.TrimSpace(t.Prompt) == "" {
+		return ErrInvalidTask
+	}
+	if len(t.SystemPrompt) > 64<<10 {
+		return ErrInvalidTask
+	}
+	if t.Temperature != nil && (math.IsNaN(*t.Temperature) || math.IsInf(*t.Temperature, 0) || *t.Temperature < 0 || *t.Temperature > 2) {
 		return ErrInvalidTask
 	}
 	if t.MaxSteps < 0 || t.MaxToolCalls < 0 || t.MaxOutputTokens < 0 || t.TimeoutSeconds < 0 || t.TimeoutSeconds > 3600 {
