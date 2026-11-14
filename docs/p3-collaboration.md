@@ -9,41 +9,29 @@ P3 adds durable collaboration primitives without replacing P2 Execution Manager.
 - Assignment claims use conditional SQL updates, expiring leases and monotonically increasing claim versions.
 - Domain changes produce durable Outbox records. The Dispatcher delivers only to recipients defined by explicit event routing rules; it never invokes an LLM.
 
-## API
+## Event routing
 
-Routes are under /api/v1/collaboration:
-
-- GET|POST /workspaces; GET /workspaces/:id
-- GET /workspaces/:id/agents; POST /agents; GET /agents/:id
-- GET /workspaces/:id/channels; POST /channels; GET /channels/:id
-- GET|POST /channels/:id/messages; POST /channels/:id/threads
-- GET /workspaces/:id/tasks; POST /tasks; GET /tasks/:id
-- POST /tasks/:id/assignments; POST /tasks/:id/handoff
-- POST /assignments/:id/claim; POST /assignments/:id/renew; POST /assignments/:id/complete
-- POST /decisions/evaluate
-- GET /workspaces/:id/approvals; POST /approvals/:id/resolve
-- GET /outbox; GET /inbox/:agent_id; POST /inbox/:agent_id/events; POST /inbox/:agent_id/:event_id/ack
-
-## Event routing and delivery
-
-The dispatcher uses an allow-list:
 - task.assigned -> the assigned, non-disabled Agent Identity in the same Workspace.
 - message.created -> non-disabled members of the referenced, non-archived Channel in the same Workspace.
 - approval.requested -> the requesting Agent Identity.
 - approval.approved / approval.rejected -> the approval requester's Agent Identity.
+- Unknown event types are never workspace-broadcast; they are marked unroutable in Outbox diagnostics.
 
-Unknown event types are never workspace-broadcast. They are marked published with an `unroutable:` diagnostic in the Outbox `last_error` field so that unsupported events do not block later events. Malformed known-event payloads and invalid recipients are treated as dispatch errors and remain pending for operator investigation.
+## Inbox lease protocol
 
-Fan-out and marking the Outbox event published happen in one SQLite transaction. Duplicate Inbox delivery is prevented by the unique (agent_id,event_id) constraint. The dispatcher does not invoke an LLM. Inbox consumption and execution are separate concerns: an Inbox event is not itself permission to wake an Agent; a consumer must evaluate a decision and acknowledge the event.
+Inbox consumption is at-least-once and requires a lease:
+1. POST /inbox/:agent_id/claim with owner and lease_seconds.
+2. Process the event idempotently.
+3. Renew with POST /inbox/:agent_id/:event_id/renew if needed.
+4. ACK using POST /inbox/:agent_id/:event_id/ack-lease with owner, lease_token and status (handled or ignored).
+5. On transient failure, POST /inbox/:agent_id/:event_id/fail. The server applies bounded exponential backoff; after the retry ceiling, the event is terminally failed.
+
+Lease owner and random lease token are both checked on renew, ACK and retry. An expired or superseded consumer cannot complete an event. Claim increments attempts and reclaims expired leases. The default retry ceiling is eight attempts. Existing legacy Inbox listing and ACK routes remain for compatibility; new consumers must use lease routes.
 
 ## Governance
 
 The Decision Gate applies Workspace autonomy mode before privileged actions. Every evaluation is persisted in decision audit. Approval decisions are durable, expire after 24 hours, and emit Outbox events. Approval resolution does not itself execute the approved action; an execution consumer must consume the approval event and re-check current policy.
 
-Agent-initiated handoff requires a requester identity and passes through the Decision Gate. A rejected or expired approval does not create a child task.
+## Verification
 
-## Migrations and verification
-
-- 000024_collaboration_core: workspace, identity, channel, thread, task, assignment, inbox and outbox.
-- 000025_collaboration_governance: decision audit and human approvals.
-- Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and race tests. The script never rewrites source files.
+Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and race tests. The script never rewrites source files.
