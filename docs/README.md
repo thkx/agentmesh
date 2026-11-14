@@ -9,6 +9,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [Project overview (English)](../README.md) | Product summary, requirements and quick start |
 | [项目说明（简体中文）](../README.zh-CN.md) | 中文项目概览、环境要求与快速开始 |
 | [P2 Unified Execution](p2-execution.md) | Execution/Attempt model, Runtime adapters, HTTP API, cancellation and recovery |
+| [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |
 
 ## Architecture and implementation history
 
@@ -48,3 +49,9 @@ When documents and implementation appear inconsistent, use this order:
 4. Milestone notes, which explain historical intent and implementation decisions.
 
 Historical validation sections are snapshots. They must not be interpreted as evidence that the current branch has or has not passed its checks. For current P2 CI status, see the [Go CI workflow runs for the P2 implementation branch](https://github.com/thkx/agentmesh/actions/workflows/go.yml?query=branch%3Ap2%2Fimplementation) and verify the run's commit SHA.
+
+## P3: Agent Collaboration Plane
+
+- P3 collaboration contract: [p3-collaboration.md](p3-collaboration.md)
+- Verification entry point: bash scripts/verify-p3.sh
+- Database migrations: 000024_collaboration_core and 000025_collaboration_governance

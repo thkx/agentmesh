@@ -7,26 +7,33 @@ P3 adds durable collaboration primitives without replacing P2 Execution Manager.
 - Channel stores membership and references the existing Conversation as message history. Threads are channel discussion branches.
 - Collaboration Task is a general objective, distinct from Agent Runtime input Task and P2 Execution.
 - Assignment claims use conditional SQL updates, expiring leases and monotonically increasing claim versions.
-- Domain changes produce durable Outbox records. The Dispatcher fans events into Agent Inboxes with `(agent_id,event_id)` idempotency and never invokes an LLM.
+- Domain changes produce durable Outbox records. The Dispatcher fans events into Agent Inboxes with (agent_id,event_id) idempotency and never invokes an LLM.
 
 ## API
 
-Routes are under `/api/v1/collaboration`: workspaces, agent identities, channels/messages/threads, tasks/assignments, outbox polling and idempotent inbox receipt.
+Routes are under /api/v1/collaboration:
 
-- ` + "`POST /tasks/:id/handoff`" + ` creates a child task with a structured handoff payload and assigns it to a recipient in the same workspace.
-- ` + "`POST /assignments/:id/renew`" + ` renews a lease only when owner and fencing version still match.
-- ` + "`GET /inbox/:agent_id`" + ` reads pending inbox events; ` + "`POST /inbox/:agent_id/:event_id/ack`" + ` acknowledges handling.
+- GET|POST /workspaces; GET /workspaces/:id
+- GET /workspaces/:id/agents; POST /agents; GET /agents/:id
+- GET /workspaces/:id/channels; POST /channels; GET /channels/:id
+- GET|POST /channels/:id/messages; POST /channels/:id/threads
+- GET /workspaces/:id/tasks; POST /tasks; GET /tasks/:id
+- POST /tasks/:id/assignments; POST /tasks/:id/handoff
+- POST /assignments/:id/claim; POST /assignments/:id/renew; POST /assignments/:id/complete
+- POST /decisions/evaluate
+- GET /workspaces/:id/approvals; POST /approvals/:id/resolve
+- GET /outbox; GET /inbox/:agent_id; POST /inbox/:agent_id/events; POST /inbox/:agent_id/:event_id/ack
 
-## Delivery semantics
+## Delivery and governance
 
-Outbox dispatch is transactional: inbox fan-out and marking the outbox event published happen in one SQLite transaction. Duplicate inbox delivery is prevented by a unique `(agent_id,event_id)` constraint. Agent wakeup/decision policy is intentionally not wired to the dispatcher yet; an inbox event is not itself permission to invoke a model.
+Outbox dispatch is transactional: inbox fan-out and marking the outbox event published happen in one SQLite transaction. Duplicate inbox delivery is prevented by a unique (agent_id,event_id) constraint. The dispatcher does not invoke an LLM. An inbox event is not itself permission to wake an Agent; the consumer reads it, evaluates a decision, and acknowledges the event.
 
-## Migration
+The Decision Gate applies Workspace autonomy mode before privileged actions. Directed mode requires approval for claim/delegate/execute actions; Hybrid requires approval for delegation and execution; Autonomous permits delegation and workflow execution but still requires approval for direct execution. Every evaluation is persisted in decision audit. Approval decisions are durable, expire after 24 hours, and emit Outbox events. Approval resolution does not itself execute the approved action; an execution consumer must consume the approval event and re-check current policy.
 
-`000024_collaboration_core` creates the collaboration tables and does not alter P2 execution tables.
+Agent-initiated handoff requires a requester identity and passes through the Decision Gate. Directed and Hybrid modes create or reuse a pending human approval; the handoff is materialized only after approval. Autonomous mode permits delegation within the Workspace's configured depth limit. A rejected or expired approval does not create a child task.
 
-## Autonomy governance
+## Migrations and verification
 
-The Decision Gate applies the Workspace autonomy mode before any privileged action. Directed mode requires approval for claim/delegate/execute actions; Hybrid requires approval for delegation and execution; Autonomous permits delegation and workflow execution but still requires approval for direct execution. Every evaluation is persisted in decision audit. Approval decisions are durable, expire after 24 hours, and emit Outbox events. Approval resolution does not itself execute the approved action; a later execution consumer must consume the approval event and re-check the current policy.
-
-Agent-initiated handoff requires a requester identity and passes through the workspace Decision Gate. Directed and Hybrid modes create/reuse a pending human approval; the handoff is only materialized after that approval is granted. Autonomous mode permits delegation within the workspace's configured depth limit. A rejected or expired approval does not create a child task.
+- 000024_collaboration_core: workspace, identity, channel, thread, task, assignment, inbox and outbox.
+- 000025_collaboration_governance: decision audit and human approvals.
+- Run bash scripts/verify-p3.sh for formatting, build, vet and race tests.
