@@ -119,7 +119,7 @@ func CanTransition(from, to LifecycleStatus) bool {
 	if from==to { return true }
 	switch from {
 	case LifecycleQueued:
-		return to==LifecycleRunning || to==LifecycleCanceled || to==LifecycleFailed
+		return to==LifecycleRunning || to==LifecycleCanceled || to==LifecycleFailed || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
 	case LifecycleRunning:
 		return to==LifecycleQueued || to==LifecycleSucceeded || to==LifecycleFailed || to==LifecycleCanceled || to==LifecycleTimedOut || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
 	case LifecycleInterrupted, LifecycleNeedsReconciliation:

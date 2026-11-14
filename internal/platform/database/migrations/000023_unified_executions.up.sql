@@ -18,6 +18,7 @@ CREATE UNIQUE INDEX idx_executions_runtime_ref ON executions(runtime,runtime_ref
 CREATE INDEX idx_executions_status_created ON executions(status,created_at DESC);
 CREATE INDEX idx_executions_kind_created ON executions(kind,created_at DESC);
 CREATE INDEX idx_executions_task ON executions(task_id);
+CREATE UNIQUE INDEX idx_executions_runtime_task ON executions(runtime,task_id) WHERE task_id IS NOT NULL AND task_id <> '';
 
 CREATE TABLE execution_attempts (
     id TEXT PRIMARY KEY NOT NULL,

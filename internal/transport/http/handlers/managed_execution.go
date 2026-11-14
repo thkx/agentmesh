@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -27,7 +28,7 @@ func(h *ManagedExecutionHandler)submit(c *gin.Context){
 		Kind dom.Kind `json:"kind"`
 		Runtime dom.Runtime `json:"runtime"`
 		TaskID string `json:"task_id"`
-		Input []byte `json:"input"`
+		Input json.RawMessage `json:"input"`
 		IdempotencyKey string `json:"idempotency_key"`
 	}
 	if err:=c.ShouldBindJSON(&in);err!=nil{c.JSON(http.StatusBadRequest,gin.H{"code":"invalid_request","message":err.Error()});return}

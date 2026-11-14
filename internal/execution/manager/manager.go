@@ -56,7 +56,7 @@ func (m *Manager) Register(runtime dom.Runtime,adapter Adapter) error {
 }
 
 func (m *Manager) Submit(ctx context.Context,in SubmitRequest)(dom.Entity,error) {
-	if in.Kind=="" || in.Runtime=="" || len(in.Input)==0 || !json.Valid(in.Input) || len(in.Input)>1<<20 || len(in.TaskID)>128 || len(in.IdempotencyKey)>256 {
+	if !validKindRuntime(in.Kind,in.Runtime) || len(in.Input)==0 || !json.Valid(in.Input) || len(in.Input)>1<<20 || len(in.TaskID)>128 || len(in.IdempotencyKey)>256 {
 		return dom.Entity{},ErrInvalidRequest
 	}
 	adapter,ok:=m.adapters[in.Runtime];if !ok{return dom.Entity{},ErrAdapterNotRegistered}
@@ -74,8 +74,8 @@ func (m *Manager) Submit(ctx context.Context,in SubmitRequest)(dom.Entity,error)
 	if created.ID!=e.ID {return m.Get(ctx,created.ID)}
 	ref,err:=adapter.Submit(ctx,created)
 	if err!=nil {
-		_,transitionErr:=m.store.Transition(context.Background(),created.ID,[]dom.LifecycleStatus{dom.LifecycleQueued},dom.LifecycleFailed,err.Error(),nil)
-		return created,errors.Join(err,transitionErr)
+		failed,transitionErr:=m.store.Transition(context.Background(),created.ID,[]dom.LifecycleStatus{dom.LifecycleQueued},dom.LifecycleFailed,err.Error(),nil)
+		return failed,errors.Join(err,transitionErr)
 	}
 	if ref!="" {
 		created,err=m.store.BindRuntimeRef(ctx,created.ID,ref)
@@ -102,4 +102,8 @@ func (m *Manager) Cancel(ctx context.Context,id string) error {
 
 func (m *Manager) List(ctx context.Context,f dom.ListFilter)([]dom.Entity,error) {
 	return m.store.List(ctx,f)
+}
+
+func validKindRuntime(kind dom.Kind, runtime dom.Runtime) bool {
+ switch kind { case dom.KindAgent: return runtime==dom.RuntimeAgent; case dom.KindCoding: return runtime==dom.RuntimeCoding; case dom.KindWorkflow: return runtime==dom.RuntimeWorkflow; case dom.KindCLI: return runtime==dom.RuntimeCLI; default: return false }
 }
