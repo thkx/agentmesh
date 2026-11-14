@@ -60,4 +60,6 @@ func TestTaskIdempotencyAndHandoffDepth(t *testing.T){
  if original.ID!=replay.ID{t.Fatal("idempotency key must return the original task")}
  child,assignment,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{Goal:"Write tests",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
  if child.ParentTaskID!=original.ID||assignment.AgentID!=a.ID{t.Fatalf("invalid handoff result: %+v %+v",child,assignment)}
+ childAgain,assignmentAgain,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{Goal:"Retry title",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
+ if childAgain.ID!=child.ID||assignmentAgain.ID!=assignment.ID{t.Fatal("handoff retry must be idempotent")}
 }
