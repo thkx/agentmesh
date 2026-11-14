@@ -588,6 +588,15 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	workerWG.Add(1)
 	go func() { defer workerWG.Done(); if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) { log.Error("collaboration dispatcher stopped", "error", runErr) } }()
 
+	wakeupWorker, err := collaboration.NewWakeupWorker(collaborationService, agentDefinitions, executionManager, workspaceManager, collaboration.WakeupConfig{
+		WorkerID: cfg.Scheduler.WorkerID, PollInterval: cfg.Scheduler.PollInterval,
+		InboxLease: 2*time.Minute, AssignmentLease: 2*time.Minute,
+		MaxInboxAttempts: 8, Logger: log,
+	})
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration wakeup worker: %w", err) }
+	workerWG.Add(1)
+	go func() { defer workerWG.Done(); if runErr := wakeupWorker.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) { log.Error("collaboration wakeup worker stopped", "error", runErr) } }()
+
 	container := &Container{
 		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,

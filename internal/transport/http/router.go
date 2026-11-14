@@ -156,7 +156,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		workflowHandler.RegisterRoutes(api)
 	}
 	if deps.Collaboration != nil {
-		handlers.NewCollaborationHandler(deps.Collaboration).RegisterRoutes(api)
+		collaborationHandler:=handlers.NewCollaborationHandler(deps.Collaboration);collaborationHandler.SetRuntimeBindingDependencies(deps.AgentDefinitions,deps.Workspaces);collaborationHandler.RegisterRoutes(api)
 	}
 	if deps.DB != nil {
 		if repo, err := conversation.NewSQLiteRepository(deps.DB); err == nil {

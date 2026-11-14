@@ -2,36 +2,48 @@
 
 P3 adds durable collaboration primitives without replacing P2 Execution Manager.
 
+## Collaboration model
+
 - Workspace is a persisted collaboration and policy boundary, separate from filesystem workspaces.
-- Agent Identity is a durable participant. Agent Definition remains the versioned execution recipe; runtime instances and sessions remain separate lifecycles.
-- Channel stores membership and references the existing Conversation as message history. Threads are channel discussion branches.
+- Agent Identity is durable and distinct from Agent Definition, Runtime Instance and Session.
+- Channel references the existing Conversation for message history; threads are discussion branches.
 - Collaboration Task is a general objective, distinct from Agent Runtime input Task and P2 Execution.
 - Assignment claims use conditional SQL updates, expiring leases and monotonically increasing claim versions.
-- Domain changes produce durable Outbox records. The Dispatcher delivers only to recipients defined by explicit event routing rules; it never invokes an LLM.
+- Domain changes produce durable Outbox records. The Dispatcher uses explicit recipient rules and never workspace-broadcasts unknown events.
 
-## Event routing
+## Runtime binding and sessions
 
-- task.assigned -> the assigned, non-disabled Agent Identity in the same Workspace.
-- message.created -> non-disabled members of the referenced, non-archived Channel in the same Workspace.
-- approval.requested -> the requesting Agent Identity.
-- approval.approved / approval.rejected -> the approval requester's Agent Identity.
-- Unknown event types are never workspace-broadcast; they are marked unroutable in Outbox diagnostics.
+Each Agent Identity can be bound to an enabled, versioned Agent Definition and a managed filesystem Workspace. The binding stores an immutable definition snapshot and model ID. Runtime Workspace IDs are resolved through the existing workspace manager; arbitrary filesystem paths are never accepted.
+
+A persistent Agent Session tracks the active execution and last completed execution/task. It is an operational continuity record, not a claim that conversational memory is automatically injected into future prompts.
+
+## Wakeup and execution
+
+The Wakeup Worker consumes Inbox items with fenced leases. It does not invoke an LLM for every incoming event:
+- task.assigned -> evaluate the Workspace Decision Gate for claim; if allowed, claim the Assignment, construct a validated Agent Runtime task from the bound definition, and submit it through P2 Execution Manager.
+- In directed mode, a claim requiring approval is held. approval.approved rechecks the current Decision Gate and resumes the referenced assignment only when the persisted approval is still approved.
+- approval.rejected -> reject the assignment and block its task.
+- Other event types are safely acknowledged as non-executable notifications.
+
+Execution idempotency is keyed by Assignment ID. If a process crashes after submitting but before acknowledging Inbox, the replay reuses the same Execution instead of submitting duplicate work. The worker renews both Inbox and Assignment leases while observing the Execution. On success it completes the Assignment; on terminal failure it rejects the Assignment and records a task failure event.
 
 ## Inbox lease protocol
 
-Inbox consumption is at-least-once and requires a lease:
 1. POST /inbox/:agent_id/claim with owner and lease_seconds.
-2. Process the event idempotently.
-3. Renew with POST /inbox/:agent_id/:event_id/renew if needed.
-4. ACK using POST /inbox/:agent_id/:event_id/ack-lease with owner, lease_token and status (handled or ignored).
-5. On transient failure, POST /inbox/:agent_id/:event_id/fail. The server applies bounded exponential backoff; after the retry ceiling, the event is terminally failed.
+2. Process idempotently.
+3. Renew with POST /inbox/:agent_id/:event_id/renew.
+4. ACK with POST /inbox/:agent_id/:event_id/ack-lease using owner, lease_token and status (handled or ignored).
+5. Retry transient failures with POST /inbox/:agent_id/:event_id/fail. Bounded exponential backoff applies; retry exhaustion moves the event to failed.
 
-Lease owner and random lease token are both checked on renew, ACK and retry. An expired or superseded consumer cannot complete an event. Claim increments attempts and reclaims expired leases. The default retry ceiling is eight attempts. Existing legacy Inbox listing and ACK routes remain for compatibility; new consumers must use lease routes.
+Legacy Inbox list and ACK routes remain for compatibility. New consumers use lease-aware endpoints.
 
-## Governance
+## API additions
 
-The Decision Gate applies Workspace autonomy mode before privileged actions. Every evaluation is persisted in decision audit. Approval decisions are durable, expire after 24 hours, and emit Outbox events. Approval resolution does not itself execute the approved action; an execution consumer must consume the approval event and re-check current policy.
+- POST /api/v1/collaboration/agents/:id/runtime-binding
+- GET /api/v1/collaboration/agents/:id/runtime-binding
+
+The binding request contains definition_id and runtime_workspace_id. The runtime workspace must already exist under the configured workspace root.
 
 ## Verification
 
-Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and race tests. The script never rewrites source files.
+Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and race tests.
