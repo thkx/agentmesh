@@ -1,6 +1,6 @@
 # P2 — Unified Execution Management
 
-> Status: implemented on `p2/implementation`. The current branch CI run for commit `f8fa6be318b64ef922c44d909a5a9b966c0e32ba` completed successfully. This is a branch-level verification result, not a claim that the branch has been merged to `main`.
+> Status: implemented on `p2/implementation`. The documentation baseline commit `599935ec41136f651dde45244e1002e70eb21ea4` completed the repository's Go CI workflow successfully (Build, Vet and Race tests). This is a branch-level verification result, not a claim that the branch has been merged to `main`.
 
 P2 adds a common execution identity and lifecycle above the existing runtime queues. It does **not** replace the Agent Scheduler, Coding Task service, Workflow queue or CLI executor with a second generic job queue.
 
@@ -136,7 +136,7 @@ Run from the repository root using the Go version declared in `go.mod`:
 bash scripts/verify-p2.sh
 ```
 
-The script runs formatting, `go build ./...`, `go vet ./...` and `go test -race ./...`. For CI results, verify the exact commit SHA in the [P2 branch Actions](https://github.com/thkx/agentmesh/actions/workflows/ci.yml?query=branch%3Ap2%2Fimplementation).
+The script runs formatting, `go build ./...`, `go vet ./...` and `go test -race ./...`. For CI results, verify the exact commit SHA in the [Go CI workflow runs for the P2 branch](https://github.com/thkx/agentmesh/actions/workflows/go.yml?query=branch%3Ap2%2Fimplementation).
 
 ## 6. Scope boundaries
 

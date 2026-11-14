@@ -47,4 +47,4 @@ When documents and implementation appear inconsistent, use this order:
 3. Current verification scripts and completed CI runs for the exact commit.
 4. Milestone notes, which explain historical intent and implementation decisions.
 
-Historical validation sections are snapshots. They must not be interpreted as evidence that the current branch has or has not passed its checks. For current P2 CI status, see the [P2 implementation branch Actions](https://github.com/thkx/agentmesh/actions/workflows/ci.yml?query=branch%3Ap2%2Fimplementation) and verify the run's commit SHA.
+Historical validation sections are snapshots. They must not be interpreted as evidence that the current branch has or has not passed its checks. For current P2 CI status, see the [Go CI workflow runs for the P2 implementation branch](https://github.com/thkx/agentmesh/actions/workflows/go.yml?query=branch%3Ap2%2Fimplementation) and verify the run's commit SHA.
