@@ -17,6 +17,7 @@ type WorkerConfig struct {
 	ID            string
 	PollInterval  time.Duration
 	LeaseDuration time.Duration
+	Observer      Observer
 }
 type Worker struct {
 	logger  *slog.Logger
@@ -81,12 +82,17 @@ func (w *Worker) runOne(ctx context.Context) error {
 	if err = w.store.MarkStarted(ctx, job.ID, w.cfg.ID); err != nil {
 		return err
 	}
+	if w.cfg.Observer != nil {
+		observerCtx, observerCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if observerErr := w.cfg.Observer.Started(observerCtx, job); observerErr != nil { w.logger.ErrorContext(observerCtx, "execution observer start failed", "job_id", job.ID, "error", observerErr) }
+		observerCancel()
+	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	heartbeatDone := make(chan struct{})
 	go w.heartbeat(workCtx, cancel, job.ID, heartbeatDone)
 	defer func() { cancel(); <-heartbeatDone }()
-	_, runErr := w.handler.Run(workCtx, job.Task)
+	result, runErr := w.handler.Run(workCtx, job.Task)
 	// During process shutdown leave the lease to expire; startup recovery will mark it interrupted,
 	// never replaying an execution that may already have caused side effects.
 	if ctx.Err() != nil {
@@ -95,9 +101,19 @@ func (w *Worker) runOne(ctx context.Context) error {
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
 	if runErr != nil {
-		return w.store.Fail(finishCtx, job.ID, w.cfg.ID, runErr)
+		finishErr := w.store.Fail(finishCtx, job.ID, w.cfg.ID, runErr)
+		if w.cfg.Observer != nil {
+			finalJob, getErr := w.store.Get(finishCtx, job.ID)
+			if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, runErr); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
+		}
+		return finishErr
 	}
-	return w.store.Complete(finishCtx, job.ID, w.cfg.ID)
+	finishErr := w.store.Complete(finishCtx, job.ID, w.cfg.ID)
+	if w.cfg.Observer != nil {
+		finalJob, getErr := w.store.Get(finishCtx, job.ID)
+		if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, nil); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
+	}
+	return finishErr
 }
 func (w *Worker) heartbeat(ctx context.Context, cancel context.CancelFunc, id string, done chan<- struct{}) {
 	defer close(done)

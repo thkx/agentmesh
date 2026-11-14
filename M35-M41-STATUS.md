@@ -1,3 +1,5 @@
+> Historical implementation record: this file records the state and validation evidence at the time it was written. Its validation section is not the current branch's verification status. For current project status and documentation navigation, see [the documentation index](docs/README.md) and the current [P2 execution guide](docs/p2-execution.md).
+
 # AgentMesh M35–M41 Implementation
 
 This release is an additive continuation of the uploaded M1–M34 project. Existing package boundaries, provider/model catalog, Agent Runtime, Tool Registry, workspace manager and migrations 000001–000020 are retained.

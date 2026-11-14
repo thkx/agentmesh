@@ -1,3 +1,5 @@
+> Historical implementation record: this file records the state and validation evidence at the time it was written. Its validation section is not the current branch's verification status. For current project status and documentation navigation, see [the documentation index](docs/README.md) and the current [P2 execution guide](docs/p2-execution.md).
+
 # AgentMesh M29–M34 Implementation Status
 
 This is an incremental continuation of the M23–M28 source tree. Existing Provider, Model Router, Workflow Runtime, scheduler, checkpoint, M1–M28 migrations and package boundaries are retained. YAML remains the canonical workflow definition; the visual editor is an authoring view over the same definition.

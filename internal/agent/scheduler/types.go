@@ -63,6 +63,11 @@ type Store interface {
 	CancelTask(context.Context, string) error
 }
 
+type Observer interface {
+	Started(context.Context, Job) error
+	Finished(context.Context, Job, dom.Result, error) error
+}
+
 type Handler interface {
 	Run(context.Context, dom.Task) (dom.Result, error)
 }

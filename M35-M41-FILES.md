@@ -1,3 +1,5 @@
+> Historical file manifest for the M35–M41 delivery. Paths describe the original package layout and are retained for traceability; this is not a current patch manifest. See [the documentation index](docs/README.md).
+
 # M35–M41 File Change Manifest
 
 ## New files

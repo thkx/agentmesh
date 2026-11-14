@@ -1,0 +1,28 @@
+name: Go CI
+
+on:
+  push:
+    branches: ["main", "p2/**", "p2-a/**"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Normalize formatting in CI workspace
+        run: gofmt -w $(find . -name '*.go' -type f)
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Race tests
+        run: go test -race ./...

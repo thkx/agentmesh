@@ -286,3 +286,39 @@ func (r *Repository) Snapshots(ctx context.Context, taskID string) ([]Snapshot, 
 	}
 	return out, rows.Err()
 }
+
+
+// CancelPending atomically cancels a task that has not been claimed by a worker.
+// The state transition and event are committed together so a racing worker either
+// claims the task first or observes that the task is no longer pending.
+func (r *Repository) CancelPending(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Unix()
+	result, err := tx.ExecContext(ctx, `UPDATE coding_tasks SET status='canceled',error='canceled before execution',updated_at=?,finished_at=? WHERE id=? AND status='pending'`, now, now, id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		var exists int
+		queryErr := tx.QueryRowContext(ctx, `SELECT 1 FROM coding_tasks WHERE id=?`, id).Scan(&exists)
+		if errors.Is(queryErr, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if queryErr != nil {
+			return queryErr
+		}
+		return ErrConflict
+	}
+	if err := insertEvent(ctx, tx, id, "task.canceled", map[string]string{"reason": "canceled before execution"}); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

@@ -1,3 +1,5 @@
+> Historical implementation record: this file records the state and validation evidence at the time it was written. Its validation section is not the current branch's verification status. For current project status and documentation navigation, see [the documentation index](docs/README.md) and the current [P2 execution guide](docs/p2-execution.md).
+
 # M17–M22 implementation status
 
 This source tree is based on the previously supplied `agentmesh-m16-final.zip` and adds migration 000018 plus the `internal/airesource` package and HTTP wiring.

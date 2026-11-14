@@ -16,6 +16,7 @@ import (
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/coding"
+	"github.com/thkx/agentmesh/internal/execution/manager"
 	"github.com/thkx/agentmesh/internal/conversation"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
@@ -44,6 +45,7 @@ type Dependencies struct {
 	CredentialManager     appcredential.Manager
 	AgentExecutor         executor.AgentExecutor
 	AgentRuntime          *agentruntime.Runtime
+	ExecutionManager      *manager.Manager
 	WorkflowEngine        *wfruntime.Engine
 	GoalService           *goalservice.Service
 	PlanningService       *planning.Service
@@ -116,6 +118,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	if deps.AgentExecutor != nil {
 		handlers.NewExecutionHandler(deps.AgentExecutor).RegisterRoutes(api)
+	}
+	if deps.ExecutionManager != nil {
+		handlers.NewManagedExecutionHandler(deps.ExecutionManager).RegisterRoutes(api)
 	}
 	if deps.Workspaces != nil {
 		handlers.NewWorkspaceHandler(deps.Workspaces).RegisterRoutes(api)
