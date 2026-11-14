@@ -200,6 +200,13 @@ func(s *Service) EvaluateDecision(ctx context.Context,req DecisionRequest)(Decis
  case "autonomous": requiresApproval=req.Action=="direct_execute"
  default:return DecisionResult{},ErrInvalid
  }
+ if requiresApproval {
+  var existingID,existingStatus string
+  lookupErr:=s.db.QueryRowContext(ctx,"SELECT id,status FROM collaboration_approvals WHERE workspace_id=? AND requester_agent_id=? AND resource_type=? AND resource_id=? AND action=? AND status IN ('pending','approved') AND expires_at>? ORDER BY created_at DESC LIMIT 1",agent.WorkspaceID,agent.ID,req.ResourceType,req.ResourceID,req.Action,s.clock().UTC().UnixMilli()).Scan(&existingID,&existingStatus)
+  if lookupErr==nil {
+   if existingStatus=="approved" { requiresApproval=false } else { return DecisionResult{Outcome:"approval_required",Action:req.Action,ApprovalID:existingID,Explanation:"an approval request is already pending"},nil }
+  } else if !errors.Is(lookupErr,sql.ErrNoRows) { return DecisionResult{},lookupErr }
+ }
  outcome:="allowed";explanation:="decision is permitted by workspace autonomy policy";var approvalID string
  if requiresApproval{
   outcome="approval_required";explanation="workspace autonomy policy requires human approval"
