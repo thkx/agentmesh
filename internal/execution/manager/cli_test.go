@@ -97,3 +97,22 @@ func TestCLIAdapterCancelsQueuedExecutionWithoutLaunchingProcess(t *testing.T) {
 	}
 	if err := adapter.CloseContext(context.Background()); err != nil { t.Fatal(err) }
 }
+
+
+func TestCLIAdapterRejectsMismatchedTaskIdentity(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "execution-cli-mismatch", Kind: dom.KindCLI, Runtime: dom.RuntimeCLI,
+		TaskID: "expected-task", Status: dom.LifecycleQueued,
+		Input: json.RawMessage(`{"id":"different-task","provider":"codex","prompt":"test","workspace_path":"/tmp"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	store.values[entity.ID] = entity
+	adapter, err := NewCLIAdapter(&blockingCLIExecutor{started: make(chan struct{})}, store)
+	if err != nil { t.Fatal(err) }
+	if _, err := adapter.Submit(context.Background(), entity); err != dom.ErrInvalidEntity {
+		t.Fatalf("mismatched task ID error=%v, want ErrInvalidEntity", err)
+	}
+	if err := adapter.CloseContext(context.Background()); err != nil { t.Fatal(err) }
+}

@@ -252,3 +252,20 @@ func TestSubmitIdempotencyKeyReusesExecutionAndRejectsChangedPayload(t *testing.
 	}
 	if adapter.submitCount != 1 { t.Fatalf("conflicting request reached adapter: submissions=%d", adapter.submitCount) }
 }
+
+
+func TestSubmitDerivesCLIIdentityFromInput(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil { t.Fatal(err) }
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
+	if err := m.Register(dom.RuntimeCLI, adapter); err != nil { t.Fatal(err) }
+	input := json.RawMessage(`{"id":"cli-task-derived","prompt":"run","workspace_path":"/tmp"}`)
+	entity, err := m.Submit(context.Background(), SubmitRequest{
+		Kind: dom.KindCLI, Runtime: dom.RuntimeCLI, Input: input,
+	})
+	if err != nil { t.Fatal(err) }
+	if entity.TaskID != "cli-task-derived" {
+		t.Fatalf("task ID=%q, want derived CLI request ID", entity.TaskID)
+	}
+}

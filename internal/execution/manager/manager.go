@@ -66,7 +66,7 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 	if !validKindRuntime(in.Kind, in.Runtime) || len(in.Input) == 0 || !json.Valid(in.Input) || len(in.Input) > 1<<20 || len(in.TaskID) > 128 || len(in.IdempotencyKey) > 256 {
 		return dom.Entity{}, ErrInvalidRequest
 	}
-	if in.TaskID == "" && (in.Runtime == dom.RuntimeAgent || in.Runtime == dom.RuntimeCoding) {
+	if in.TaskID == "" && (in.Runtime == dom.RuntimeAgent || in.Runtime == dom.RuntimeCoding || in.Runtime == dom.RuntimeCLI) {
 		var identity struct {
 			ID string `json:"id"`
 		}

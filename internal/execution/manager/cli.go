@@ -62,6 +62,9 @@ func (a *CLIAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
+	if e.TaskID != "" && request.ID != e.TaskID {
+		return "", dom.ErrInvalidEntity
+	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
