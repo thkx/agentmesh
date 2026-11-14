@@ -66,7 +66,8 @@ func(o *AgentObserver)Finished(ctx context.Context,job scheduler.Job,result agen
 	case scheduler.Queued:target=dom.LifecycleQueued
 	case scheduler.Canceled:target=dom.LifecycleCanceled
 	case scheduler.Interrupted:target=dom.LifecycleInterrupted
-	case scheduler.Failed:target=dom.LifecycleFailed
+	case scheduler.Failed:
+		if errors.Is(runErr,context.DeadlineExceeded){target=dom.LifecycleTimedOut}else{target=dom.LifecycleFailed}
 	default:
 		fresh,loadErr:=o.find(ctx,job.Task.ID);if loadErr==nil{latest=fresh}
 		// The queue may have transitioned to retryable queued after Fail.

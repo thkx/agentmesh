@@ -464,6 +464,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	workflowExecutionAdapter, err := executionmanager.NewWorkflowAdapter(workflowEngine, cfg.Scheduler.MaxAttempts)
 	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize workflow execution adapter: %w", err) }
 	if err := executionManager.Register(execution.RuntimeWorkflow, workflowExecutionAdapter); err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("register workflow execution adapter: %w", err) }
+	if report, reconcileErr := executionManager.Reconcile(ctx, 500); reconcileErr != nil {
+		log.WarnContext(ctx, "execution startup reconciliation failed", "error", reconcileErr)
+	} else if report.Recovered > 0 || report.NeedsAttention > 0 {
+		log.InfoContext(ctx, "execution startup reconciliation completed", "scanned", report.Scanned, "recovered", report.Recovered, "needs_attention", report.NeedsAttention)
+	}
 	planExecutionRepo, err := planworkflow.NewSQLiteRepository(sqliteDB.DB)
 	if err != nil {
 		workerCancel()

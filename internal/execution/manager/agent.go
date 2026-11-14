@@ -62,6 +62,7 @@ func (a *AgentAdapter) Observe(ctx context.Context,e dom.Entity)(Observation,err
 		if marshalErr!=nil{return Observation{},marshalErr}
 		return Observation{Status:dom.LifecycleSucceeded,Attempt:job.Attempts,Result:result},nil
 	case scheduler.Failed:
+		if snapshot,loadErr:=a.runtime.GetSnapshot(ctx,job.Task.ID);loadErr==nil && snapshot.Result.Status==agentdom.StatusTimedOut { return Observation{Status:dom.LifecycleTimedOut,Attempt:job.Attempts,Result:mustJSON(snapshot.Result),Error:job.LastError},nil }
 		return Observation{Status:dom.LifecycleFailed,Attempt:job.Attempts,Error:job.LastError},nil
 	case scheduler.Canceled:
 		return Observation{Status:dom.LifecycleCanceled,Attempt:job.Attempts,Error:job.LastError},nil
@@ -88,3 +89,5 @@ func (a *AgentAdapter) Cancel(ctx context.Context,e dom.Entity)error {
 		return errors.New("unsupported agent scheduler state")
 	}
 }
+
+func mustJSON(v any) []byte { b,_:=json.Marshal(v); return b }
