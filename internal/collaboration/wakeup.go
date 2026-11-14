@@ -2,7 +2,6 @@ package collaboration
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -137,16 +136,21 @@ func(w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, a
 	assignment,err=w.service.ClaimAssignment(ctx,assignmentID,w.owner,w.cfg.AssignmentLease)
 	if err!=nil{
 		var status string
-		if readErr:=w.service.db.QueryRowContext(ctx,"SELECT status FROM task_assignments WHERE id=?",assignmentID).Scan(&status);readErr==nil&&status=="completed"{return nil}
+		if readErr:=w.service.db.QueryRowContext(ctx,"SELECT status FROM task_assignments WHERE id=?",assignmentID).Scan(&status);readErr==nil&&(status=="completed"||status=="rejected"){return nil}
 		return err
 	}
 	var task Task
 	var title,description string
+	var createdAt,updatedAt int64
 	err=w.service.db.QueryRowContext(ctx,"SELECT id,workspace_id,title,description,task_type,status,priority,created_by,delegation_depth,created_at,updated_at FROM collaboration_tasks WHERE id=?",assignment.TaskID).
-		Scan(&task.ID,&task.WorkspaceID,&title,&description,&task.Type,&task.Status,&task.Priority,&task.CreatedBy,&task.DelegationDepth,&task.CreatedAt,&task.UpdatedAt)
+		Scan(&task.ID,&task.WorkspaceID,&title,&description,&task.Type,&task.Status,&task.Priority,&task.CreatedBy,&task.DelegationDepth,&createdAt,&updatedAt)
 	if err!=nil{return err};task.Title=title;task.Description=description
+	task.CreatedAt=time.UnixMilli(createdAt).UTC();task.UpdatedAt=time.UnixMilli(updatedAt).UTC()
 	binding,err:=w.service.GetRuntimeBinding(ctx,assignment.AgentID);if err!=nil{return fmt.Errorf("agent runtime binding: %w",err)}
 	if !binding.Enabled||!binding.Definition.Enabled{return errors.New("agent runtime binding or definition is disabled")}
+	currentDefinition,definitionErr:=w.definitions.Get(ctx,binding.DefinitionID)
+	if definitionErr!=nil{return definitionErr}
+	if !currentDefinition.Enabled{return errors.New("bound agent definition has been disabled")}
 	if _,err=w.workspaces.Resolve(binding.RuntimeWorkspaceID);err!=nil{return fmt.Errorf("resolve bound runtime workspace: %w",err)}
 	session,err:=w.service.EnsureAgentSession(ctx,assignment.AgentID);if err!=nil{return err}
 	taskID:="collab-"+assignment.ID
@@ -191,4 +195,3 @@ func(w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, a
 	}
 }
 
-var _ = sql.ErrNoRows

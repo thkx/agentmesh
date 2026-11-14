@@ -170,9 +170,13 @@ func (s *Service) FailInboxLease(ctx context.Context, agentID, eventID, owner, t
 	if attempts >= maxAttempts {
 		_, err = s.db.ExecContext(ctx, `UPDATE collaboration_inbox
 			SET status='failed', handled_at=?, lease_owner='', lease_token='', lease_expires_at=NULL, last_error=?
-			WHERE agent_id=? AND event_id=? AND status='processing' AND lease_owner=? AND lease_token=?`,
-			now.UnixMilli(), cause, agentID, eventID, owner, token)
-		return time.Time{}, err
+			WHERE agent_id=? AND event_id=? AND status='processing' AND lease_owner=? AND lease_token=? AND lease_expires_at>?`,
+			now.UnixMilli(), cause, agentID, eventID, owner, token, now.UnixMilli())
+		if err != nil { return time.Time{}, err }
+		n, rowsErr := res.RowsAffected()
+		if rowsErr != nil { return time.Time{}, rowsErr }
+		if n != 1 { return time.Time{}, ErrInboxLeaseLost }
+		return time.Time{}, nil
 	}
 	delay := time.Second * time.Duration(1<<min(attempts-1, 8))
 	next := now.Add(delay)
