@@ -113,3 +113,20 @@ bash scripts/verify-p2.sh
 ```
 
 It checks Go formatting, build, vet, and the full race-enabled test suite using the Go version declared in go.mod.
+
+
+## Manual resolution
+
+An execution in `interrupted` or `needs_reconciliation` is never automatically replayed. After inspecting runtime evidence, an operator can record an explicit outcome:
+
+`POST /api/v1/managed-executions/{id}/resolve`
+
+```json
+{
+  "status": "succeeded",
+  "result": {"verified": true, "artifact": "report.md"},
+  "reason": "Verified the persisted artifact and its checks"
+}
+```
+
+Only `succeeded`, `failed`, or `canceled` are valid resolutions. A successful resolution requires a JSON result, and every resolution requires a reason. The original uncertain Attempt remains marked as unknown; the operator decision resolves the Execution, not the historical claim about what the runtime actually completed.

@@ -21,6 +21,7 @@ func(h *ManagedExecutionHandler)RegisterRoutes(r *gin.RouterGroup){
 	g.GET("",h.list)
 	g.GET("/:id",h.get)
 	g.DELETE("/:id",h.cancel)
+	g.POST("/:id/resolve", h.resolve)
 }
 
 func(h *ManagedExecutionHandler)submit(c *gin.Context){
@@ -61,4 +62,29 @@ func(h *ManagedExecutionHandler)cancel(c *gin.Context){
 		c.JSON(status,gin.H{"code":"execution_cancel_failed","message":err.Error()});return
 	}
 	c.Status(http.StatusAccepted)
+}
+
+
+func (h *ManagedExecutionHandler) resolve(c *gin.Context) {
+	var in struct {
+		Status dom.LifecycleStatus `json:"status"`
+		Result json.RawMessage `json:"result"`
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+		return
+	}
+	resolved, err := h.manager.Resolve(c.Request.Context(), c.Param("id"), in.Status, in.Result, in.Reason)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, dom.ErrNotFound) {
+			status = http.StatusNotFound
+		} else if errors.Is(err, dom.ErrInvalidTransition) || errors.Is(err, dom.ErrConflict) {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"code": "execution_resolve_failed", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resolved)
 }

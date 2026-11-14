@@ -269,3 +269,45 @@ func TestSubmitDerivesCLIIdentityFromInput(t *testing.T) {
 		t.Fatalf("task ID=%q, want derived CLI request ID", entity.TaskID)
 	}
 }
+
+
+func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil { t.Fatal(err) }
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "execution-needs-reconcile", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "task-needs-reconcile", Status: dom.LifecycleNeedsReconciliation,
+		Input: json.RawMessage(`{"id":"task-needs-reconcile"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil { t.Fatal(err) }
+	result := json.RawMessage(`{"verified":true,"source":"operator"}`)
+	resolved, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, result, "verified the persisted artifact")
+	if err != nil { t.Fatal(err) }
+	if resolved.Status != dom.LifecycleSucceeded || string(resolved.Result) != string(result) {
+		t.Fatalf("unexpected resolved execution: %+v", resolved)
+	}
+	if resolved.Error != "operator resolution: verified the persisted artifact" {
+		t.Fatalf("resolution reason was not persisted: %q", resolved.Error)
+	}
+}
+
+func TestResolveRejectsUnsafeOrInvalidResolution(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil { t.Fatal(err) }
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "execution-running", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "task-running", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"task-running"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil { t.Fatal(err) }
+	if _, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, json.RawMessage(`{"ok":true}`), "confirmed"); err != dom.ErrInvalidTransition {
+		t.Fatalf("running resolution error=%v, want invalid transition", err)
+	}
+	if _, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, nil, "confirmed"); err != ErrInvalidRequest {
+		t.Fatalf("missing evidence error=%v, want invalid request", err)
+	}
+}

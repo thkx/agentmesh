@@ -218,6 +218,37 @@ func (m *Manager) Cancel(ctx context.Context, id string) error {
 	return adapter.Cancel(ctx, e)
 }
 
+
+// Resolve records an explicit human decision for an execution whose runtime
+// outcome could not be determined safely. It never replays the underlying work.
+func (m *Manager) Resolve(ctx context.Context, id string, status dom.LifecycleStatus, result json.RawMessage, reason string) (dom.Entity, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" || len(reason) > 4000 || len(result) > 4<<20 ||
+		(len(result) > 0 && !json.Valid(result)) ||
+		(status != dom.LifecycleSucceeded && status != dom.LifecycleFailed && status != dom.LifecycleCanceled) ||
+		(status == dom.LifecycleSucceeded && len(result) == 0) {
+		return dom.Entity{}, ErrInvalidRequest
+	}
+	current, err := m.store.Get(ctx, id)
+	if err != nil {
+		return dom.Entity{}, err
+	}
+	if current.Status != dom.LifecycleInterrupted && current.Status != dom.LifecycleNeedsReconciliation {
+		return dom.Entity{}, dom.ErrInvalidTransition
+	}
+	updated, err := m.store.Transition(ctx, id,
+		[]dom.LifecycleStatus{dom.LifecycleInterrupted, dom.LifecycleNeedsReconciliation},
+		status, "operator resolution: "+reason, result)
+	if err != nil {
+		return dom.Entity{}, err
+	}
+	updated.Attempts, err = m.store.ListAttempts(ctx, id)
+	if err != nil {
+		return dom.Entity{}, err
+	}
+	return updated, nil
+}
+
 func (m *Manager) List(ctx context.Context, f dom.ListFilter) ([]dom.Entity, error) {
 	return m.store.List(ctx, f)
 }
