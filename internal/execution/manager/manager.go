@@ -111,3 +111,36 @@ func (m *Manager) List(ctx context.Context,f dom.ListFilter)([]dom.Entity,error)
 func validKindRuntime(kind dom.Kind, runtime dom.Runtime) bool {
  switch kind { case dom.KindAgent: return runtime==dom.RuntimeAgent; case dom.KindCoding: return runtime==dom.RuntimeCoding; case dom.KindWorkflow: return runtime==dom.RuntimeWorkflow; case dom.KindCLI: return runtime==dom.RuntimeCLI; default: return false }
 }
+
+type ReconcileReport struct {
+	Scanned int `json:"scanned"`
+	Recovered int `json:"recovered"`
+	NeedsAttention int `json:"needs_attention"`
+}
+
+// Reconcile repairs the create-before-enqueue crash window for queued executions
+// and observes active executions without replaying uncertain running work.
+func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport,error) {
+	var report ReconcileReport
+	if limit<=0 || limit>1000 {limit=200}
+	items,err:=m.store.List(ctx,dom.ListFilter{Limit:limit})
+	if err!=nil{return report,err}
+	for _,item:=range items {
+		if item.Status!=dom.LifecycleQueued && item.Status!=dom.LifecycleRunning {continue}
+		report.Scanned++
+		adapter,ok:=m.adapters[item.Runtime]
+		if !ok {report.NeedsAttention++;continue}
+		if item.Status==dom.LifecycleQueued {
+			ref,submitErr:=adapter.Submit(ctx,item)
+			if submitErr!=nil {report.NeedsAttention++;continue}
+			if ref!="" && item.RuntimeRef=="" {
+				if _,bindErr:=m.store.BindRuntimeRef(ctx,item.ID,ref);bindErr!=nil {report.NeedsAttention++;continue}
+			}
+		}
+		before:=item.Status
+		after,getErr:=m.Get(ctx,item.ID)
+		if getErr!=nil {report.NeedsAttention++;continue}
+		if after.Status!=before {report.Recovered++}
+	}
+	return report,nil
+}
