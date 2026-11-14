@@ -583,6 +583,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration conversation service: %w", err) }
 	collaborationService, err := collaboration.NewService(sqliteDB.DB, conversationService)
 	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration service: %w", err) }
+	collaborationDispatcher, err := collaboration.NewDispatcher(sqliteDB.DB, time.Second)
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration dispatcher: %w", err) }
+	workerWG.Add(1)
+	go func() { defer workerWG.Done(); if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) { log.Error("collaboration dispatcher stopped", "error", runErr) } }()
 
 	container := &Container{
 		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,

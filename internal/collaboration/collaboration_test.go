@@ -12,7 +12,7 @@ import (
  "github.com/thkx/agentmesh/internal/platform/database"
 )
 
-func testService(t *testing.T)(*collaboration.Service,*database.SQLiteDB){
+func testService(t *testing.T)(*collaboration.Service,*database.SQLite){
  t.Helper();cfg:=config.Defaults().Database;cfg.DSN=filepath.Join(t.TempDir(),"collaboration.db")
  db,err:=database.OpenSQLite(context.Background(),cfg);if err!=nil{t.Fatal(err)}
  if err=database.RunMigrations(db.DB);err!=nil{db.Close();t.Fatal(err)}
@@ -43,5 +43,8 @@ func TestOutboxDispatchIsIdempotent(t *testing.T){
  var pending int
  if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_outbox WHERE published_at IS NULL").Scan(&pending);err!=nil{t.Fatal(err)}
  if pending!=0{t.Fatalf("expected dispatched outbox, got %d pending",pending)}
+ var inbox int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=?",a.ID).Scan(&inbox);err!=nil{t.Fatal(err)}
+ if inbox==0{t.Fatal("expected workspace event to be delivered to agent inbox")}
  _=a;_ = events
 }
