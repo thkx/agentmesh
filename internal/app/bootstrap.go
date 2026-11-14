@@ -352,6 +352,12 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("register agent execution adapter: %w", err)
 	}
+	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService)
+	if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize coding execution adapter: %w", err) }
+	if err := executionManager.Register(execution.RuntimeCoding, codingExecutionAdapter); err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("register coding execution adapter: %w", err) }
+	cliExecutionAdapter, err := executionmanager.NewCLIAdapter(agentExec, executionStore)
+	if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize CLI execution adapter: %w", err) }
+	if err := executionManager.Register(execution.RuntimeCLI, cliExecutionAdapter); err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("register CLI execution adapter: %w", err) }
 	agentExecutionObserver, err := executionmanager.NewAgentObserver(executionStore)
 	if err != nil {
 		_ = sqliteDB.Close()
@@ -455,6 +461,9 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize workflow engine: %w", err)
 	}
+	workflowExecutionAdapter, err := executionmanager.NewWorkflowAdapter(workflowEngine, cfg.Scheduler.MaxAttempts)
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize workflow execution adapter: %w", err) }
+	if err := executionManager.Register(execution.RuntimeWorkflow, workflowExecutionAdapter); err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("register workflow execution adapter: %w", err) }
 	planExecutionRepo, err := planworkflow.NewSQLiteRepository(sqliteDB.DB)
 	if err != nil {
 		workerCancel()
