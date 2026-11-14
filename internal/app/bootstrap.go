@@ -18,6 +18,8 @@ import (
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	agentstate "github.com/thkx/agentmesh/internal/agent/state"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/collaboration"
+	"github.com/thkx/agentmesh/internal/conversation"
 	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/coding"
 	"github.com/thkx/agentmesh/internal/config"
@@ -575,6 +577,13 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	go func() { workerWG.Wait(); close(workerDone) }()
 
+	conversationRepo, err := conversation.NewSQLiteRepository(sqliteDB.DB)
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration conversation repository: %w", err) }
+	conversationService, err := conversation.NewService(conversationRepo)
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration conversation service: %w", err) }
+	collaborationService, err := collaboration.NewService(sqliteDB.DB, conversationService)
+	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration service: %w", err) }
+
 	container := &Container{
 		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
@@ -582,7 +591,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResourceHandler: aiHTTP, APIToken: apiToken,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, APIToken: apiToken,
 	})
 	return container, nil
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/thkx/agentmesh/internal/coding"
 	"github.com/thkx/agentmesh/internal/execution/manager"
 	"github.com/thkx/agentmesh/internal/conversation"
+	"github.com/thkx/agentmesh/internal/collaboration"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
@@ -62,6 +63,7 @@ type Dependencies struct {
 	ToolAudit             audit.Store
 	AIResourceHandler     *airesource.HTTPHandler
 	AgentDefinitions      *agentcatalog.Service
+	Collaboration         *collaboration.Service
 	CodingService         *coding.Service
 	APIToken              string
 }
@@ -152,6 +154,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		workflowHandler := handlers.NewWorkflowHandler(deps.WorkflowEngine)
 		workflowHandler.SetMaxAttempts(deps.WorkflowMaxAttempts)
 		workflowHandler.RegisterRoutes(api)
+	}
+	if deps.Collaboration != nil {
+		handlers.NewCollaborationHandler(deps.Collaboration).RegisterRoutes(api)
 	}
 	if deps.DB != nil {
 		if repo, err := conversation.NewSQLiteRepository(deps.DB); err == nil {
