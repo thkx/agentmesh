@@ -52,7 +52,7 @@ func(a *CodingAdapter)Observe(ctx context.Context,e dom.Entity)(Observation,erro
 	default:return Observation{},fmt.Errorf("unknown coding task status %q",task.Status)
 	}
 	result,_:=json.Marshal(task)
-	return Observation{Status:status,Result:result,Error:task.Error},nil
+	return Observation{Status:status,Attempt:1,Result:result,Error:task.Error},nil
 }
 
 func(a *CodingAdapter)Cancel(ctx context.Context,e dom.Entity)error{

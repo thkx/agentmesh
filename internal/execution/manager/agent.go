@@ -52,21 +52,21 @@ func (a *AgentAdapter) Observe(ctx context.Context,e dom.Entity)(Observation,err
 	if err!=nil{return Observation{},err}
 	switch job.Status {
 	case scheduler.Queued:
-		return Observation{Status:dom.LifecycleQueued,Error:job.LastError},nil
+		return Observation{Status:dom.LifecycleQueued,Attempt:job.Attempts,Error:job.LastError},nil
 	case scheduler.Running:
-		return Observation{Status:dom.LifecycleRunning},nil
+		return Observation{Status:dom.LifecycleRunning,Attempt:job.Attempts},nil
 	case scheduler.Succeeded:
 		snapshot,loadErr:=a.runtime.GetSnapshot(ctx,job.Task.ID)
 		if loadErr!=nil{return Observation{Status:dom.LifecycleNeedsReconciliation,Error:"scheduler reports success but agent state is missing"},nil}
 		result,marshalErr:=json.Marshal(snapshot.Result)
 		if marshalErr!=nil{return Observation{},marshalErr}
-		return Observation{Status:dom.LifecycleSucceeded,Result:result},nil
+		return Observation{Status:dom.LifecycleSucceeded,Attempt:job.Attempts,Result:result},nil
 	case scheduler.Failed:
-		return Observation{Status:dom.LifecycleFailed,Error:job.LastError},nil
+		return Observation{Status:dom.LifecycleFailed,Attempt:job.Attempts,Error:job.LastError},nil
 	case scheduler.Canceled:
-		return Observation{Status:dom.LifecycleCanceled,Error:job.LastError},nil
+		return Observation{Status:dom.LifecycleCanceled,Attempt:job.Attempts,Error:job.LastError},nil
 	case scheduler.Interrupted:
-		return Observation{Status:dom.LifecycleInterrupted,Error:job.LastError},nil
+		return Observation{Status:dom.LifecycleInterrupted,Attempt:job.Attempts,Error:job.LastError},nil
 	default:
 		return Observation{},fmt.Errorf("unknown agent scheduler status %q",job.Status)
 	}

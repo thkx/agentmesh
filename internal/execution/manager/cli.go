@@ -33,12 +33,12 @@ func(a *CLIAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
 	if err:=request.Validate();err!=nil{return "",err}
 	now:=time.Now().UTC()
 	attemptID:=e.ID+"-a-1"
+	if _,err:=a.store.Transition(ctx,e.ID,[]dom.LifecycleStatus{dom.LifecycleQueued},dom.LifecycleRunning,"",nil);err!=nil{return "",err}
 	attempt:=dom.Attempt{ID:attemptID,ExecutionID:e.ID,Number:1,Runtime:dom.RuntimeCLI,RuntimeRef:request.ID,Status:dom.AttemptRunning,Input:e.Input,StartedAt:now}
 	if _,err:=a.store.CreateAttempt(ctx,attempt);err!=nil{return "",err}
-	if _,err:=a.store.Transition(ctx,e.ID,[]dom.LifecycleStatus{dom.LifecycleQueued},dom.LifecycleRunning,"",nil);err!=nil{return "",err}
 	runCtx,cancel:=context.WithCancel(context.Background())
 	if request.Timeout>0{runCtx,cancel=context.WithTimeout(context.Background(),request.Timeout)}
-	a.mu.Lock();a.cancels[request.ID]=cancel;a.results[request.ID]=Observation{Status:dom.LifecycleRunning};a.mu.Unlock()
+	a.mu.Lock();a.cancels[request.ID]=cancel;a.results[request.ID]=Observation{Status:dom.LifecycleRunning,Attempt:1};a.mu.Unlock()
 	go func(){
 		result,runErr:=a.executor.Execute(runCtx,request)
 		cancel()
@@ -58,7 +58,7 @@ func(a *CLIAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
 		if runErr!=nil{message=runErr.Error();if errors.Is(runErr,context.Canceled){target=dom.LifecycleCanceled;attemptStatus=dom.AttemptCanceled};if errors.Is(runErr,context.DeadlineExceeded){target=dom.LifecycleTimedOut;attemptStatus=dom.AttemptTimedOut}}
 		_,_=a.store.FinishAttempt(context.Background(),attemptID,attemptStatus,request.ID,raw,message)
 		_,_=a.store.Transition(context.Background(),e.ID,[]dom.LifecycleStatus{dom.LifecycleRunning},target,message,raw)
-		a.mu.Lock();delete(a.cancels,request.ID);a.results[request.ID]=Observation{Status:target,Result:raw,Error:message};a.mu.Unlock()
+		a.mu.Lock();delete(a.cancels,request.ID);a.results[request.ID]=Observation{Status:target,Attempt:1,Result:raw,Error:message};a.mu.Unlock()
 	}()
 	return request.ID,nil
 }

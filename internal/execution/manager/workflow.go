@@ -48,7 +48,7 @@ func(a *WorkflowAdapter)Observe(ctx context.Context,e dom.Entity)(Observation,er
 	default:return Observation{},fmt.Errorf("unknown workflow run status %q",run.Status)
 	}
 	result,_:=json.Marshal(run)
-	return Observation{Status:status,Result:result,Error:run.Error},nil
+	return Observation{Status:status,Attempt:1,Result:result,Error:run.Error},nil
 }
 
 func(a *WorkflowAdapter)Cancel(context.Context,dom.Entity)error{
