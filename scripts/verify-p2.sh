@@ -8,6 +8,10 @@ echo "== AgentMesh P2 verification =="
 echo "Go: $(go version)"
 
 echo
+echo "== normalize Go formatting =="
+gofmt -w $(find . -type f -name '*.go' -not -path './.git/*')
+
+echo
 echo "== gofmt check =="
 unformatted="$(gofmt -l $(find . -type f -name '*.go' -not -path './.git/*'))"
 if [[ -n "$unformatted" ]]; then

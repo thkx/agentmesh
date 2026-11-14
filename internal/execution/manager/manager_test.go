@@ -116,11 +116,13 @@ func (s *memoryStore) FinishAttempt(_ context.Context, id string, status dom.Att
 
 type fakeAdapter struct {
 	submitted   bool
+	submitCount int
 	observation Observation
 }
 
 func (a *fakeAdapter) Submit(context.Context, dom.Entity) (string, error) {
 	a.submitted = true
+	a.submitCount++
 	return "runtime-1", nil
 }
 
@@ -223,4 +225,30 @@ func TestReconcileScansAllPages(t *testing.T) {
 	if report.Recovered != 5 {
 		t.Fatalf("recovered=%d, want 5; report=%+v", report.Recovered, report)
 	}
+}
+
+
+func TestSubmitIdempotencyKeyReusesExecutionAndRejectsChangedPayload(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil { t.Fatal(err) }
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil { t.Fatal(err) }
+	input := json.RawMessage(`{"id":"task-1","prompt":"same"}`)
+	request := SubmitRequest{
+		Kind: dom.KindAgent, Runtime: dom.RuntimeAgent, TaskID: "task-1",
+		Input: input, IdempotencyKey: "request-key-1",
+	}
+	first, err := m.Submit(context.Background(), request)
+	if err != nil { t.Fatal(err) }
+	second, err := m.Submit(context.Background(), request)
+	if err != nil { t.Fatal(err) }
+	if first.ID != second.ID { t.Fatalf("idempotent submit returned different IDs: %s != %s", first.ID, second.ID) }
+	if adapter.submitCount != 1 { t.Fatalf("adapter submissions=%d, want 1", adapter.submitCount) }
+
+	request.Input = json.RawMessage(`{"id":"task-1","prompt":"changed"}`)
+	if _, err := m.Submit(context.Background(), request); err != dom.ErrConflict {
+		t.Fatalf("changed payload error=%v, want ErrConflict", err)
+	}
+	if adapter.submitCount != 1 { t.Fatalf("conflicting request reached adapter: submissions=%d", adapter.submitCount) }
 }
