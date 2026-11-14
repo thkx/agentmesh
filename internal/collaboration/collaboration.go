@@ -19,6 +19,7 @@ var (
  ErrNotFound = errors.New("collaboration resource not found")
  ErrConflict = errors.New("collaboration state conflict")
  ErrLeaseLost = errors.New("assignment lease lost")
+ ErrApprovalRequired = errors.New("human approval required")
 )
 
 type Workspace struct { ID string `json:"id,omitempty"`; Name string `json:"name,omitempty"`; Slug string `json:"slug,omitempty"`; Description string `json:"description,omitempty"`; AutonomyMode string `json:"autonomy_mode,omitempty"`; MaxAgentConcurrency int `json:"max_agent_concurrency,omitempty"`; MaxDelegationDepth int `json:"max_delegation_depth,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
@@ -28,9 +29,13 @@ type Thread struct { ID string `json:"id,omitempty"`; ChannelID string `json:"ch
 type Task struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; ParentTaskID string `json:"parent_task_id,omitempty"`; Title string `json:"title,omitempty"`; Description string `json:"description,omitempty"`; Type string `json:"type,omitempty"`; Status string `json:"status,omitempty"`; Priority int `json:"priority,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; IdempotencyKey string `json:"idempotency_key,omitempty"`; DelegationDepth int `json:"delegation_depth,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
 type Assignment struct { ID string `json:"id,omitempty"`; TaskID string `json:"task_id,omitempty"`; AgentID string `json:"agent_id,omitempty"`; Status string `json:"status,omitempty"`; AssignedBy string `json:"assigned_by,omitempty"`; LeaseOwner string `json:"lease_owner,omitempty"`; LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`; ClaimVersion int64 `json:"claim_version,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
 
-type Handoff struct { Goal string `json:"goal"`; Completed []string `json:"completed"`; Remaining []string `json:"remaining"`; Artifacts []string `json:"artifacts"`; Constraints []string `json:"constraints"`; AcceptanceCriteria []string `json:"acceptance_criteria"`; Reason string `json:"reason"`; Recipient string `json:"recipient"`; IdempotencyKey string `json:"idempotency_key"` }
+type Handoff struct { RequesterAgentID string `json:"requester_agent_id"`; Goal string `json:"goal"`; Completed []string `json:"completed"`; Remaining []string `json:"remaining"`; Artifacts []string `json:"artifacts"`; Constraints []string `json:"constraints"`; AcceptanceCriteria []string `json:"acceptance_criteria"`; Reason string `json:"reason"`; Recipient string `json:"recipient"`; IdempotencyKey string `json:"idempotency_key"` }
 
 type Event struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; AggregateType string `json:"aggregate_type,omitempty"`; AggregateID string `json:"aggregate_id,omitempty"`; Type string `json:"type,omitempty"`; Payload json.RawMessage `json:"payload,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
+
+
+type ApprovalRequiredError struct { ApprovalID string }
+func(e *ApprovalRequiredError) Error() string { return ErrApprovalRequired.Error() }
 
 type Service struct { db *sql.DB; conversations *conversation.Service; clock func()time.Time }
 func NewService(db *sql.DB, cs *conversation.Service)(*Service,error){if db==nil||cs==nil{return nil,errors.New("collaboration dependencies required")};return &Service{db:db,conversations:cs,clock:time.Now},nil}
@@ -161,8 +166,12 @@ func(s *Service) AckInbox(ctx context.Context,agentID,eventID,status string)erro
 
 func(s *Service) HandoffTask(ctx context.Context,parentID string,h Handoff,createdBy string)(Task,Assignment,error){
  parent,err:=s.GetTask(ctx,parentID);if err!=nil{return Task{},Assignment{},err}
- if strings.TrimSpace(h.Goal)==""||strings.TrimSpace(h.Recipient)==""||len(h.Goal)>240{return Task{},Assignment{},ErrInvalid}
- recipient,err:=s.GetAgent(ctx,h.Recipient);if err!=nil{return Task{},Assignment{},err};if recipient.WorkspaceID!=parent.WorkspaceID{return Task{},Assignment{},ErrInvalid}
+ if strings.TrimSpace(h.Goal)==""||strings.TrimSpace(h.Recipient)==""||strings.TrimSpace(h.RequesterAgentID)==""||len(h.Goal)>240{return Task{},Assignment{},ErrInvalid}
+ requester,err:=s.GetAgent(ctx,h.RequesterAgentID);if err!=nil{return Task{},Assignment{},err}
+ recipient,err:=s.GetAgent(ctx,h.Recipient);if err!=nil{return Task{},Assignment{},err}
+ if requester.WorkspaceID!=parent.WorkspaceID||recipient.WorkspaceID!=parent.WorkspaceID{return Task{},Assignment{},ErrInvalid}
+ decision,err:=s.EvaluateDecision(ctx,DecisionRequest{AgentID:requester.ID,Action:"delegate",ResourceType:"task",ResourceID:parent.ID,Reason:h.Reason})
+ if err!=nil{return Task{},Assignment{},err};if decision.Outcome!="allowed"{return Task{},Assignment{},&ApprovalRequiredError{ApprovalID:decision.ApprovalID}}
  payload,err:=json.Marshal(h);if err!=nil{return Task{},Assignment{},err}
  key:=h.IdempotencyKey;if key!=""{key="handoff:"+parent.ID+":"+recipient.ID+":"+key}
  child,err:=s.CreateTask(ctx,Task{WorkspaceID:parent.WorkspaceID,ParentTaskID:parent.ID,Title:h.Goal,Description:string(payload),Type:parent.Type,Priority:parent.Priority,CreatedBy:createdBy,IdempotencyKey:key});if err!=nil{return Task{},Assignment{},err}
