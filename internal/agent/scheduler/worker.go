@@ -103,13 +103,15 @@ func (w *Worker) runOne(ctx context.Context) error {
 	if runErr != nil {
 		finishErr := w.store.Fail(finishCtx, job.ID, w.cfg.ID, runErr)
 		if w.cfg.Observer != nil {
-			if observerErr := w.cfg.Observer.Finished(finishCtx, job, result, runErr); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) }
+			finalJob, getErr := w.store.Get(finishCtx, job.ID)
+			if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, runErr); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
 		}
 		return finishErr
 	}
 	finishErr := w.store.Complete(finishCtx, job.ID, w.cfg.ID)
 	if w.cfg.Observer != nil {
-		if observerErr := w.cfg.Observer.Finished(finishCtx, job, result, nil); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) }
+		finalJob, getErr := w.store.Get(finishCtx, job.ID)
+		if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, nil); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
 	}
 	return finishErr
 }

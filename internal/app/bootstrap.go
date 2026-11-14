@@ -352,6 +352,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("register agent execution adapter: %w", err)
 	}
+	agentExecutionObserver, err := executionmanager.NewAgentObserver(executionStore)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize agent execution observer: %w", err)
+	}
 	toolLedger, err := scheduler.NewToolLedger(sqliteDB.DB)
 	if err != nil {
 		_ = sqliteDB.Close()
@@ -381,7 +386,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		if workerID != "" {
 			workerID = fmt.Sprintf("%s-%d", workerID, i+1)
 		}
-		worker, workerErr := scheduler.NewWorker(schedulerStore, agentRuntime, scheduler.WorkerConfig{Logger: log, ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration})
+		worker, workerErr := scheduler.NewWorker(schedulerStore, agentRuntime, scheduler.WorkerConfig{Logger: log, ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration, Observer: agentExecutionObserver})
 		if workerErr != nil {
 			workerCancel()
 			workerWG.Wait()

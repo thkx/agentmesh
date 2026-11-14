@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
@@ -80,4 +79,3 @@ func(o *AgentObserver)Finished(ctx context.Context,job scheduler.Job,result agen
 }
 
 var _ scheduler.Observer = (*AgentObserver)(nil)
-var _ = uuid.NewString
