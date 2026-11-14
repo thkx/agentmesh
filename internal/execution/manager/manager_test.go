@@ -171,7 +171,7 @@ func TestGetQueuedDoesNotCreateRunningAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &fakeAdapter{observation: Observation{Status: dom.LifecycleRunning}}
+	a := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
 	if err = m.Register(dom.RuntimeAgent, a); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestReconcileScansAllPages(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
 	if err != nil { t.Fatal(err) }
-	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleRunning}}
 	if err := m.Register(dom.RuntimeAgent, adapter); err != nil { t.Fatal(err) }
 	now := time.Now().UTC()
 	for _, id := range []string{"exec-a", "exec-b", "exec-c", "exec-d", "exec-e"} {
