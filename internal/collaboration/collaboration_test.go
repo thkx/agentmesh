@@ -2,6 +2,7 @@ package collaboration_test
 
 import (
  "context"
+ "errors"
  "path/filepath"
  "testing"
  "time"
@@ -53,14 +54,14 @@ func TestOutboxDispatchIsIdempotent(t *testing.T){
 
 func TestTaskIdempotencyAndHandoffDepth(t *testing.T){
  ctx:=context.Background();s,db:=testService(t);defer db.Close()
- w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Build",Slug:"build",MaxDelegationDepth:2});if err!=nil{t.Fatal(err)}
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Build",Slug:"build",MaxDelegationDepth:2,AutonomyMode:"autonomous"});if err!=nil{t.Fatal(err)}
  a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Implementer",Role:"worker"});if err!=nil{t.Fatal(err)}
  original,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Implement feature",IdempotencyKey:"request-1"});if err!=nil{t.Fatal(err)}
  replay,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Different retry title",IdempotencyKey:"request-1"});if err!=nil{t.Fatal(err)}
  if original.ID!=replay.ID{t.Fatal("idempotency key must return the original task")}
- child,assignment,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{Goal:"Write tests",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
+ child,assignment,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{RequesterAgentID:a.ID,Goal:"Write tests",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
  if child.ParentTaskID!=original.ID||assignment.AgentID!=a.ID{t.Fatalf("invalid handoff result: %+v %+v",child,assignment)}
- childAgain,assignmentAgain,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{Goal:"Retry title",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
+ childAgain,assignmentAgain,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{RequesterAgentID:a.ID,Goal:"Retry title",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
  if childAgain.ID!=child.ID||assignmentAgain.ID!=assignment.ID{t.Fatal("handoff retry must be idempotent")}
 }
 
@@ -89,4 +90,20 @@ func TestDecisionGateRequiresApprovalForPrivilegedActions(t *testing.T){
  if resolved.Status!="approved"{t.Fatalf("expected approved, got %s",resolved.Status)}
  allowed,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"claim"});if err!=nil{t.Fatal(err)}
  if allowed.Outcome!="allowed"{t.Fatalf("claim should be allowed in hybrid mode: %+v",allowed)}
+}
+
+func TestHandoffRequiresHumanApprovalInHybridMode(t *testing.T){
+ ctx:=context.Background();s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Hybrid",Slug:"hybrid",AutonomyMode:"hybrid"});if err!=nil{t.Fatal(err)}
+ planner,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Planner",Role:"planner"});if err!=nil{t.Fatal(err)}
+ worker,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Worker",Role:"worker"});if err!=nil{t.Fatal(err)}
+ parent,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Research",Type:"research"});if err!=nil{t.Fatal(err)}
+ handoff:=collaboration.Handoff{RequesterAgentID:planner.ID,Goal:"Collect sources",Recipient:worker.ID,IdempotencyKey:"approval-handoff"}
+ _,_,err=s.HandoffTask(ctx,parent.ID,handoff,planner.ID)
+ var approvalErr *collaboration.ApprovalRequiredError
+ if !errors.As(err,&approvalErr){t.Fatalf("expected approval required, got %v",err)}
+ if _,_,err=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);!errors.As(err,&approvalErr){t.Fatalf("expected same pending approval on retry, got %v",err)}
+ if _,err=s.ResolveApproval(ctx,approvalErr.ApprovalID,"human","approved","safe delegation");err!=nil{t.Fatal(err)}
+ child,assignment,err:=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);if err!=nil{t.Fatal(err)}
+ if child.ParentTaskID!=parent.ID||assignment.AgentID!=worker.ID{t.Fatalf("handoff did not complete after approval: %+v %+v",child,assignment)}
 }
