@@ -29,8 +29,16 @@ func(a *WorkflowAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
 	if err:=json.Unmarshal(e.Input,&request);err!=nil{return "",fmt.Errorf("decode workflow execution input: %w",err)}
 	if request.WorkflowID==""{return "",dom.ErrInvalidEntity}
 	runID:=e.TaskID;if runID==""{runID=e.ID}
-	run,err:=a.engine.GetRun(ctx,runID)
-	if err==nil{return run.ID,nil}
+	run, err := a.engine.GetRun(ctx, runID)
+	if err == nil {
+		if run.WorkflowID != request.WorkflowID {
+			return "", dom.ErrConflict
+		}
+		return run.ID, nil
+	}
+	if !errors.Is(err, wf.ErrNotFound) {
+		return "", fmt.Errorf("lookup workflow run before submit: %w", err)
+	}
 	run,err=a.engine.StartQueued(ctx,request.WorkflowID,runID,request.Input,a.maxAttempts)
 	if err!=nil{return "",err}
 	return run.ID,nil
