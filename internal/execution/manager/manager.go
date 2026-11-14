@@ -235,48 +235,69 @@ type ReconcileReport struct {
 // It never resubmits a running execution whose outcome may be ambiguous.
 func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, error) {
 	var report ReconcileReport
-	if limit <= 0 || limit > 1000 {
-		limit = 200
-	}
-	queued, err := m.store.List(ctx, dom.ListFilter{Status: dom.LifecycleQueued, Limit: limit})
-	if err != nil {
-		return report, err
-	}
-	running, err := m.store.List(ctx, dom.ListFilter{Status: dom.LifecycleRunning, Limit: limit})
-	if err != nil {
-		return report, err
-	}
-	items := append(queued, running...)
-	for _, item := range items {
-		report.Scanned++
-		adapter, ok := m.adapters[item.Runtime]
-		if !ok {
-			report.NeedsAttention++
-			continue
-		}
-		if item.Status == dom.LifecycleQueued {
-			ref, submitErr := adapter.Submit(ctx, item)
-			if submitErr != nil {
-				report.NeedsAttention++
-				continue
-			}
-			if ref != "" && item.RuntimeRef == "" {
-				if _, bindErr := m.store.BindRuntimeRef(ctx, item.ID, ref); bindErr != nil {
+	if limit <= 0 || limit > 1000 { limit = 200 }
+
+	// Scan each status independently with bounded pages. Reconciliation is
+	// deliberately repeatable: a later tick catches rows shifted by concurrent
+	// state transitions without replaying ambiguous running executions.
+	for _, status := range []dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning} {
+		offset := 0
+		for {
+			if err := ctx.Err(); err != nil { return report, err }
+			page, err := m.store.List(ctx, dom.ListFilter{Status: status, Limit: limit, Offset: offset})
+			if err != nil { return report, err }
+			if len(page) == 0 { break }
+			for _, item := range page {
+				report.Scanned++
+				adapter, ok := m.adapters[item.Runtime]
+				if !ok {
 					report.NeedsAttention++
 					continue
 				}
+				if item.Status == dom.LifecycleQueued {
+					ref, submitErr := adapter.Submit(ctx, item)
+					if submitErr != nil {
+						report.NeedsAttention++
+						continue
+					}
+					if ref != "" && item.RuntimeRef == "" {
+						if _, bindErr := m.store.BindRuntimeRef(ctx, item.ID, ref); bindErr != nil {
+							report.NeedsAttention++
+							continue
+						}
+					}
+				}
+				updated, getErr := m.Get(ctx, item.ID)
+				if getErr != nil {
+					report.NeedsAttention++
+					continue
+				}
+				if updated.Status != item.Status { report.Recovered++ }
 			}
-		}
-		updated, getErr := m.Get(ctx, item.ID)
-		if getErr != nil {
-			report.NeedsAttention++
-			continue
-		}
-		if updated.Status != item.Status {
-			report.Recovered++
+			if len(page) < limit { break }
+			offset += len(page)
 		}
 	}
 	return report, nil
+}
+
+// RunReconciler periodically repairs transient submit/observation failures.
+// It never replays a running execution; ambiguous outcomes remain visible for
+// manual reconciliation according to the adapter's observation contract.
+func (m *Manager) RunReconciler(ctx context.Context, interval time.Duration, limit int, onError func(error)) {
+	if interval <= 0 { interval = 15 * time.Second }
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := m.Reconcile(ctx, limit); err != nil && onError != nil && !errors.Is(err, context.Canceled) {
+				onError(err)
+			}
+		}
+	}
 }
 
 func validKindRuntime(kind dom.Kind, runtime dom.Runtime) bool {

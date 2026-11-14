@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"testing"
 	"time"
 
@@ -50,12 +51,22 @@ func (s *memoryStore) ListAttempts(_ context.Context, executionID string) ([]dom
 	return out, nil
 }
 
-func (s *memoryStore) List(_ context.Context, _ dom.ListFilter) ([]dom.Entity, error) {
+func (s *memoryStore) List(_ context.Context, f dom.ListFilter) ([]dom.Entity, error) {
 	out := make([]dom.Entity, 0, len(s.values))
 	for _, e := range s.values {
+		if f.Status != "" && e.Status != f.Status { continue }
+		if f.Kind != "" && e.Kind != f.Kind { continue }
+		if f.Runtime != "" && e.Runtime != f.Runtime { continue }
+		if f.TaskID != "" && e.TaskID != f.TaskID { continue }
 		out = append(out, e)
 	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	start := f.Offset
+	if start < 0 { start = 0 }
+	if start >= len(out) { return []dom.Entity{}, nil }
+	end := len(out)
+	if f.Limit > 0 && start+f.Limit < end { end = start+f.Limit }
+	return out[start:end], nil
 }
 
 func (s *memoryStore) BindRuntimeRef(_ context.Context, id, ref string) (dom.Entity, error) {
@@ -185,5 +196,28 @@ func TestGetQueuedDoesNotCreateRunningAttempt(t *testing.T) {
 	}
 	if len(store.attempts) != 0 {
 		t.Fatalf("queued execution created %d attempts", len(store.attempts))
+	}
+}
+
+
+func TestReconcileScansAllPages(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil { t.Fatal(err) }
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil { t.Fatal(err) }
+	now := time.Now().UTC()
+	for _, id := range []string{"exec-a", "exec-b", "exec-c", "exec-d", "exec-e"} {
+		_, err := store.Create(context.Background(), dom.Entity{
+			ID: id, Kind: dom.KindAgent, Runtime: dom.RuntimeAgent, TaskID: id,
+			Status: dom.LifecycleQueued, Input: json.RawMessage(`{"id":"task"}`),
+			CreatedAt: now, UpdatedAt: now,
+		})
+		if err != nil { t.Fatal(err) }
+	}
+	report, err := m.Reconcile(context.Background(), 2)
+	if err != nil { t.Fatal(err) }
+	if report.Scanned != 5 {
+		t.Fatalf("scanned=%d, want 5; report=%+v", report.Scanned, report)
 	}
 }

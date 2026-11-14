@@ -49,6 +49,7 @@ type Container struct {
 	AgentExecutor         executor.AgentExecutor
 	AgentRuntime          *agentruntime.Runtime
 	ExecutionManager      *manager.Manager
+	CLIExecutionAdapter   *manager.CLIAdapter
 	AgentDefinitions      *agentcatalog.Service
 	WorkflowEngine        *wfruntime.Engine
 	GoalService           *goalservice.Service
@@ -82,6 +83,11 @@ func (c *Container) Close() error {
 	// Stop all producers first; then wait for their in-flight work before DB close.
 	if c.workerCancel != nil {
 		c.workerCancel()
+	}
+	if c.CLIExecutionAdapter != nil {
+		if err := c.CLIExecutionAdapter.CloseContext(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown CLI execution adapter: %w", err))
+		}
 	}
 	if c.CodingService != nil {
 		if err := c.CodingService.CloseContext(shutdownCtx); err != nil {
