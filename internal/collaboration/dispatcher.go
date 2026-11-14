@@ -11,7 +11,7 @@ import (
 // Dispatcher fans persisted domain events into per-Agent inboxes. It never calls an LLM.
 type Dispatcher struct { db *sql.DB; interval time.Duration }
 func NewDispatcher(db *sql.DB, interval time.Duration)(*Dispatcher,error){if db==nil{return nil,errors.New("collaboration dispatcher database is nil")};if interval<=0{interval=time.Second};return &Dispatcher{db:db,interval:interval},nil}
-func(d *Dispatcher) Run(ctx context.Context)error{ticker:=time.NewTicker(d.interval);defer ticker.Stop();for{if err:=d.DispatchOnce(ctx,100);err!=nil&&ctx.Err()==nil{return err};select{case<-ctx.Done():return ctx.Err();case<-ticker.C:}}}
+func(d *Dispatcher) Run(ctx context.Context)error{ticker:=time.NewTicker(d.interval);defer ticker.Stop();for{_ = d.DispatchOnce(ctx,100);select{case<-ctx.Done():return ctx.Err();case<-ticker.C:}}}
 func(d *Dispatcher) DispatchOnce(ctx context.Context,limit int)error{
  if limit<1||limit>500{limit=100}
  rows,err:=d.db.QueryContext(ctx,"SELECT id FROM collaboration_outbox WHERE published_at IS NULL ORDER BY created_at,id LIMIT ?",limit);if err!=nil{return err}

@@ -63,3 +63,16 @@ func TestTaskIdempotencyAndHandoffDepth(t *testing.T){
  childAgain,assignmentAgain,err:=s.HandoffTask(ctx,original.ID,collaboration.Handoff{Goal:"Retry title",Recipient:a.ID,IdempotencyKey:"handoff-1"},"planner");if err!=nil{t.Fatal(err)}
  if childAgain.ID!=child.ID||assignmentAgain.ID!=assignment.ID{t.Fatal("handoff retry must be idempotent")}
 }
+
+func TestInboxReceiptIsIdempotentPerAgent(t *testing.T){
+ ctx:=context.Background();s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Inbox",Slug:"inbox"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Inbox Agent",Role:"worker"});if err!=nil{t.Fatal(err)}
+ event:=collaboration.Event{ID:"event-1",Type:"test.event",Payload:[]byte("{\"ok\":true}")}
+ first,err:=s.ReceiveEvent(ctx,a.ID,event);if err!=nil{t.Fatal(err)}
+ second,err:=s.ReceiveEvent(ctx,a.ID,event);if err!=nil{t.Fatal(err)}
+ if !first||second{t.Fatalf("expected first delivery only, got %v then %v",first,second)}
+ items,err:=s.ListInbox(ctx,a.ID,"pending",20);if err!=nil{t.Fatal(err)}
+ if len(items)!=1{t.Fatalf("expected one pending inbox event, got %d",len(items))}
+ if err=s.AckInbox(ctx,a.ID,event.ID,"handled");err!=nil{t.Fatal(err)}
+}
