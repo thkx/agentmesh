@@ -25,7 +25,7 @@ func (s *SQLiteStore) Create(ctx context.Context,e dom.Entity)(dom.Entity,error)
 	if err:=e.Validate(); err!=nil { return dom.Entity{},err }
 	now:=time.Now().UTC()
 	if e.CreatedAt.IsZero(){e.CreatedAt=now}; if e.UpdatedAt.IsZero(){e.UpdatedAt=now}
-	_,err:=s.db.ExecContext(ctx,`INSERT INTO executions(`+entityColumns+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_,err:=s.db.ExecContext(ctx,`INSERT INTO executions(id,kind,runtime,runtime_ref,task_id,status,input_json,result_json,error_text,idempotency_key,created_at,updated_at,started_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		e.ID,e.Kind,e.Runtime,nullString(e.RuntimeRef),nullString(e.TaskID),e.Status,nullableJSON(e.Input),nullableJSON(e.Result),e.Error,nullString(e.IdempotencyKey),e.CreatedAt.UnixNano(),e.UpdatedAt.UnixNano(),nullableTime(e.StartedAt),nullableTime(e.FinishedAt))
 	if err!=nil {
 		if e.IdempotencyKey!="" {
