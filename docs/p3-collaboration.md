@@ -28,3 +28,5 @@ Outbox dispatch is transactional: inbox fan-out and marking the outbox event pub
 ## Autonomy governance
 
 The Decision Gate applies the Workspace autonomy mode before any privileged action. Directed mode requires approval for claim/delegate/execute actions; Hybrid requires approval for delegation and execution; Autonomous permits delegation and workflow execution but still requires approval for direct execution. Every evaluation is persisted in decision audit. Approval decisions are durable, expire after 24 hours, and emit Outbox events. Approval resolution does not itself execute the approved action; a later execution consumer must consume the approval event and re-check the current policy.
+
+Agent-initiated handoff requires a requester identity and passes through the workspace Decision Gate. Directed and Hybrid modes create/reuse a pending human approval; the handoff is only materialized after that approval is granted. Autonomous mode permits delegation within the workspace's configured depth limit. A rejected or expired approval does not create a child task.
