@@ -97,6 +97,29 @@ func (s *SQLiteStore) GetAttempt(ctx context.Context,id string)(dom.Attempt,erro
 	if ref.Valid{a.RuntimeRef=ref.String};if input.Valid{a.Input=json.RawMessage(input.String)};if result.Valid{a.Result=json.RawMessage(result.String)};if finished.Valid{v:=time.Unix(0,finished.Int64).UTC();a.FinishedAt=&v};return a,nil
 }
 
+func (s *SQLiteStore) GetAttemptByNumber(ctx context.Context, executionID string, number int) (dom.Attempt,error) {
+	var id string
+	err:=s.db.QueryRowContext(ctx,`SELECT id FROM execution_attempts WHERE execution_id=? AND attempt_number=?`,executionID,number).Scan(&id)
+	if errors.Is(err,sql.ErrNoRows){return dom.Attempt{},dom.ErrNotFound}
+	if err!=nil{return dom.Attempt{},err}
+	return s.GetAttempt(ctx,id)
+}
+
+func (s *SQLiteStore) ListAttempts(ctx context.Context, executionID string) ([]dom.Attempt,error) {
+	rows,err:=s.db.QueryContext(ctx,`SELECT id FROM execution_attempts WHERE execution_id=? ORDER BY attempt_number`,executionID)
+	if err!=nil{return nil,err}
+	defer rows.Close()
+	out:=make([]dom.Attempt,0)
+	for rows.Next(){
+		var id string
+		if err=rows.Scan(&id);err!=nil{return nil,err}
+		item,loadErr:=s.GetAttempt(ctx,id)
+		if loadErr!=nil{return nil,loadErr}
+		out=append(out,item)
+	}
+	return out,rows.Err()
+}
+
 func (s *SQLiteStore) FinishAttempt(ctx context.Context,id string,status dom.AttemptStatus,ref string,result []byte,message string)(dom.Attempt,error) {
 	switch status {case dom.AttemptSucceeded,dom.AttemptFailed,dom.AttemptCanceled,dom.AttemptTimedOut,dom.AttemptUnknown:default:return dom.Attempt{},dom.ErrInvalidAttempt}
 	if len(result)>4<<20 || (len(result)>0&&!json.Valid(result)) || len(message)>4096 || len(ref)>256{return dom.Attempt{},dom.ErrInvalidAttempt}

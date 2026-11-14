@@ -64,6 +64,7 @@ type Entity struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	StartedAt *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Attempts []Attempt `json:"attempts,omitempty"`
 }
 
 type Attempt struct {
@@ -119,7 +120,7 @@ func CanTransition(from, to LifecycleStatus) bool {
 	if from==to { return true }
 	switch from {
 	case LifecycleQueued:
-		return to==LifecycleRunning || to==LifecycleCanceled || to==LifecycleFailed || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
+		return to==LifecycleRunning || to==LifecycleSucceeded || to==LifecycleCanceled || to==LifecycleFailed || to==LifecycleTimedOut || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
 	case LifecycleRunning:
 		return to==LifecycleQueued || to==LifecycleSucceeded || to==LifecycleFailed || to==LifecycleCanceled || to==LifecycleTimedOut || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
 	case LifecycleInterrupted, LifecycleNeedsReconciliation:

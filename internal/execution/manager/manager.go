@@ -89,9 +89,12 @@ func (m *Manager) Get(ctx context.Context,id string)(dom.Entity,error) {
 	e,err:=m.store.Get(ctx,id);if err!=nil{return dom.Entity{},err}
 	adapter,ok:=m.adapters[e.Runtime];if !ok{return e,nil}
 	observed,err:=adapter.Observe(ctx,e);if err!=nil{return e,err}
-	if observed.Status=="" || observed.Status==e.Status{return e,nil}
+	if observed.Status=="" || observed.Status==e.Status { e.Attempts,_=m.store.ListAttempts(ctx,e.ID); return e,nil }
 	if !dom.CanTransition(e.Status,observed.Status){return e,dom.ErrInvalidTransition}
-	return m.store.Transition(ctx,e.ID,[]dom.LifecycleStatus{e.Status},observed.Status,observed.Error,observed.Result)
+	updated,transitionErr:=m.store.Transition(ctx,e.ID,[]dom.LifecycleStatus{e.Status},observed.Status,observed.Error,observed.Result)
+	if transitionErr!=nil{return e,transitionErr}
+	updated.Attempts,_=m.store.ListAttempts(ctx,e.ID)
+	return updated,nil
 }
 
 func (m *Manager) Cancel(ctx context.Context,id string) error {
