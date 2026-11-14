@@ -7,13 +7,12 @@ import (
  "time"
  "github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
-	"github.com/thkx/agentmesh/internal/domain/agent"
 	"github.com/thkx/agentmesh/internal/workspace"
  "github.com/thkx/agentmesh/internal/collaboration"
 )
 
-type CollaborationHandler struct{ service *collaboration.Service; definitions *agentcatalog.Service; workspaces *workspace.Manager }
-func(h *CollaborationHandler)SetRuntimeBindingDependencies(defs *agentcatalog.Service, workspaces *workspace.Manager){h.definitions=defs;h.workspaces=workspaces}
+type CollaborationHandler struct{ service *collaboration.Service; definitions *agentcatalog.Service; workspaceManager *workspace.Manager }
+func(h *CollaborationHandler)SetRuntimeBindingDependencies(defs *agentcatalog.Service, workspaces *workspace.Manager){h.definitions=defs;h.workspaceManager=workspaces}
 func NewCollaborationHandler(s *collaboration.Service)*CollaborationHandler{return &CollaborationHandler{service:s}}
 func(h *CollaborationHandler)RegisterRoutes(r *gin.RouterGroup){g:=r.Group("/collaboration");g.GET("/workspaces",h.workspaces);g.POST("/workspaces",h.createWorkspace);g.GET("/workspaces/:id",h.getWorkspace);g.GET("/workspaces/:id/agents",h.agents);g.POST("/agents",h.createAgent);g.GET("/agents/:id",h.getAgent);g.POST("/agents/:id/runtime-binding",h.bindRuntime);g.GET("/agents/:id/runtime-binding",h.getRuntimeBinding);g.GET("/workspaces/:id/channels",h.channels);g.POST("/channels",h.createChannel);g.GET("/channels/:id",h.getChannel);g.GET("/channels/:id/messages",h.messages);g.POST("/channels/:id/messages",h.postMessage);g.POST("/channels/:id/threads",h.thread);g.GET("/workspaces/:id/tasks",h.tasks);g.POST("/tasks",h.createTask);g.GET("/tasks/:id",h.getTask);g.POST("/tasks/:id/assignments",h.assign);g.POST("/tasks/:id/handoff",h.handoff);g.POST("/assignments/:id/claim",h.claim);g.POST("/assignments/:id/renew",h.renew);g.POST("/assignments/:id/complete",h.complete);g.POST("/decisions/evaluate",h.evaluateDecision);g.GET("/workspaces/:id/approvals",h.approvals);g.POST("/approvals/:id/resolve",h.resolveApproval);g.GET("/outbox",h.outbox);g.GET("/inbox/:agent_id",h.listInbox);g.POST("/inbox/:agent_id/events",h.inbox);g.POST("/inbox/:agent_id/claim",h.claimInbox);g.POST("/inbox/:agent_id/:event_id/renew",h.renewInbox);g.POST("/inbox/:agent_id/:event_id/ack-lease",h.ackInboxLease);g.POST("/inbox/:agent_id/:event_id/fail",h.failInboxLease);g.POST("/inbox/:agent_id/:event_id/ack",h.ackInbox)}
 func(h *CollaborationHandler)fail(c *gin.Context,e error){var approvalErr *collaboration.ApprovalRequiredError;if errors.As(e,&approvalErr){c.JSON(http.StatusAccepted,gin.H{"outcome":"approval_required","approval_id":approvalErr.ApprovalID});return};code:=400;if errors.Is(e,collaboration.ErrNotFound){code=404}else if errors.Is(e,collaboration.ErrConflict)||errors.Is(e,collaboration.ErrLeaseLost)||errors.Is(e,collaboration.ErrInboxLeaseLost){code=409};c.JSON(code,gin.H{"error":e.Error()})}
@@ -76,11 +75,11 @@ func(h *CollaborationHandler)failInboxLease(c *gin.Context){
 }
 
 func(h *CollaborationHandler)bindRuntime(c *gin.Context){
-	if h.definitions==nil||h.workspaces==nil{c.JSON(http.StatusServiceUnavailable,gin.H{"error":"runtime binding is unavailable"});return}
+	if h.definitions==nil||h.workspaceManager==nil{c.JSON(http.StatusServiceUnavailable,gin.H{"error":"runtime binding is unavailable"});return}
 	var in struct{DefinitionID string `json:"definition_id"`;RuntimeWorkspaceID string `json:"runtime_workspace_id"`}
 	if c.ShouldBindJSON(&in)!=nil{c.JSON(400,gin.H{"error":"invalid_request"});return}
 	def,err:=h.definitions.Get(c,in.DefinitionID);if err!=nil{h.fail(c,err);return}
-	if _,err=h.workspaces.Resolve(in.RuntimeWorkspaceID);err!=nil{c.JSON(400,gin.H{"error":"runtime_workspace_not_found"});return}
+	if _,err=h.workspaceManager.Resolve(in.RuntimeWorkspaceID);err!=nil{c.JSON(400,gin.H{"error":"runtime_workspace_not_found"});return}
 	v,err:=h.service.BindRuntime(c,c.Param("id"),in.RuntimeWorkspaceID,def);if err!=nil{h.fail(c,err);return};c.JSON(200,v)
 }
 func(h *CollaborationHandler)getRuntimeBinding(c *gin.Context){
