@@ -766,8 +766,13 @@ func (s *Store) HeartbeatRun(ctx context.Context, job Job, lease time.Duration) 
 
 func (s *Store) FinishRun(ctx context.Context, job Job, run workflow.Run, runErr error) error {
 	status := "succeeded"
-	if run.Status == workflow.RunFailed || runErr != nil {
+	switch run.Status {
+	case workflow.RunCanceled:
+		status = "canceled"
+	case workflow.RunFailed:
 		status = "failed"
+	default:
+		if runErr != nil { status = "failed" }
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

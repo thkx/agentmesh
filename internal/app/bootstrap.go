@@ -469,6 +469,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	} else if report.Recovered > 0 || report.NeedsAttention > 0 {
 		log.InfoContext(ctx, "execution startup reconciliation completed", "scanned", report.Scanned, "recovered", report.Recovered, "needs_attention", report.NeedsAttention)
 	}
+	if report, reconcileErr := executionManager.Reconcile(ctx, 500); reconcileErr != nil {
+		log.WarnContext(ctx, "execution startup reconciliation failed", "error", reconcileErr)
+	} else if report.Recovered > 0 || report.NeedsAttention > 0 {
+		log.InfoContext(ctx, "execution startup reconciliation completed", "scanned", report.Scanned, "recovered", report.Recovered, "needs_attention", report.NeedsAttention)
+	}
 	planExecutionRepo, err := planworkflow.NewSQLiteRepository(sqliteDB.DB)
 	if err != nil {
 		workerCancel()
