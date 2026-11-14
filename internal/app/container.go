@@ -13,6 +13,7 @@ import (
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/coding"
+	"github.com/thkx/agentmesh/internal/execution/manager"
 
 	"github.com/thkx/agentmesh/internal/agent/executor"
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
@@ -47,6 +48,7 @@ type Container struct {
 	ProviderRuntime       *modelgateway.ProviderRuntime
 	AgentExecutor         executor.AgentExecutor
 	AgentRuntime          *agentruntime.Runtime
+	ExecutionManager      *manager.Manager
 	AgentDefinitions      *agentcatalog.Service
 	WorkflowEngine        *wfruntime.Engine
 	GoalService           *goalservice.Service
