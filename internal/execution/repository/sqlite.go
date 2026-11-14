@@ -62,7 +62,7 @@ func (s *SQLiteStore) List(ctx context.Context,f dom.ListFilter)([]dom.Entity,er
 
 func (s *SQLiteStore) BindRuntimeRef(ctx context.Context,id,ref string)(dom.Entity,error) {
 	if strings.TrimSpace(id)=="" || strings.TrimSpace(ref)=="" || len(ref)>256 { return dom.Entity{},dom.ErrInvalidEntity }
-	res,err:=s.db.ExecContext(ctx,`UPDATE executions SET runtime_ref=?,updated_at=? WHERE id=? AND status='queued' AND (runtime_ref IS NULL OR runtime_ref=?)`,ref,time.Now().UTC().UnixNano(),id,ref)
+	res,err:=s.db.ExecContext(ctx,`UPDATE executions SET runtime_ref=?,updated_at=? WHERE id=? AND status IN ('queued','running') AND (runtime_ref IS NULL OR runtime_ref=?)`,ref,time.Now().UTC().UnixNano(),id,ref)
 	if err!=nil{return dom.Entity{},err}; n,_:=res.RowsAffected()
 	if n!=1 { if _,e:=s.Get(ctx,id); errors.Is(e,dom.ErrNotFound){return dom.Entity{},dom.ErrNotFound}; return dom.Entity{},dom.ErrConflict }
 	return s.Get(ctx,id)

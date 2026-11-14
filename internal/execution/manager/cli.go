@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/thkx/agentmesh/internal/agent/executor"
-	clidomain "github.com/thkx/agentmesh/internal/domain/execution"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
 	"github.com/thkx/agentmesh/internal/execution/repository"
 )
@@ -28,7 +27,7 @@ func NewCLIAdapter(executor executor.AgentExecutor,store repository.Store)(*CLIA
 }
 
 func(a *CLIAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
-	var request clidomain.Request
+	var request dom.Request
 	if err:=json.Unmarshal(e.Input,&request);err!=nil{return "",fmt.Errorf("decode CLI execution input: %w",err)}
 	if request.ID==""{request.ID=e.TaskID};if request.ID==""{request.ID=e.ID}
 	if err:=request.Validate();err!=nil{return "",err}
@@ -50,9 +49,9 @@ func(a *CLIAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
 		if result!=nil{
 			raw,_=json.Marshal(result)
 			switch result.Status{
-			case clidomain.StatusSucceeded:target=dom.LifecycleSucceeded;attemptStatus=dom.AttemptSucceeded
-			case clidomain.StatusCanceled:target=dom.LifecycleCanceled;attemptStatus=dom.AttemptCanceled
-			case clidomain.StatusTimedOut:target=dom.LifecycleTimedOut;attemptStatus=dom.AttemptTimedOut
+			case dom.StatusSucceeded:target=dom.LifecycleSucceeded;attemptStatus=dom.AttemptSucceeded
+			case dom.StatusCanceled:target=dom.LifecycleCanceled;attemptStatus=dom.AttemptCanceled
+			case dom.StatusTimedOut:target=dom.LifecycleTimedOut;attemptStatus=dom.AttemptTimedOut
 			default:target=dom.LifecycleFailed;attemptStatus=dom.AttemptFailed
 			}
 		}

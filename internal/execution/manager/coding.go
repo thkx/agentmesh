@@ -31,10 +31,8 @@ func(a *CodingAdapter)Submit(ctx context.Context,e dom.Entity)(string,error){
 	if request.ID==""{request.ID=e.ID}
 	if e.TaskID!="" && request.ID!=e.TaskID{return "",dom.ErrInvalidEntity}
 	task,err:=a.service.Get(ctx,request.ID)
-	if err!=nil{
-		task,err=a.service.Create(ctx,request)
-		if err!=nil{return "",err}
-	}
+	if errors.Is(err,coding.ErrNotFound){ task,err=a.service.Create(ctx,request) }
+	if err!=nil{return "",err}
 	if task.Status==coding.StatusPending{
 		if _,err=a.service.Start(ctx,task.ID);err!=nil{return "",err}
 	}

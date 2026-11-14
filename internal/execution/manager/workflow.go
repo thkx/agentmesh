@@ -8,7 +8,6 @@ import (
 
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
-	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 )
 
 type WorkflowEngine interface {
@@ -56,4 +55,3 @@ func(a *WorkflowAdapter)Cancel(context.Context,dom.Entity)error{
 	return errors.New("workflow cancellation is not yet supported by the workflow runtime")
 }
 
-var _ = (*wfruntime.Engine)(nil)

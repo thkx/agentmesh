@@ -60,6 +60,7 @@ func (m *Manager) Submit(ctx context.Context,in SubmitRequest)(dom.Entity,error)
 		return dom.Entity{},ErrInvalidRequest
 	}
 	adapter,ok:=m.adapters[in.Runtime];if !ok{return dom.Entity{},ErrAdapterNotRegistered}
+	if in.TaskID=="" && (in.Runtime==dom.RuntimeAgent || in.Runtime==dom.RuntimeCoding) { var taskIdentity struct{ID string `json:"id"`}; if json.Unmarshal(in.Input,&taskIdentity)==nil { in.TaskID=taskIdentity.ID } }
 	if in.IdempotencyKey!="" {
 		old,err:=m.store.GetByIdempotencyKey(ctx,in.IdempotencyKey)
 		if err==nil {
