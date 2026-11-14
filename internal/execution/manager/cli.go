@@ -213,12 +213,25 @@ func (a *CLIAdapter) Cancel(ctx context.Context, e dom.Entity) error {
 	if id == "" {
 		id = e.TaskID
 	}
-	a.mu.RLock()
-	cancel, ok := a.cancels[id]
-	a.mu.RUnlock()
-	if ok {
+	a.mu.Lock()
+	if cancel, ok := a.cancels[id]; ok {
+		a.mu.Unlock()
 		cancel()
 		return nil
+	}
+	current, err := a.store.Get(ctx, e.ID)
+	if err != nil {
+		a.mu.Unlock()
+		return err
+	}
+	if current.Status == dom.LifecycleQueued {
+		_, err = a.store.Transition(ctx, e.ID, []dom.LifecycleStatus{dom.LifecycleQueued}, dom.LifecycleCanceled, "canceled before CLI process start", nil)
+		a.mu.Unlock()
+		return err
+	}
+	a.mu.Unlock()
+	if current.Status != dom.LifecycleRunning {
+		return dom.ErrInvalidTransition
 	}
 	return a.executor.Cancel(ctx, id)
 }

@@ -72,3 +72,28 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 		t.Fatalf("second close: %v", err)
 	}
 }
+
+
+func TestCLIAdapterCancelsQueuedExecutionWithoutLaunchingProcess(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "execution-cli-queued", Kind: dom.KindCLI, Runtime: dom.RuntimeCLI,
+		TaskID: "cli-task-queued", Status: dom.LifecycleQueued,
+		Input: json.RawMessage(`{"id":"cli-task-queued"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	store.values[entity.ID] = entity
+	exec := &blockingCLIExecutor{started: make(chan struct{})}
+	adapter, err := NewCLIAdapter(exec, store)
+	if err != nil { t.Fatal(err) }
+	if err := adapter.Cancel(context.Background(), entity); err != nil { t.Fatal(err) }
+	got, err := store.Get(context.Background(), entity.ID)
+	if err != nil { t.Fatal(err) }
+	if got.Status != dom.LifecycleCanceled { t.Fatalf("status=%s, want canceled", got.Status) }
+	select {
+	case <-exec.started:
+		t.Fatal("queued cancellation unexpectedly launched the CLI executor")
+	default:
+	}
+	if err := adapter.CloseContext(context.Background()); err != nil { t.Fatal(err) }
+}
