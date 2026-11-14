@@ -27,6 +27,9 @@ type Channel struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:
 type Thread struct { ID string `json:"id,omitempty"`; ChannelID string `json:"channel_id,omitempty"`; Title string `json:"title,omitempty"`; RootMessageID string `json:"root_message_id,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
 type Task struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; ParentTaskID string `json:"parent_task_id,omitempty"`; Title string `json:"title,omitempty"`; Description string `json:"description,omitempty"`; Type string `json:"type,omitempty"`; Status string `json:"status,omitempty"`; Priority int `json:"priority,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; IdempotencyKey string `json:"idempotency_key,omitempty"`; DelegationDepth int `json:"delegation_depth,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
 type Assignment struct { ID string `json:"id,omitempty"`; TaskID string `json:"task_id,omitempty"`; AgentID string `json:"agent_id,omitempty"`; Status string `json:"status,omitempty"`; AssignedBy string `json:"assigned_by,omitempty"`; LeaseOwner string `json:"lease_owner,omitempty"`; LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`; ClaimVersion int64 `json:"claim_version,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
+
+type Handoff struct { Goal string `json:"goal"`; Completed []string `json:"completed"`; Remaining []string `json:"remaining"`; Artifacts []string `json:"artifacts"`; Constraints []string `json:"constraints"`; AcceptanceCriteria []string `json:"acceptance_criteria"`; Reason string `json:"reason"`; Recipient string `json:"recipient"`; IdempotencyKey string `json:"idempotency_key"` }
+
 type Event struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; AggregateType string `json:"aggregate_type,omitempty"`; AggregateID string `json:"aggregate_id,omitempty"`; Type string `json:"type,omitempty"`; Payload json.RawMessage `json:"payload,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
 
 type Service struct { db *sql.DB; conversations *conversation.Service; clock func()time.Time }
@@ -109,3 +112,23 @@ func null(v string)any{if v==""{return nil};return v}
 type InboxEvent struct { ID string `json:"id"`; AgentID string `json:"agent_id"`; EventID string `json:"event_id"`; EventType string `json:"event_type"`; Payload json.RawMessage `json:"payload"`; Status string `json:"status"`; ReceivedAt time.Time `json:"received_at"` }
 func(s *Service) ListInbox(ctx context.Context,agentID,status string,limit int)([]InboxEvent,error){ if _,err:=s.GetAgent(ctx,agentID);err!=nil{return nil,err};if limit<1||limit>500{limit=100};if status==""{status="pending"};rows,err:=s.db.QueryContext(ctx,"SELECT id,agent_id,event_id,event_type,payload_json,status,received_at FROM collaboration_inbox WHERE agent_id=? AND status=? ORDER BY received_at,id LIMIT ?",agentID,status,limit);if err!=nil{return nil,err};defer rows.Close();out:=[]InboxEvent{};for rows.Next(){var v InboxEvent;var p string;var t int64;if err=rows.Scan(&v.ID,&v.AgentID,&v.EventID,&v.EventType,&p,&v.Status,&t);err!=nil{return nil,err};v.Payload=json.RawMessage(p);v.ReceivedAt=time.UnixMilli(t).UTC();out=append(out,v)};return out,rows.Err() }
 func(s *Service) AckInbox(ctx context.Context,agentID,eventID,status string)error{if status!="handled"&&status!="ignored"&&status!="failed"{return ErrInvalid};res,err:=s.db.ExecContext(ctx,"UPDATE collaboration_inbox SET status=?,handled_at=? WHERE agent_id=? AND event_id=? AND status IN ('pending','processing')",status,s.clock().UTC().UnixMilli(),agentID,eventID);if err!=nil{return err};n,_:=res.RowsAffected();if n!=1{return ErrConflict};return nil}
+
+func(s *Service) HandoffTask(ctx context.Context,parentID string,h Handoff,createdBy string)(Task,Assignment,error){
+ parent,err:=s.GetTask(ctx,parentID);if err!=nil{return Task{},Assignment{},err}
+ if strings.TrimSpace(h.Goal)==""||strings.TrimSpace(h.Recipient)==""||len(h.Goal)>240{return Task{},Assignment{},ErrInvalid}
+ recipient,err:=s.GetAgent(ctx,h.Recipient);if err!=nil{return Task{},Assignment{},err};if recipient.WorkspaceID!=parent.WorkspaceID{return Task{},Assignment{},ErrInvalid}
+ payload,err:=json.Marshal(h);if err!=nil{return Task{},Assignment{},err}
+ key:=h.IdempotencyKey;if key!=""{key="handoff:"+parent.ID+":"+recipient.ID+":"+key}
+ child,err:=s.CreateTask(ctx,Task{WorkspaceID:parent.WorkspaceID,ParentTaskID:parent.ID,Title:h.Goal,Description:string(payload),Type:parent.Type,Priority:parent.Priority,CreatedBy:createdBy,IdempotencyKey:key});if err!=nil{return Task{},Assignment{},err}
+ assignment,err:=s.AssignTask(ctx,child.ID,recipient.ID,createdBy);if err!=nil{return Task{},Assignment{},err}
+ return child,assignment,nil
+}
+func(s *Service) RenewAssignment(ctx context.Context,id,owner string,version int64,lease time.Duration)(Assignment,error){
+ if strings.TrimSpace(owner)==""||lease<time.Second||lease>24*time.Hour{return Assignment{},ErrInvalid}
+ now:=s.clock().UTC();expires:=now.Add(lease)
+ res,err:=s.db.ExecContext(ctx,"UPDATE task_assignments SET lease_expires_at=?,updated_at=? WHERE id=? AND status='claimed' AND lease_owner=? AND claim_version=? AND lease_expires_at>=?",expires.UnixMilli(),now.UnixMilli(),id,owner,version,now.UnixMilli())
+ if err!=nil{return Assignment{},err};n,_:=res.RowsAffected();if n!=1{return Assignment{},ErrLeaseLost}
+ var v Assignment;var created,updated int64;var exp int64
+ err=s.db.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE id=?",id).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&created,&updated)
+ if err!=nil{return v,err};x:=time.UnixMilli(exp).UTC();v.LeaseExpiresAt=&x;v.CreatedAt=time.UnixMilli(created).UTC();v.UpdatedAt=time.UnixMilli(updated).UTC();return v,nil
+}
