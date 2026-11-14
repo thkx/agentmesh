@@ -73,6 +73,22 @@ func (a *CLIAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 		a.mu.Unlock()
 		return "", errors.New("CLI execution adapter is closed")
 	}
+	current, err := a.store.Get(ctx, e.ID)
+	if err != nil {
+		a.mu.Unlock()
+		return "", err
+	}
+	if current.Status == dom.LifecycleRunning {
+		// A concurrent submit/reconcile may have started this execution already.
+		// Reuse it, or expose it as interrupted after process loss; never spawn
+		// a second CLI process for the same durable execution.
+		a.mu.Unlock()
+		return request.ID, nil
+	}
+	if current.Status != dom.LifecycleQueued {
+		a.mu.Unlock()
+		return "", dom.ErrInvalidTransition
+	}
 	attemptID := e.ID + "-a-1"
 	now := time.Now().UTC()
 	attempt := dom.Attempt{
@@ -135,14 +151,30 @@ func (a *CLIAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 		persistCtx, persistCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer persistCancel()
 		_, attemptErr := a.store.FinishAttempt(persistCtx, attemptID, attemptStatus, request.ID, raw, message)
-		_, transitionErr := a.store.Transition(persistCtx, e.ID, []dom.LifecycleStatus{dom.LifecycleRunning}, target, message, raw)
-		if persistErr := errors.Join(attemptErr, transitionErr); persistErr != nil {
-			if message == "" {
-				message = persistErr.Error()
-			} else {
-				message = message + "; persist result: " + persistErr.Error()
-			}
+		if attemptErr != nil {
+			message = fmt.Sprintf("finish CLI attempt: %v", attemptErr)
 			target = dom.LifecycleNeedsReconciliation
+			_, transitionErr := a.store.Transition(persistCtx, e.ID, []dom.LifecycleStatus{dom.LifecycleRunning}, target, message, raw)
+			if transitionErr != nil {
+				message += fmt.Sprintf("; mark execution for reconciliation: %v", transitionErr)
+			}
+		} else {
+			_, transitionErr := a.store.Transition(persistCtx, e.ID, []dom.LifecycleStatus{dom.LifecycleRunning}, target, message, raw)
+			if transitionErr != nil {
+				latest, readErr := a.store.Get(persistCtx, e.ID)
+				if readErr == nil && latest.Status != dom.LifecycleRunning {
+					target = latest.Status
+					if len(latest.Result) > 0 { raw = latest.Result }
+					if latest.Error != "" { message = latest.Error }
+				} else {
+					target = dom.LifecycleNeedsReconciliation
+					message = fmt.Sprintf("persist CLI execution result: %v", transitionErr)
+					_, fallbackErr := a.store.Transition(persistCtx, e.ID, []dom.LifecycleStatus{dom.LifecycleRunning}, target, message, raw)
+					if fallbackErr != nil {
+						message += fmt.Sprintf("; mark execution for reconciliation: %v", fallbackErr)
+					}
+				}
+			}
 		}
 
 		a.mu.Lock()

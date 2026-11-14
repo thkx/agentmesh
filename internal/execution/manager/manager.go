@@ -106,9 +106,6 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 	ref, err := adapter.Submit(ctx, created)
 	if err != nil {
 		expected := []dom.LifecycleStatus{dom.LifecycleQueued}
-		if in.Runtime == dom.RuntimeCLI {
-			expected = append(expected, dom.LifecycleRunning)
-		}
 		failed, transitionErr := m.store.Transition(context.Background(), created.ID, expected, dom.LifecycleFailed, err.Error(), nil)
 		return failed, errors.Join(err, transitionErr)
 	}
