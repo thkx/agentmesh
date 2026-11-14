@@ -13,6 +13,7 @@ import (
 type WorkflowEngine interface {
 	StartQueued(context.Context,string,string,map[string]any,int)(wf.Run,error)
 	GetRun(context.Context,string)(wf.Run,error)
+	CancelRun(context.Context,string) error
 }
 
 type WorkflowAdapter struct{ engine WorkflowEngine; maxAttempts int }
@@ -51,7 +52,7 @@ func(a *WorkflowAdapter)Observe(ctx context.Context,e dom.Entity)(Observation,er
 	return Observation{Status:status,Attempt:1,Result:result,Error:run.Error},nil
 }
 
-func(a *WorkflowAdapter)Cancel(context.Context,dom.Entity)error{
-	return errors.New("workflow cancellation is not yet supported by the workflow runtime")
+func(a *WorkflowAdapter)Cancel(ctx context.Context,e dom.Entity)error{
+	id:=e.RuntimeRef;if id==""{id=e.TaskID};return a.engine.CancelRun(ctx,id)
 }
 
