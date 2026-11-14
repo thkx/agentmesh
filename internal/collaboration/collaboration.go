@@ -124,6 +124,37 @@ func(s *Service) MarkPublished(ctx context.Context,id string)error{_,e:=s.db.Exe
 func(s *Service) ReceiveEvent(ctx context.Context,agentID string,e Event)(bool,error){if _,err:=s.GetAgent(ctx,agentID);err!=nil{return false,err};if e.ID==""||e.Type==""||!json.Valid(e.Payload){return false,ErrInvalid};res,err:=s.db.ExecContext(ctx,"INSERT OR IGNORE INTO collaboration_inbox(id,agent_id,event_id,event_type,payload_json,status,received_at) VALUES(?,?,?,?,?,'pending',?)",e.ID+":"+agentID,agentID,e.ID,e.Type,string(e.Payload),s.clock().UTC().UnixMilli());if err!=nil{return false,err};n,_:=res.RowsAffected();return n==1,nil}
 func null(v string)any{if v==""{return nil};return v}
 
+
+type DecisionRequest struct {
+ AgentID string `json:"agent_id"`
+ EventID string `json:"event_id,omitempty"`
+ Action string `json:"action"`
+ ResourceType string `json:"resource_type,omitempty"`
+ ResourceID string `json:"resource_id,omitempty"`
+ Reason string `json:"reason,omitempty"`
+}
+type DecisionResult struct {
+ Outcome string `json:"outcome"`
+ Action string `json:"action"`
+ ApprovalID string `json:"approval_id,omitempty"`
+ Explanation string `json:"explanation"`
+}
+type Approval struct {
+ ID string `json:"id"`
+ WorkspaceID string `json:"workspace_id"`
+ RequesterAgentID string `json:"requester_agent_id,omitempty"`
+ ReviewerID string `json:"reviewer_id,omitempty"`
+ ResourceType string `json:"resource_type"`
+ ResourceID string `json:"resource_id"`
+ Action string `json:"action"`
+ Reason string `json:"reason,omitempty"`
+ Status string `json:"status"`
+ DecisionNote string `json:"decision_note,omitempty"`
+ CreatedAt time.Time `json:"created_at"`
+ ExpiresAt time.Time `json:"expires_at"`
+ DecidedAt *time.Time `json:"decided_at,omitempty"`
+}
+
 type InboxEvent struct { ID string `json:"id"`; AgentID string `json:"agent_id"`; EventID string `json:"event_id"`; EventType string `json:"event_type"`; Payload json.RawMessage `json:"payload"`; Status string `json:"status"`; ReceivedAt time.Time `json:"received_at"` }
 func(s *Service) ListInbox(ctx context.Context,agentID,status string,limit int)([]InboxEvent,error){ if _,err:=s.GetAgent(ctx,agentID);err!=nil{return nil,err};if limit<1||limit>500{limit=100};if status==""{status="pending"};rows,err:=s.db.QueryContext(ctx,"SELECT id,agent_id,event_id,event_type,payload_json,status,received_at FROM collaboration_inbox WHERE agent_id=? AND status=? ORDER BY received_at,id LIMIT ?",agentID,status,limit);if err!=nil{return nil,err};defer rows.Close();out:=[]InboxEvent{};for rows.Next(){var v InboxEvent;var p string;var t int64;if err=rows.Scan(&v.ID,&v.AgentID,&v.EventID,&v.EventType,&p,&v.Status,&t);err!=nil{return nil,err};v.Payload=json.RawMessage(p);v.ReceivedAt=time.UnixMilli(t).UTC();out=append(out,v)};return out,rows.Err() }
 func(s *Service) AckInbox(ctx context.Context,agentID,eventID,status string)error{if status!="handled"&&status!="ignored"&&status!="failed"{return ErrInvalid};res,err:=s.db.ExecContext(ctx,"UPDATE collaboration_inbox SET status=?,handled_at=? WHERE agent_id=? AND event_id=? AND status IN ('pending','processing')",status,s.clock().UTC().UnixMilli(),agentID,eventID);if err!=nil{return err};n,_:=res.RowsAffected();if n!=1{return ErrConflict};return nil}
@@ -146,4 +177,53 @@ func(s *Service) RenewAssignment(ctx context.Context,id,owner string,version int
  var v Assignment;var created,updated int64;var exp int64
  err=s.db.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE id=?",id).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&created,&updated)
  if err!=nil{return v,err};x:=time.UnixMilli(exp).UTC();v.LeaseExpiresAt=&x;v.CreatedAt=time.UnixMilli(created).UTC();v.UpdatedAt=time.UnixMilli(updated).UTC();return v,nil
+}
+
+func(s *Service) EvaluateDecision(ctx context.Context,req DecisionRequest)(DecisionResult,error){
+ agent,err:=s.GetAgent(ctx,req.AgentID);if err!=nil{return DecisionResult{},err}
+ allowedAction:=map[string]bool{"ignore":true,"reply":true,"ask_human":true,"claim":true,"delegate":true,"execute_workflow":true,"direct_execute":true}
+ if !allowedAction[req.Action]{return DecisionResult{},ErrInvalid}
+ workspace,err:=s.GetWorkspace(ctx,agent.WorkspaceID);if err!=nil{return DecisionResult{},err}
+ requiresApproval:=false
+ switch workspace.AutonomyMode{
+ case "directed": requiresApproval=req.Action=="claim"||req.Action=="delegate"||req.Action=="execute_workflow"||req.Action=="direct_execute"
+ case "hybrid": requiresApproval=req.Action=="delegate"||req.Action=="execute_workflow"||req.Action=="direct_execute"
+ case "autonomous": requiresApproval=req.Action=="direct_execute"
+ default:return DecisionResult{},ErrInvalid
+ }
+ outcome:="allowed";explanation:="decision is permitted by workspace autonomy policy";var approvalID string
+ if requiresApproval{
+  outcome="approval_required";explanation="workspace autonomy policy requires human approval"
+  approvalID,err=newID();if err!=nil{return DecisionResult{},err}
+ }
+ auditID,err:=newID();if err!=nil{return DecisionResult{},err};now:=s.clock().UTC()
+ tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return DecisionResult{},err};defer tx.Rollback()
+ if requiresApproval{
+  expires:=now.Add(24*time.Hour)
+  _,err=tx.ExecContext(ctx,"INSERT INTO collaboration_approvals(id,workspace_id,requester_agent_id,resource_type,resource_id,action,reason,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?,'pending',?,?)",approvalID,agent.WorkspaceID,agent.ID,req.ResourceType,req.ResourceID,req.Action,req.Reason,now.UnixMilli(),expires.UnixMilli());if err!=nil{return DecisionResult{},err}
+  if err=s.writeEventTx(ctx,tx,agent.WorkspaceID,"approval",approvalID,"approval.requested",map[string]any{"approval_id":approvalID,"agent_id":agent.ID,"action":req.Action,"resource_type":req.ResourceType,"resource_id":req.ResourceID});err!=nil{return DecisionResult{},err}
+ }
+ _,err=tx.ExecContext(ctx,"INSERT INTO collaboration_decision_audit(id,workspace_id,agent_id,event_id,action,resource_type,resource_id,outcome,approval_id,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",auditID,agent.WorkspaceID,agent.ID,req.EventID,req.Action,req.ResourceType,req.ResourceID,outcome,null(approvalID),req.Reason,now.UnixMilli());if err!=nil{return DecisionResult{},err}
+ if err=tx.Commit();err!=nil{return DecisionResult{},err}
+ return DecisionResult{Outcome:outcome,Action:req.Action,ApprovalID:approvalID,Explanation:explanation},nil
+}
+func(s *Service) ListApprovals(ctx context.Context,workspaceID,status string,limit int)([]Approval,error){
+ if _,err:=s.GetWorkspace(ctx,workspaceID);err!=nil{return nil,err};if limit<1||limit>500{limit=100}
+ query:="SELECT id,workspace_id,COALESCE(requester_agent_id,''),reviewer_id,resource_type,resource_id,action,reason,status,decision_note,created_at,expires_at,decided_at FROM collaboration_approvals WHERE workspace_id=?";args:=[]any{workspaceID}
+ if status!=""{query+=" AND status=?";args=append(args,status)};query+=" ORDER BY created_at DESC LIMIT ?";args=append(args,limit)
+ rows,err:=s.db.QueryContext(ctx,query,args...);if err!=nil{return nil,err};defer rows.Close();out:=[]Approval{}
+ for rows.Next(){var v Approval;var c,x int64;var decided sql.NullInt64;if err=rows.Scan(&v.ID,&v.WorkspaceID,&v.RequesterAgentID,&v.ReviewerID,&v.ResourceType,&v.ResourceID,&v.Action,&v.Reason,&v.Status,&v.DecisionNote,&c,&x,&decided);err!=nil{return nil,err};v.CreatedAt=time.UnixMilli(c).UTC();v.ExpiresAt=time.UnixMilli(x).UTC();if decided.Valid{z:=time.UnixMilli(decided.Int64).UTC();v.DecidedAt=&z};out=append(out,v)};return out,rows.Err()
+}
+func(s *Service) ResolveApproval(ctx context.Context,id,reviewer,status,note string)(Approval,error){
+ if status!="approved"&&status!="rejected"{return Approval{},ErrInvalid};if strings.TrimSpace(reviewer)==""{return Approval{},ErrInvalid}
+ now:=s.clock().UTC();tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return Approval{},err};defer tx.Rollback()
+ var workspaceID string;var expires int64
+ if err=tx.QueryRowContext(ctx,"SELECT workspace_id,expires_at FROM collaboration_approvals WHERE id=? AND status='pending'",id).Scan(&workspaceID,&expires);err!=nil{if errors.Is(err,sql.ErrNoRows){return Approval{},ErrNotFound};return Approval{},err}
+ if expires<now.UnixMilli(){_,_ = tx.ExecContext(ctx,"UPDATE collaboration_approvals SET status='expired',decided_at=? WHERE id=? AND status='pending'",now.UnixMilli(),id);_ = tx.Commit();return Approval{},ErrConflict}
+ res,err:=tx.ExecContext(ctx,"UPDATE collaboration_approvals SET status=?,reviewer_id=?,decision_note=?,decided_at=? WHERE id=? AND status='pending'",status,reviewer,note,now.UnixMilli(),id);if err!=nil{return Approval{},err};n,_:=res.RowsAffected();if n!=1{return Approval{},ErrConflict}
+ if err=s.writeEventTx(ctx,tx,workspaceID,"approval",id,"approval."+status,map[string]any{"approval_id":id,"reviewer_id":reviewer,"status":status,"note":note});err!=nil{return Approval{},err}
+ if err=tx.Commit();err!=nil{return Approval{},err}
+ var v Approval;var c,x int64;var decided sql.NullInt64
+ err=s.db.QueryRowContext(ctx,"SELECT id,workspace_id,COALESCE(requester_agent_id,''),reviewer_id,resource_type,resource_id,action,reason,status,decision_note,created_at,expires_at,decided_at FROM collaboration_approvals WHERE id=?",id).Scan(&v.ID,&v.WorkspaceID,&v.RequesterAgentID,&v.ReviewerID,&v.ResourceType,&v.ResourceID,&v.Action,&v.Reason,&v.Status,&v.DecisionNote,&c,&x,&decided)
+ if err!=nil{return v,err};v.CreatedAt=time.UnixMilli(c).UTC();v.ExpiresAt=time.UnixMilli(x).UTC();if decided.Valid{z:=time.UnixMilli(decided.Int64).UTC();v.DecidedAt=&z};return v,nil
 }
