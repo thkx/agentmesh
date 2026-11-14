@@ -51,6 +51,10 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 	case <-time.After(2*time.Second):
 		t.Fatal("CLI executor did not start")
 	}
+	// A reconciliation racing the initial submit must reuse the active process.
+	if ref, err := adapter.Submit(context.Background(), entity); err != nil || ref != "cli-task-1" {
+		t.Fatalf("duplicate submit ref=%q err=%v", ref, err)
+	}
 	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := adapter.CloseContext(closeCtx); err != nil { t.Fatalf("close adapter: %v", err) }

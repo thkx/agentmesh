@@ -138,6 +138,7 @@ func (a *CLIAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 		}
 		if runErr != nil {
 			message = runErr.Error()
+			target, attemptStatus = dom.LifecycleFailed, dom.AttemptFailed
 			if errors.Is(runErr, context.Canceled) {
 				target, attemptStatus = dom.LifecycleCanceled, dom.AttemptCanceled
 			}
