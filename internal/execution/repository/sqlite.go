@@ -74,7 +74,7 @@ func (s *SQLiteStore) Transition(ctx context.Context,id string,from []dom.Lifecy
 	for _,v:=range from { if !dom.CanTransition(v,to) { return dom.Entity{},dom.ErrInvalidTransition } }
 	now:=time.Now().UTC()
 	marks:=make([]string,len(from)); for i:=range from {marks[i]="?"}
-	q:=`UPDATE executions SET status=?,error_text=?,result_json=?,updated_at=?,started_at=CASE WHEN ?='running' AND started_at IS NULL THEN ? ELSE started_at END,finished_at=CASE WHEN ? IN ('succeeded','failed','canceled','timed_out','interrupted','needs_reconciliation') THEN ? ELSE finished_at END WHERE id=? AND status IN (`+strings.Join(marks,",")+`) `
+	q:=`UPDATE executions SET status=?,error_text=?,result_json=?,updated_at=?,started_at=CASE WHEN ? IN ('running','succeeded','failed','canceled','timed_out','interrupted','needs_reconciliation') AND started_at IS NULL THEN ? ELSE started_at END,finished_at=CASE WHEN ? IN ('succeeded','failed','canceled','timed_out','interrupted','needs_reconciliation') THEN ? ELSE finished_at END WHERE id=? AND status IN (`+strings.Join(marks,",")+`) `
 	args:=[]any{to,message,nullableJSON(result),now.UnixNano(),to,now.UnixNano(),to,now.UnixNano(),id}
 	for _,v:=range from {args=append(args,v)}
 	res,err:=s.db.ExecContext(ctx,q,args...); if err!=nil{return dom.Entity{},err}; n,_:=res.RowsAffected()
@@ -90,31 +90,21 @@ func (s *SQLiteStore) CreateAttempt(ctx context.Context,a dom.Attempt)(dom.Attem
 }
 
 func (s *SQLiteStore) GetAttempt(ctx context.Context,id string)(dom.Attempt,error) {
-	var a dom.Attempt; var runtime,status string; var ref sql.NullString; var input,result sql.NullString; var started,created,updated int64; var finished sql.NullInt64
-	err:=s.db.QueryRowContext(ctx,`SELECT id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at FROM execution_attempts WHERE id=?`,id).Scan(&a.ID,&a.ExecutionID,&a.Number,&runtime,&ref,&status,&input,&result,&a.Error,&started,&finished,&created,&updated)
-	if errors.Is(err,sql.ErrNoRows){return dom.Attempt{},dom.ErrNotFound}; if err!=nil{return dom.Attempt{},err}
-	a.Runtime=dom.Runtime(runtime);a.Status=dom.AttemptStatus(status);a.StartedAt=time.Unix(0,started).UTC();a.CreatedAt=time.Unix(0,created).UTC();a.UpdatedAt=time.Unix(0,updated).UTC()
-	if ref.Valid{a.RuntimeRef=ref.String};if input.Valid{a.Input=json.RawMessage(input.String)};if result.Valid{a.Result=json.RawMessage(result.String)};if finished.Valid{v:=time.Unix(0,finished.Int64).UTC();a.FinishedAt=&v};return a,nil
+	return scanAttempt(s.db.QueryRowContext(ctx,`SELECT id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at FROM execution_attempts WHERE id=?`,id))
 }
 
 func (s *SQLiteStore) GetAttemptByNumber(ctx context.Context, executionID string, number int) (dom.Attempt,error) {
-	var id string
-	err:=s.db.QueryRowContext(ctx,`SELECT id FROM execution_attempts WHERE execution_id=? AND attempt_number=?`,executionID,number).Scan(&id)
-	if errors.Is(err,sql.ErrNoRows){return dom.Attempt{},dom.ErrNotFound}
-	if err!=nil{return dom.Attempt{},err}
-	return s.GetAttempt(ctx,id)
+	return scanAttempt(s.db.QueryRowContext(ctx,`SELECT id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at FROM execution_attempts WHERE execution_id=? AND attempt_number=?`,executionID,number))
 }
 
 func (s *SQLiteStore) ListAttempts(ctx context.Context, executionID string) ([]dom.Attempt,error) {
-	rows,err:=s.db.QueryContext(ctx,`SELECT id FROM execution_attempts WHERE execution_id=? ORDER BY attempt_number`,executionID)
+	rows,err:=s.db.QueryContext(ctx,`SELECT id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at FROM execution_attempts WHERE execution_id=? ORDER BY attempt_number`,executionID)
 	if err!=nil{return nil,err}
 	defer rows.Close()
 	out:=make([]dom.Attempt,0)
 	for rows.Next(){
-		var id string
-		if err=rows.Scan(&id);err!=nil{return nil,err}
-		item,loadErr:=s.GetAttempt(ctx,id)
-		if loadErr!=nil{return nil,loadErr}
+		item,scanErr:=scanAttempt(rows)
+		if scanErr!=nil{return nil,scanErr}
 		out=append(out,item)
 	}
 	return out,rows.Err()
@@ -128,6 +118,21 @@ func (s *SQLiteStore) FinishAttempt(ctx context.Context,id string,status dom.Att
 }
 
 type scanner interface{ Scan(...any) error }
+func scanAttempt(row scanner)(dom.Attempt,error) {
+	var a dom.Attempt
+	var runtime,status string
+	var ref,input,result sql.NullString
+	var started,created,updated int64
+	var finished sql.NullInt64
+	err:=row.Scan(&a.ID,&a.ExecutionID,&a.Number,&runtime,&ref,&status,&input,&result,&a.Error,&started,&finished,&created,&updated)
+	if errors.Is(err,sql.ErrNoRows){return dom.Attempt{},dom.ErrNotFound}
+	if err!=nil{return dom.Attempt{},err}
+	a.Runtime=dom.Runtime(runtime);a.Status=dom.AttemptStatus(status)
+	a.StartedAt=time.Unix(0,started).UTC();a.CreatedAt=time.Unix(0,created).UTC();a.UpdatedAt=time.Unix(0,updated).UTC()
+	if ref.Valid{a.RuntimeRef=ref.String};if input.Valid{a.Input=json.RawMessage(input.String)};if result.Valid{a.Result=json.RawMessage(result.String)}
+	if finished.Valid{v:=time.Unix(0,finished.Int64).UTC();a.FinishedAt=&v}
+	return a,nil
+}
 func scanEntity(row scanner)(dom.Entity,error) {
 	var e dom.Entity;var kind,runtime,status string;var ref,task,input,result,key sql.NullString;var created,updated int64;var started,finished sql.NullInt64
 	err:=row.Scan(&e.ID,&kind,&runtime,&ref,&task,&status,&input,&result,&e.Error,&key,&created,&updated,&started,&finished);if err!=nil{return dom.Entity{},err}
