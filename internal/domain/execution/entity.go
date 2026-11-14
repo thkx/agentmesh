@@ -24,14 +24,14 @@ const (
 	RuntimeWorkflow Runtime = "workflow"
 	RuntimeCLI Runtime = "cli"
 
-	StatusQueued LifecycleStatus = "queued"
-	StatusRunning LifecycleStatus = "running"
-	StatusSucceeded LifecycleStatus = "succeeded"
-	StatusFailed LifecycleStatus = "failed"
-	StatusCanceled LifecycleStatus = "canceled"
-	StatusTimedOut LifecycleStatus = "timed_out"
-	StatusInterrupted LifecycleStatus = "interrupted"
-	StatusNeedsReconciliation LifecycleStatus = "needs_reconciliation"
+	LifecycleQueued LifecycleStatus = "queued"
+	LifecycleRunning LifecycleStatus = "running"
+	LifecycleSucceeded LifecycleStatus = "succeeded"
+	LifecycleFailed LifecycleStatus = "failed"
+	LifecycleCanceled LifecycleStatus = "canceled"
+	LifecycleTimedOut LifecycleStatus = "timed_out"
+	LifecycleInterrupted LifecycleStatus = "interrupted"
+	LifecycleNeedsReconciliation LifecycleStatus = "needs_reconciliation"
 
 	AttemptRunning AttemptStatus = "running"
 	AttemptSucceeded AttemptStatus = "succeeded"
@@ -118,12 +118,12 @@ func (a Attempt) Validate() error {
 func CanTransition(from, to LifecycleStatus) bool {
 	if from==to { return true }
 	switch from {
-	case StatusQueued:
-		return to==StatusRunning || to==StatusCanceled || to==StatusFailed
-	case StatusRunning:
-		return to==StatusQueued || to==StatusSucceeded || to==StatusFailed || to==StatusCanceled || to==StatusTimedOut || to==StatusInterrupted || to==StatusNeedsReconciliation
-	case StatusInterrupted, StatusNeedsReconciliation:
-		return to==StatusSucceeded || to==StatusFailed || to==StatusCanceled
+	case LifecycleQueued:
+		return to==LifecycleRunning || to==LifecycleCanceled || to==LifecycleFailed
+	case LifecycleRunning:
+		return to==LifecycleQueued || to==LifecycleSucceeded || to==LifecycleFailed || to==LifecycleCanceled || to==LifecycleTimedOut || to==LifecycleInterrupted || to==LifecycleNeedsReconciliation
+	case LifecycleInterrupted, LifecycleNeedsReconciliation:
+		return to==LifecycleSucceeded || to==LifecycleFailed || to==LifecycleCanceled
 	default:
 		return false
 	}
@@ -132,7 +132,7 @@ func CanTransition(from, to LifecycleStatus) bool {
 func validKind(v Kind) bool { return v==KindAgent || v==KindCoding || v==KindWorkflow || v==KindCLI }
 func validRuntime(v Runtime) bool { return v==RuntimeAgent || v==RuntimeCoding || v==RuntimeWorkflow || v==RuntimeCLI }
 func validLifecycle(v LifecycleStatus) bool {
-	switch v { case StatusQueued,StatusRunning,StatusSucceeded,StatusFailed,StatusCanceled,StatusTimedOut,StatusInterrupted,StatusNeedsReconciliation: return true }; return false
+	switch v { case LifecycleQueued,LifecycleRunning,LifecycleSucceeded,LifecycleFailed,LifecycleCanceled,LifecycleTimedOut,LifecycleInterrupted,LifecycleNeedsReconciliation: return true }; return false
 }
 func validAttempt(v AttemptStatus) bool {
 	switch v { case AttemptRunning,AttemptSucceeded,AttemptFailed,AttemptCanceled,AttemptTimedOut,AttemptUnknown: return true }; return false
