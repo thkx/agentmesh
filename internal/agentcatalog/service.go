@@ -73,14 +73,24 @@ func (s *Service) Run(ctx context.Context, definitionID, workspaceID, prompt str
 	if result.FinishedAt.IsZero() {
 		result.FinishedAt = time.Now().UTC()
 	}
-	if runErr != nil && result.Error == "" {
-		result.Error = runErr.Error()
+	if runErr != nil {
+		if result.Error == "" {
+			result.Error = runErr.Error()
+		}
+		result.Status = dom.StatusFailed
 	}
 	if result.Status == "" {
 		result.Status = dom.StatusFailed
 	}
-	if finishErr := s.repo.FinishRun(context.Background(), runID, result); finishErr != nil && runErr == nil {
-		runErr = fmt.Errorf("persist agent run result: %w", finishErr)
+	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer finishCancel()
+	if finishErr := s.repo.FinishRun(finishCtx, runID, result); finishErr != nil {
+		persistErr := fmt.Errorf("persist agent run result: %w", finishErr)
+		if runErr != nil {
+			runErr = errors.Join(runErr, persistErr)
+		} else {
+			runErr = persistErr
+		}
 	}
 	return result, runErr
 }

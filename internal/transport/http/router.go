@@ -70,7 +70,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Use(gin.Recovery())
 	if deps.APIToken != "" {
 		router.Use(func(c *gin.Context) {
-			if strings.HasPrefix(c.Request.URL.Path, "/workflow-editor") {
+			if c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/workflow-editor" || c.Request.URL.Path == "/workflow-editor/app.js") {
 				c.Next()
 				return
 			}

@@ -83,3 +83,14 @@ func TestValidateSchedulerLimits(t *testing.T) {
 		t.Fatal("expected scheduler attempts limit error")
 	}
 }
+
+func TestValidateWithAPIAuthAllowsRemoteHostOnlyWithAuth(t *testing.T) {
+	cfg := Defaults()
+	cfg.Server.Host = "0.0.0.0"
+	if err := ValidateWithAPIAuth(cfg, false); err == nil {
+		t.Fatal("expected remote listener without API auth to be rejected")
+	}
+	if err := ValidateWithAPIAuth(cfg, true); err != nil {
+		t.Fatalf("authenticated remote listener should validate: %v", err)
+	}
+}

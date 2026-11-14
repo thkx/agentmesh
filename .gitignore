@@ -16,3 +16,6 @@ configs/ai-resource-import.json
 coverage.out
 
 m
+
+verify.sh
+apply_fixes.py

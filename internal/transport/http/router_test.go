@@ -251,3 +251,26 @@ func TestCredentialHTTPNeverReturnsSecret(t *testing.T) {
 		t.Fatalf("delete status=%d body=%s", del.Code, del.Body.String())
 	}
 }
+
+func TestAPITokenProtectsWorkflowEditorNonStaticPaths(t *testing.T) {
+	router := httptransport.NewRouter(httptransport.Dependencies{APIToken: strings.Repeat("x", 32)})
+	cases := []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/workflow-editor", http.StatusOK},
+		{http.MethodGet, "/workflow-editor/app.js", http.StatusOK},
+		{http.MethodGet, "/workflow-editor/unknown", http.StatusUnauthorized},
+		{http.MethodPost, "/workflow-editor", http.StatusUnauthorized},
+		{http.MethodGet, "/api/v1/workflows", http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, httptest.NewRequest(tc.method, tc.path, nil))
+			if rr.Code != tc.want {
+				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.want, rr.Body.String())
+			}
+		})
+	}
+}

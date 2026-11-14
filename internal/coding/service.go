@@ -21,18 +21,19 @@ type Agent interface {
 	Run(context.Context, dom.Task) (dom.Result, error)
 }
 type Service struct {
-	repo          *Repository
-	agent         Agent
-	workspaceRoot string
-	sandbox       docker.Runner
-	worktrees     *worktree.Manager
-	mu            sync.Mutex
-	cancels       map[string]context.CancelFunc
-	maxConcurrent chan struct{}
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	closed        bool
+	repo           *Repository
+	agent          Agent
+	workspaceRoot  string
+	sandbox        docker.Runner
+	worktrees      *worktree.Manager
+	mu             sync.Mutex
+	workspaceLocks sync.Map // task ID -> *sync.Mutex
+	cancels        map[string]context.CancelFunc
+	maxConcurrent  chan struct{}
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	closed         bool
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
@@ -83,12 +84,20 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 func (s *Service) Run(ctx context.Context, id string) (Task, error) {
-	select {
-	case s.maxConcurrent <- struct{}{}:
-	case <-ctx.Done():
-		return Task{}, ctx.Err()
+	return s.run(ctx, id, true)
+}
+
+func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, error) {
+	if acquireSlot {
+		select {
+		case s.maxConcurrent <- struct{}{}:
+		case <-ctx.Done():
+			return Task{}, ctx.Err()
+		}
+		defer func() { <-s.maxConcurrent }()
 	}
-	defer func() { <-s.maxConcurrent }()
+	unlock := s.lockTask(id)
+	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return Task{}, e
@@ -304,13 +313,27 @@ func (s *Service) Diff(ctx context.Context, id string) (string, error) {
 	}
 	return s.worktrees.Diff(ctx, workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath})
 }
+
+// lockTask serializes execution and workspace mutation for one task.
+func (s *Service) lockTask(id string) func() {
+	value, _ := s.workspaceLocks.LoadOrStore(id, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 func (s *Service) ApplyPatch(ctx context.Context, id, patch string) error {
+	unlock := s.lockTask(id)
+	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
 	}
 	if t.WorkspacePath == "" || len(patch) == 0 || len(patch) > 2<<20 {
 		return ErrInvalidTask
+	}
+	if t.Status == StatusRunning || t.Status == StatusTesting || t.Status == StatusRepairing {
+		return ErrConflict
 	}
 	ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
 	if e = s.worktrees.ApplyPatch(ctx, ws, patch); e != nil {
@@ -319,11 +342,13 @@ func (s *Service) ApplyPatch(ctx context.Context, id, patch string) error {
 	return s.repo.Event(ctx, id, "patch.applied", map[string]int{"bytes": len(patch)})
 }
 func (s *Service) Revert(ctx context.Context, id string) error {
+	unlock := s.lockTask(id)
+	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
 	}
-	if t.WorkspacePath == "" {
+	if t.WorkspacePath == "" || t.Status == StatusRunning || t.Status == StatusTesting || t.Status == StatusRepairing {
 		return ErrConflict
 	}
 	ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
@@ -333,6 +358,8 @@ func (s *Service) Revert(ctx context.Context, id string) error {
 	return e
 }
 func (s *Service) Cleanup(ctx context.Context, id string) error {
+	unlock := s.lockTask(id)
+	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
@@ -377,9 +404,19 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 		s.mu.Unlock()
 		return Task{}, ErrConflict
 	}
+	select {
+	case s.maxConcurrent <- struct{}{}:
+	default:
+		s.mu.Unlock()
+		return Task{}, ErrConflict // bounded queue: reject instead of spawning waiters
+	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go func() { defer s.wg.Done(); _, _ = s.Run(s.ctx, id) }()
+	go func() {
+		defer s.wg.Done()
+		defer func() { <-s.maxConcurrent }()
+		_, _ = s.run(s.ctx, id, false)
+	}()
 	return task, nil
 }
 func (s *Service) Close() {

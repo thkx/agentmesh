@@ -9,6 +9,12 @@ import (
 )
 
 func Validate(c Config) error {
+	return ValidateWithAPIAuth(c, false)
+}
+
+// ValidateWithAPIAuth validates a configuration whose HTTP API is protected
+// by a sufficiently strong Bearer token when bound to a non-loopback address.
+func ValidateWithAPIAuth(c Config, apiAuthEnabled bool) error {
 	if strings.TrimSpace(c.App.Name) == "" {
 		return fmt.Errorf("app.name is required")
 	}
@@ -25,8 +31,8 @@ func Validate(c Config) error {
 
 	host := strings.TrimSpace(c.Server.Host)
 	ip := net.ParseIP(host)
-	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
-		return fmt.Errorf("server.host must be a loopback address while the HTTP API has no authentication")
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) && !apiAuthEnabled {
+		return fmt.Errorf("server.host must be a loopback address unless API token authentication is enabled")
 	}
 
 	if c.Server.ReadTimeout <= 0 {
