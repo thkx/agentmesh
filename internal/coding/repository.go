@@ -307,8 +307,13 @@ func (r *Repository) CancelPending(ctx context.Context, id string) error {
 		return err
 	}
 	if affected != 1 {
-		if _, getErr := r.Get(ctx, id); errors.Is(getErr, ErrNotFound) {
+		var exists int
+		queryErr := tx.QueryRowContext(ctx, `SELECT 1 FROM coding_tasks WHERE id=?`, id).Scan(&exists)
+		if errors.Is(queryErr, sql.ErrNoRows) {
 			return ErrNotFound
+		}
+		if queryErr != nil {
+			return queryErr
 		}
 		return ErrConflict
 	}

@@ -118,3 +118,38 @@ func TestRepositoryCreateClaimAndUpdateEventsAreAtomic(t *testing.T) {
 		t.Fatalf("unexpected lifecycle events: %#v", events)
 	}
 }
+
+
+func TestRepositoryCancelPendingIsAtomicAndPreventsClaim(t *testing.T) {
+	r := testRepository(t)
+	ctx := context.Background()
+	task, err := r.Create(ctx, CreateRequest{ID: "cancel-pending", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
+	if err != nil { t.Fatal(err) }
+	if err := r.CancelPending(ctx, task.ID); err != nil { t.Fatal(err) }
+	loaded, err := r.Get(ctx, task.ID)
+	if err != nil { t.Fatal(err) }
+	if loaded.Status != StatusCanceled { t.Fatalf("status=%s, want canceled", loaded.Status) }
+	claimed, err := r.ClaimWithEvent(ctx, task.ID, "task.started", nil)
+	if err != nil { t.Fatal(err) }
+	if claimed { t.Fatal("canceled pending task must not be claimable") }
+	events, err := r.Events(ctx, task.ID)
+	if err != nil { t.Fatal(err) }
+	if len(events) != 2 || events[1].Type != "task.canceled" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+}
+
+func TestRepositoryCancelPendingRejectsMissingOrClaimedTask(t *testing.T) {
+	r := testRepository(t)
+	ctx := context.Background()
+	if err := r.CancelPending(ctx, "missing"); err != ErrNotFound {
+		t.Fatalf("missing task error=%v, want ErrNotFound", err)
+	}
+	task, err := r.Create(ctx, CreateRequest{ID: "already-claimed", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
+	if err != nil { t.Fatal(err) }
+	claimed, err := r.Claim(ctx, task.ID)
+	if err != nil || !claimed { t.Fatalf("claim=%v err=%v", claimed, err) }
+	if err := r.CancelPending(ctx, task.ID); err != ErrConflict {
+		t.Fatalf("claimed task error=%v, want ErrConflict", err)
+	}
+}
