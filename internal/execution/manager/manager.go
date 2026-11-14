@@ -236,11 +236,11 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 		limit = 200
 	}
 
-	// Snapshot the pages before processing them. Processing a queued item can
-	// move it to running; mutating rows while advancing OFFSET would otherwise
-	// shift later queued rows and make a single reconciliation pass skip work.
+	// Snapshot both status sets before processing. A queued execution can become
+	// running during this pass; collecting running rows afterward would count
+	// and observe that same execution twice.
+	var queuedItems, runningItems []dom.Entity
 	for _, status := range []dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning} {
-		var items []dom.Entity
 		offset := 0
 		for {
 			if err := ctx.Err(); err != nil {
@@ -250,41 +250,46 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 			if err != nil {
 				return report, err
 			}
-			items = append(items, page...)
+			if status == dom.LifecycleQueued {
+				queuedItems = append(queuedItems, page...)
+			} else {
+				runningItems = append(runningItems, page...)
+			}
 			if len(page) < limit {
 				break
 			}
 			offset += len(page)
 		}
+	}
 
-		for _, item := range items {
-			report.Scanned++
-			adapter, ok := m.adapters[item.Runtime]
-			if !ok {
+	items := append(queuedItems, runningItems...)
+	for _, item := range items {
+		report.Scanned++
+		adapter, ok := m.adapters[item.Runtime]
+		if !ok {
+			report.NeedsAttention++
+			continue
+		}
+		if item.Status == dom.LifecycleQueued {
+			ref, submitErr := adapter.Submit(ctx, item)
+			if submitErr != nil {
 				report.NeedsAttention++
 				continue
 			}
-			if item.Status == dom.LifecycleQueued {
-				ref, submitErr := adapter.Submit(ctx, item)
-				if submitErr != nil {
+			if ref != "" && item.RuntimeRef == "" {
+				if _, bindErr := m.store.BindRuntimeRef(ctx, item.ID, ref); bindErr != nil {
 					report.NeedsAttention++
 					continue
 				}
-				if ref != "" && item.RuntimeRef == "" {
-					if _, bindErr := m.store.BindRuntimeRef(ctx, item.ID, ref); bindErr != nil {
-						report.NeedsAttention++
-						continue
-					}
-				}
 			}
-			updated, getErr := m.Get(ctx, item.ID)
-			if getErr != nil {
-				report.NeedsAttention++
-				continue
-			}
-			if updated.Status != item.Status {
-				report.Recovered++
-			}
+		}
+		updated, getErr := m.Get(ctx, item.ID)
+		if getErr != nil {
+			report.NeedsAttention++
+			continue
+		}
+		if updated.Status != item.Status {
+			report.Recovered++
 		}
 	}
 	return report, nil
