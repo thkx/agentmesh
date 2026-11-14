@@ -82,11 +82,47 @@ func (s *SQLiteStore) Transition(ctx context.Context,id string,from []dom.Lifecy
 	return s.Get(ctx,id)
 }
 
-func (s *SQLiteStore) CreateAttempt(ctx context.Context,a dom.Attempt)(dom.Attempt,error) {
-	if err:=a.Validate();err!=nil{return dom.Attempt{},err}
-	now:=time.Now().UTC(); if a.CreatedAt.IsZero(){a.CreatedAt=now}; if a.UpdatedAt.IsZero(){a.UpdatedAt=now}
-	_,err:=s.db.ExecContext(ctx,`INSERT INTO execution_attempts(id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,a.ID,a.ExecutionID,a.Number,a.Runtime,nullString(a.RuntimeRef),a.Status,nullableJSON(a.Input),nullableJSON(a.Result),a.Error,a.StartedAt.UnixNano(),nullableTime(a.FinishedAt),a.CreatedAt.UnixNano(),a.UpdatedAt.UnixNano())
-	if err!=nil{return dom.Attempt{},fmt.Errorf("insert execution attempt: %w",err)}; return s.GetAttempt(ctx,a.ID)
+func (s *SQLiteStore) CreateAttempt(ctx context.Context, a dom.Attempt) (dom.Attempt, error) {
+	if err := a.Validate(); err != nil {
+		return dom.Attempt{}, err
+	}
+	now := time.Now().UTC()
+	if a.CreatedAt.IsZero() {
+		a.CreatedAt = now
+	}
+	if a.UpdatedAt.IsZero() {
+		a.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO execution_attempts(id,execution_id,attempt_number,runtime,runtime_ref,status,input_json,result_json,error_text,started_at,finished_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		a.ID, a.ExecutionID, a.Number, a.Runtime, nullString(a.RuntimeRef), a.Status, nullableJSON(a.Input), nullableJSON(a.Result), a.Error, a.StartedAt.UnixNano(), nullableTime(a.FinishedAt), a.CreatedAt.UnixNano(), a.UpdatedAt.UnixNano())
+	if err == nil {
+		return s.GetAttempt(ctx, a.ID)
+	}
+
+	// Scheduler observer callbacks are delivered at-least-once. The execution
+	// and attempt number form the idempotency identity; a duplicate callback
+	// must return the existing attempt without reopening a terminal attempt.
+	existing, lookupErr := s.GetAttemptByNumber(ctx, a.ExecutionID, a.Number)
+	if lookupErr == nil {
+		if existing.Runtime == a.Runtime && string(existing.Input) == string(a.Input) {
+			return existing, nil
+		}
+		return dom.Attempt{}, dom.ErrConflict
+	}
+	if !errors.Is(lookupErr, dom.ErrNotFound) {
+		return dom.Attempt{}, errors.Join(fmt.Errorf("insert execution attempt: %w", err), lookupErr)
+	}
+	if existing, lookupErr = s.GetAttempt(ctx, a.ID); lookupErr == nil {
+		if existing.ExecutionID == a.ExecutionID && existing.Number == a.Number &&
+			existing.Runtime == a.Runtime && string(existing.Input) == string(a.Input) {
+			return existing, nil
+		}
+		return dom.Attempt{}, dom.ErrConflict
+	}
+	if !errors.Is(lookupErr, dom.ErrNotFound) {
+		return dom.Attempt{}, errors.Join(fmt.Errorf("insert execution attempt: %w", err), lookupErr)
+	}
+	return dom.Attempt{}, fmt.Errorf("insert execution attempt: %w", err)
 }
 
 func (s *SQLiteStore) GetAttempt(ctx context.Context,id string)(dom.Attempt,error) {
