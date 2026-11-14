@@ -15,6 +15,7 @@ import (
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/airesource"
+	"github.com/thkx/agentmesh/internal/coding"
 	"github.com/thkx/agentmesh/internal/conversation"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
@@ -59,6 +60,7 @@ type Dependencies struct {
 	ToolAudit             audit.Store
 	AIResourceHandler     *airesource.HTTPHandler
 	AgentDefinitions      *agentcatalog.Service
+	CodingService         *coding.Service
 	APIToken              string
 }
 
@@ -104,6 +106,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	api := router.Group("/api/v1")
+	if deps.CodingService != nil {
+		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
+	}
 	h := handlers.NewCatalogHandler(deps.Providers, deps.Models, deps.Adapters, deps.ProviderRuntime, deps.Repository, deps.Gateway)
 	h.RegisterRoutes(api)
 	if deps.CredentialManager != nil {

@@ -27,15 +27,15 @@ func TestImportManifestJSONEncryptsSecretsAndIsIdempotent(t *testing.T) {
 		`CREATE TABLE ai_models(id TEXT PRIMARY KEY,model_key TEXT NOT NULL UNIQUE,display_name TEXT NOT NULL,enabled INTEGER NOT NULL,supports_streaming INTEGER NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
 		`CREATE TABLE ai_credential_models(credential_id TEXT NOT NULL,model_id TEXT NOT NULL,upstream_model TEXT NOT NULL,enabled INTEGER NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(credential_id,model_id),FOREIGN KEY(credential_id) REFERENCES ai_credentials(id),FOREIGN KEY(model_id) REFERENCES ai_models(id))`,
 		`CREATE TABLE ai_routing_policies(
-    model_id TEXT PRIMARY KEY NOT NULL,
-    strategy TEXT NOT NULL DEFAULT 'weighted_round_robin'
-        CHECK (strategy IN ('priority','round_robin','weighted_round_robin','least_connections')),
-    max_retries INTEGER NOT NULL DEFAULT 2 CHECK (max_retries BETWEEN 0 AND 5),
-    failure_threshold INTEGER NOT NULL DEFAULT 5 CHECK (failure_threshold > 0),
-    cooldown_seconds INTEGER NOT NULL DEFAULT 30 CHECK (cooldown_seconds > 0),
-    updated_at INTEGER NOT NULL,
-    FOREIGN KEY(model_id) REFERENCES ai_models(id)
-)`,
+			model_id TEXT PRIMARY KEY NOT NULL,
+			strategy TEXT NOT NULL DEFAULT 'weighted_round_robin'
+				CHECK (strategy IN ('priority','round_robin','weighted_round_robin','least_connections')),
+			max_retries INTEGER NOT NULL DEFAULT 2 CHECK (max_retries BETWEEN 0 AND 5),
+			failure_threshold INTEGER NOT NULL DEFAULT 5 CHECK (failure_threshold > 0),
+			cooldown_seconds INTEGER NOT NULL DEFAULT 30 CHECK (cooldown_seconds > 0),
+			updated_at INTEGER NOT NULL,
+			FOREIGN KEY(model_id) REFERENCES ai_models(id)
+		)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatal(err)

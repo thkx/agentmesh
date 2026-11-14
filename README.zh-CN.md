@@ -380,3 +380,13 @@ M29–M34 的实现范围、API、配置、验证状态和已知限制见 [`M29-
 - Workflow Graph：`/api/v1/workflows/:id/graph`
 - Workflow 可视化编辑器：`/workflow-editor`
 - Workflow 模板：`/api/v1/workflow-templates`
+
+## M35–M41：Coding Agent 执行系统
+
+项目已在 M1–M34 基础上增加 Coding Task、Git Worktree 隔离、复用 Agent Runtime 的代码执行、Git Patch 管理、Docker 测试沙箱、测试失败自修复，以及 HTTP API / CLI 集成。详见 [`M35-M41-STATUS.md`](./M35-M41-STATUS.md)。
+
+```bash
+agentmesh-cli coding create --id fix-login --repo /path/to/repo --model your-model-id --prompt "修复登录问题并添加回归测试"
+agentmesh-cli coding run fix-login --timeout 30m
+agentmesh-cli coding list
+```

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -23,6 +24,7 @@ type ClientConfig struct {
 
 type Client struct {
 	baseURL    string
+	apiToken   string
 	httpClient *http.Client
 }
 
@@ -70,7 +72,8 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
 
 	return &Client{
-		baseURL: parsed.String(),
+		baseURL:  parsed.String(),
+		apiToken: strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN")),
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
 			Transport: &http.Transport{
@@ -138,6 +141,9 @@ func (c *Client) do(
 	}
 
 	req.Header.Set("Accept", "application/json")
+	if c.apiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiToken)
+	}
 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")

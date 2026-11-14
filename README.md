@@ -321,3 +321,7 @@ go run ./cmd/agentmesh-cli resource import \
 ```
 
 The manifest contains plaintext API keys and must be kept private. The importer never prints key values; credential secrets are encrypted before they are written to SQLite. After a successful import, securely remove the plaintext manifest if you do not need it for future imports. Back up the SQLite database and the adjacent `keys/credential.key` together; without that key, encrypted credentials cannot be decrypted.
+
+## Coding Agent (M35–M41)
+
+The M35–M41 coding execution system adds persistent coding tasks, isolated Git worktrees, reuse of the existing Agent Runtime, patch management, Docker-based test execution, bounded self-repair, and HTTP/CLI integration. See [M35-M41-STATUS.md](./M35-M41-STATUS.md).

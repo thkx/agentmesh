@@ -9,6 +9,7 @@ import (
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/airesource"
+	"github.com/thkx/agentmesh/internal/coding"
 
 	"github.com/thkx/agentmesh/internal/agent/executor"
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
@@ -57,6 +58,7 @@ type Container struct {
 	workerCancel          context.CancelFunc
 	workerDone            chan struct{}
 	Workspaces            *workspace.Manager
+	CodingService         *coding.Service
 	ToolRegistry          *tools.Registry
 	ToolEngine            *tools.Engine
 	ToolAudit             audit.Store
@@ -68,6 +70,9 @@ type Container struct {
 func (c *Container) Close() error {
 	if c == nil {
 		return nil
+	}
+	if c.CodingService != nil {
+		c.CodingService.Close()
 	}
 	if c.workerCancel != nil {
 		c.workerCancel()
