@@ -7,7 +7,7 @@ import (
  "encoding/hex"
  "encoding/json"
  "errors"
- "fmt"
+
  "strings"
  "time"
 
@@ -21,13 +21,13 @@ var (
  ErrLeaseLost = errors.New("assignment lease lost")
 )
 
-type Workspace struct { ID string; Name string; Slug string; Description string; AutonomyMode string; MaxAgentConcurrency int; MaxDelegationDepth int; CreatedAt time.Time; UpdatedAt time.Time }
-type AgentIdentity struct { ID string; WorkspaceID string; DefinitionID string; Name string; Description string; Role string; Status string; Capabilities []string; CreatedAt time.Time; UpdatedAt time.Time }
-type Channel struct { ID string; WorkspaceID string; Name string; Kind string; ConversationID string; CreatedBy string; MemberIDs []string; CreatedAt time.Time }
-type Thread struct { ID string; ChannelID string; Title string; RootMessageID string; CreatedBy string; CreatedAt time.Time }
-type Task struct { ID string; WorkspaceID string; ParentTaskID string; Title string; Description string; Type string; Status string; Priority int; CreatedBy string; IdempotencyKey string; DelegationDepth int; CreatedAt time.Time; UpdatedAt time.Time }
-type Assignment struct { ID string; TaskID string; AgentID string; Status string; AssignedBy string; LeaseOwner string; LeaseExpiresAt *time.Time; ClaimVersion int64; CreatedAt time.Time; UpdatedAt time.Time }
-type Event struct { ID string; WorkspaceID string; AggregateType string; AggregateID string; Type string; Payload json.RawMessage; CreatedAt time.Time }
+type Workspace struct { ID string `json:"id,omitempty"`; Name string `json:"name,omitempty"`; Slug string `json:"slug,omitempty"`; Description string `json:"description,omitempty"`; AutonomyMode string `json:"autonomy_mode,omitempty"`; MaxAgentConcurrency int `json:"max_agent_concurrency,omitempty"`; MaxDelegationDepth int `json:"max_delegation_depth,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
+type AgentIdentity struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; DefinitionID string `json:"definition_id,omitempty"`; Name string `json:"name,omitempty"`; Description string `json:"description,omitempty"`; Role string `json:"role,omitempty"`; Status string `json:"status,omitempty"`; Capabilities []string `json:"capabilities,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
+type Channel struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; Name string `json:"name,omitempty"`; Kind string `json:"kind,omitempty"`; ConversationID string `json:"conversation_id,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; MemberIDs []string `json:"member_ids,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
+type Thread struct { ID string `json:"id,omitempty"`; ChannelID string `json:"channel_id,omitempty"`; Title string `json:"title,omitempty"`; RootMessageID string `json:"root_message_id,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
+type Task struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; ParentTaskID string `json:"parent_task_id,omitempty"`; Title string `json:"title,omitempty"`; Description string `json:"description,omitempty"`; Type string `json:"type,omitempty"`; Status string `json:"status,omitempty"`; Priority int `json:"priority,omitempty"`; CreatedBy string `json:"created_by,omitempty"`; IdempotencyKey string `json:"idempotency_key,omitempty"`; DelegationDepth int `json:"delegation_depth,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
+type Assignment struct { ID string `json:"id,omitempty"`; TaskID string `json:"task_id,omitempty"`; AgentID string `json:"agent_id,omitempty"`; Status string `json:"status,omitempty"`; AssignedBy string `json:"assigned_by,omitempty"`; LeaseOwner string `json:"lease_owner,omitempty"`; LeaseExpiresAt *time.Time `json:"lease_expires_at,omitempty"`; ClaimVersion int64 `json:"claim_version,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"`; UpdatedAt time.Time `json:"updated_at,omitempty"` }
+type Event struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; AggregateType string `json:"aggregate_type,omitempty"`; AggregateID string `json:"aggregate_id,omitempty"`; Type string `json:"type,omitempty"`; Payload json.RawMessage `json:"payload,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
 
 type Service struct { db *sql.DB; conversations *conversation.Service; clock func()time.Time }
 func NewService(db *sql.DB, cs *conversation.Service)(*Service,error){if db==nil||cs==nil{return nil,errors.New("collaboration dependencies required")};return &Service{db:db,conversations:cs,clock:time.Now},nil}
@@ -70,4 +70,3 @@ func(s *Service) PendingOutbox(ctx context.Context,limit int)([]Event,error){if 
 func(s *Service) MarkPublished(ctx context.Context,id string)error{_,e:=s.db.ExecContext(ctx,"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error='' WHERE id=? AND published_at IS NULL",s.clock().UTC().UnixMilli(),id);return e}
 func(s *Service) ReceiveEvent(ctx context.Context,agentID string,e Event)(bool,error){if _,err:=s.GetAgent(ctx,agentID);err!=nil{return false,err};if e.ID==""||e.Type==""||!json.Valid(e.Payload){return false,ErrInvalid};res,err:=s.db.ExecContext(ctx,"INSERT OR IGNORE INTO collaboration_inbox(id,agent_id,event_id,event_type,payload_json,status,received_at) VALUES(?,?,?,?,?,'pending',?)",e.ID,agentID,e.ID,e.Type,string(e.Payload),s.clock().UTC().UnixMilli());if err!=nil{return false,err};n,_:=res.RowsAffected();return n==1,nil}
 func null(v string)any{if v==""{return nil};return v}
-func(s *Service) String()string{return fmt.Sprintf("collaboration service")}
