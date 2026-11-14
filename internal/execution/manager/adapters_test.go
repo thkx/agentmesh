@@ -5,6 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/thkx/agentmesh/internal/agent/scheduler"
+	agentstate "github.com/thkx/agentmesh/internal/agent/state"
+	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	"github.com/thkx/agentmesh/internal/coding"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
@@ -107,4 +110,73 @@ func TestWorkflowAdapterMapsWaitingApprovalToRunning(t *testing.T) {
 	got,err:=adapter.Observe(context.Background(),dom.Entity{RuntimeRef:"run-3"})
 	if err!=nil{t.Fatal(err)}
 	if got.Status!=dom.LifecycleRunning{t.Fatalf("status=%s, want running",got.Status)}
+}
+
+
+type fakeAgentScheduler struct {
+	job scheduler.Job
+	enqueueCalls int
+	canceledTask string
+}
+func (s *fakeAgentScheduler) Enqueue(_ context.Context, task agentdom.Task, jobID string, maxAttempts int) (scheduler.Job,error) {
+	s.enqueueCalls++
+	if s.job.ID=="" {
+		s.job=scheduler.Job{ID:jobID,Task:task,Status:scheduler.Queued,MaxAttempts:maxAttempts}
+	}
+	return s.job,nil
+}
+func (s *fakeAgentScheduler) Get(_ context.Context,id string)(scheduler.Job,error) {
+	if s.job.ID=="" || s.job.ID!=id { return scheduler.Job{},scheduler.ErrNotFound }
+	return s.job,nil
+}
+func (s *fakeAgentScheduler) CancelTask(_ context.Context,id string)error {
+	s.canceledTask=id
+	s.job.Status=scheduler.Canceled
+	return nil
+}
+
+type fakeAgentRuntime struct {
+	snapshot agentstate.Snapshot
+	canceledTask string
+}
+func (r *fakeAgentRuntime) Cancel(id string)error { r.canceledTask=id; return nil }
+func (r *fakeAgentRuntime) GetSnapshot(context.Context,string)(agentstate.Snapshot,error) {
+	return r.snapshot,nil
+}
+
+func TestAgentAdapterPersistsStableTaskIdentityAndMapsSuccess(t *testing.T) {
+	queue:=&fakeAgentScheduler{}
+	runtime:=&fakeAgentRuntime{}
+	adapter,err:=NewAgentAdapter(queue,runtime,4)
+	if err!=nil{t.Fatal(err)}
+	task:=agentdom.Task{ID:"agent-task-1",ModelID:"model-1",WorkspaceID:"workspace-1",Prompt:"do work"}
+	input,err:=json.Marshal(task)
+	if err!=nil{t.Fatal(err)}
+	entity:=dom.Entity{ID:"exec-agent-1",TaskID:task.ID,Input:input}
+	ref,err:=adapter.Submit(context.Background(),entity)
+	if err!=nil{t.Fatal(err)}
+	if ref!=task.ID || queue.job.ID!=task.ID || queue.job.MaxAttempts!=4 {
+		t.Fatalf("unexpected scheduler enqueue: ref=%q job=%+v",ref,queue.job)
+	}
+	queue.job.Status=scheduler.Succeeded
+	runtime.snapshot=agentstate.Snapshot{Task:task,Result:agentdom.Result{TaskID:task.ID,Status:agentdom.StatusSucceeded,Content:"done"}}
+	observed,err:=adapter.Observe(context.Background(),dom.Entity{RuntimeRef:ref})
+	if err!=nil{t.Fatal(err)}
+	if observed.Status!=dom.LifecycleSucceeded{t.Fatalf("status=%s",observed.Status)}
+	var result agentdom.Result
+	if err:=json.Unmarshal(observed.Result,&result);err!=nil{t.Fatal(err)}
+	if result.Content!="done"{t.Fatalf("result=%+v",result)}
+}
+
+func TestAgentAdapterCancellationUsesRuntimeForRunningAndQueueForQueued(t *testing.T) {
+	queue:=&fakeAgentScheduler{job:scheduler.Job{ID:"job-1",Task:agentdom.Task{ID:"task-1"},Status:scheduler.Queued}}
+	runtime:=&fakeAgentRuntime{}
+	adapter,err:=NewAgentAdapter(queue,runtime,2)
+	if err!=nil{t.Fatal(err)}
+	entity:=dom.Entity{RuntimeRef:"job-1"}
+	if err:=adapter.Cancel(context.Background(),entity);err!=nil{t.Fatal(err)}
+	if queue.canceledTask!="task-1"{t.Fatalf("queued cancel target=%q",queue.canceledTask)}
+	queue.job.Status=scheduler.Running
+	if err:=adapter.Cancel(context.Background(),entity);err!=nil{t.Fatal(err)}
+	if runtime.canceledTask!="task-1"{t.Fatalf("running cancel target=%q",runtime.canceledTask)}
 }
