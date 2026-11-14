@@ -55,7 +55,11 @@ func(a *CodingAdapter)Observe(ctx context.Context,e dom.Entity)(Observation,erro
 	return Observation{Status:status,Attempt:1,Result:result,Error:task.Error},nil
 }
 
-func(a *CodingAdapter)Cancel(ctx context.Context,e dom.Entity)error{
-	id:=e.RuntimeRef;if id==""{id=e.TaskID}
+func (a *CodingAdapter) Cancel(ctx context.Context, e dom.Entity) error {
+	id := e.RuntimeRef
+	if id == "" { id = e.TaskID }
+	if service, ok := a.service.(interface { CancelContext(context.Context, string) error }); ok {
+		return service.CancelContext(ctx, id)
+	}
 	return a.service.Cancel(id)
 }

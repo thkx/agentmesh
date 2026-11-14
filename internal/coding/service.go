@@ -313,14 +313,39 @@ func (s *Service) Events(ctx context.Context, id string) ([]Event, error) {
 	return s.repo.Events(ctx, id)
 }
 func (s *Service) Cancel(id string) error {
+	return s.CancelContext(context.Background(), id)
+}
+
+// CancelContext cancels either a queued task atomically or an active run through
+// its context. A queued cancellation races safely with ClaimWithEvent in SQLite.
+func (s *Service) CancelContext(ctx context.Context, id string) error {
 	s.mu.Lock()
-	cancel, ok := s.cancels[id]
+	cancel, active := s.cancels[id]
 	s.mu.Unlock()
-	if !ok {
-		return ErrConflict
+	if active {
+		cancel()
+		return nil
 	}
-	cancel()
-	return nil
+
+	task, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.Status == StatusPending {
+		return s.repo.CancelPending(ctx, id)
+	}
+	if isActive(task.Status) {
+		// The worker may have claimed the task just before its cancel function
+		// was published. Recheck once under the service mutex before returning.
+		s.mu.Lock()
+		cancel, active = s.cancels[id]
+		s.mu.Unlock()
+		if active {
+			cancel()
+			return nil
+		}
+	}
+	return ErrConflict
 }
 func (s *Service) Diff(ctx context.Context, id string) (string, error) {
 	unlock, locked := s.taskLocks.TryLock(id)
