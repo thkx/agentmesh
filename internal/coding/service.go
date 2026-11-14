@@ -21,19 +21,21 @@ type Agent interface {
 	Run(context.Context, dom.Task) (dom.Result, error)
 }
 type Service struct {
-	repo           *Repository
-	agent          Agent
-	workspaceRoot  string
-	sandbox        docker.Runner
-	worktrees      *worktree.Manager
-	mu             sync.Mutex
-	workspaceLocks sync.Map // task ID -> *sync.Mutex
-	cancels        map[string]context.CancelFunc
-	maxConcurrent  chan struct{}
-	ctx            context.Context
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	closed         bool
+	repo          *Repository
+	agent         Agent
+	workspaceRoot string
+	sandbox       docker.Runner
+	worktrees     *worktree.Manager
+	taskLocks     *taskLockTable
+	closeOnce     sync.Once
+	done          chan struct{}
+	mu            sync.Mutex
+	cancels       map[string]context.CancelFunc
+	maxConcurrent chan struct{}
+	ctx           context.Context
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	closed        bool
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
@@ -55,7 +57,7 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 		return nil, err
 	}
 	serviceCtx, serviceCancel := context.WithCancel(context.Background())
-	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, cancels: map[string]context.CancelFunc{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
+	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
@@ -84,19 +86,29 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 func (s *Service) Run(ctx context.Context, id string) (Task, error) {
-	return s.run(ctx, id, true)
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return Task{}, ErrConflict
+	}
+	s.wg.Add(1)
+	s.mu.Unlock()
+	defer s.wg.Done()
+	return s.run(ctx, id, false)
 }
 
-func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, error) {
-	if acquireSlot {
+func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, error) {
+	if !slotReserved {
 		select {
 		case s.maxConcurrent <- struct{}{}:
 		case <-ctx.Done():
 			return Task{}, ctx.Err()
+		case <-s.ctx.Done():
+			return Task{}, context.Canceled
 		}
-		defer func() { <-s.maxConcurrent }()
 	}
-	unlock := s.lockTask(id)
+	defer func() { <-s.maxConcurrent }()
+	unlock := s.taskLocks.Lock(id)
 	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
@@ -105,7 +117,7 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 	if t.Status != StatusPending {
 		return Task{}, ErrConflict
 	}
-	claimed, e := s.repo.Claim(ctx, id)
+	claimed, e := s.repo.ClaimWithEvent(ctx, id, "task.started", nil)
 	if e != nil {
 		return Task{}, e
 	}
@@ -124,7 +136,6 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 	s.cancels[id] = cancel
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); delete(s.cancels, id); s.mu.Unlock() }()
-	_ = s.repo.Event(ctx, id, "task.started", nil)
 	fail := func(err error) (Task, error) {
 		t.Status = StatusFailed
 		if errors.Is(err, context.Canceled) {
@@ -135,8 +146,9 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 		}
 		t.Error = err.Error()
 		t.FinishedAt = time.Now().UTC()
-		_ = s.repo.Update(context.Background(), t)
-		_ = s.repo.Event(context.Background(), id, "task.failed", map[string]string{"error": t.Error})
+		if persistErr := s.repo.UpdateWithEvent(context.Background(), t, "task.failed", map[string]string{"error": t.Error}); persistErr != nil {
+			err = errors.Join(err, fmt.Errorf("persist failed task and event: %w", persistErr))
+		}
 		return t, err
 	}
 	if e = runCtx.Err(); e != nil {
@@ -153,10 +165,9 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 	t.WorkspaceID = workspaceID
 	t.WorkspacePath = workspacePath
 	t.BranchName = branch
-	if e = s.repo.Update(runCtx, t); e != nil {
-		return fail(e)
+	if e = s.repo.UpdateWithEvent(runCtx, t, "workspace.created", map[string]string{"path": workspacePath, "branch": branch}); e != nil {
+		return fail(fmt.Errorf("persist workspace state/event: %w", e))
 	}
-	_ = s.repo.Event(runCtx, id, "workspace.created", map[string]string{"path": workspacePath, "branch": branch})
 	agentTask := dom.Task{ID: "coding-" + t.ID, ModelID: t.ModelID, WorkspaceID: workspaceID, Prompt: buildPrompt(t), MaxSteps: 80, MaxToolCalls: 200, TimeoutSeconds: t.TimeoutSeconds, ApprovedTools: []string{"file.write"}}
 	step := Step{TaskID: id, Sequence: 1, Kind: "agent.execute", Status: "running", StartedAt: time.Now().UTC()}
 	result, agentErr := s.agent.Run(runCtx, agentTask)
@@ -164,7 +175,9 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 	if agentErr != nil {
 		step.Status = "failed"
 		step.Error = agentErr.Error()
-		_ = s.repo.AddStep(context.Background(), step)
+		if persistErr := s.repo.AddStep(context.Background(), step); persistErr != nil {
+			agentErr = errors.Join(agentErr, fmt.Errorf("persist failed agent step: %w", persistErr))
+		}
 		return fail(fmt.Errorf("coding agent: %w", agentErr))
 	}
 	step.Status = "succeeded"
@@ -177,16 +190,17 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 		command = detectCommand(workspacePath)
 	}
 	if command.Program == "" {
-		_ = s.repo.Event(runCtx, id, "test.skipped", map[string]string{"reason": "no supported project manifest or explicit test command"})
+		if e = s.repo.Event(runCtx, id, "test.skipped", map[string]string{"reason": "no supported project manifest or explicit test command"}); e != nil {
+			return fail(fmt.Errorf("persist test skipped event: %w", e))
+		}
 	}
 	if command.Program != "" {
 		for attempt := 0; attempt <= t.MaxRepairAttempts; attempt++ {
 			t.Status = StatusTesting
 			t.RepairAttempts = attempt
-			if e = s.repo.Update(runCtx, t); e != nil {
-				return fail(e)
+			if e = s.repo.UpdateWithEvent(runCtx, t, "test.started", map[string]any{"attempt": attempt + 1, "program": command.Program, "args": command.Args}); e != nil {
+				return fail(fmt.Errorf("persist test state/event: %w", e))
 			}
-			_ = s.repo.Event(runCtx, id, "test.started", map[string]any{"attempt": attempt + 1, "program": command.Program, "args": command.Args})
 			testStep := Step{TaskID: id, Sequence: 2 + attempt*2, Kind: "test.run", Status: "running", StartedAt: time.Now().UTC()}
 			output, testErr := s.sandbox.Run(runCtx, workspacePath, command.Program, command.Args...)
 			testStep.Status = "succeeded"
@@ -199,10 +213,14 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 			if e = s.repo.AddStep(context.Background(), testStep); e != nil {
 				return fail(fmt.Errorf("persist test step: %w", e))
 			}
-			_ = s.repo.Event(runCtx, id, "test.finished", map[string]any{"attempt": attempt + 1, "success": testErr == nil})
+			if e = s.repo.Event(runCtx, id, "test.finished", map[string]any{"attempt": attempt + 1, "success": testErr == nil}); e != nil {
+				return fail(fmt.Errorf("persist test finished event: %w", e))
+			}
 			if testErr == nil {
 				t.Result = string(output)
-				_ = s.repo.Event(runCtx, id, "test.passed", map[string]string{"output": limit(string(output), 12000)})
+				if e = s.repo.Event(runCtx, id, "test.passed", map[string]string{"output": limit(string(output), 12000)}); e != nil {
+					return fail(fmt.Errorf("persist test passed event: %w", e))
+				}
 				break
 			}
 			t.Result = string(output)
@@ -210,8 +228,8 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 				return fail(fmt.Errorf("tests failed after %d repair attempts: %w", attempt, testErr))
 			}
 			t.Status = StatusRepairing
-			if e = s.repo.Update(runCtx, t); e != nil {
-				return fail(e)
+			if e = s.repo.UpdateWithEvent(runCtx, t, "repair.started", map[string]int{"attempt": attempt + 1}); e != nil {
+				return fail(fmt.Errorf("persist repair state/event: %w", e))
 			}
 			repairTask := agentTask
 			repairTask.ID = fmt.Sprintf("coding-%s-repair-%d", t.ID, attempt+1)
@@ -221,7 +239,9 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 				repairStep.Status = "failed"
 				repairStep.Error = e.Error()
 				repairStep.FinishedAt = time.Now().UTC()
-				_ = s.repo.AddStep(context.Background(), repairStep)
+				if persistErr := s.repo.AddStep(context.Background(), repairStep); persistErr != nil {
+					e = errors.Join(e, fmt.Errorf("persist failed repair step: %w", persistErr))
+				}
 				return fail(fmt.Errorf("self repair attempt %d: %w", attempt+1, e))
 			}
 			repairStep.Status = "succeeded"
@@ -247,10 +267,9 @@ func (s *Service) run(ctx context.Context, id string, acquireSlot bool) (Task, e
 	t.Status = StatusSucceeded
 	t.Error = ""
 	t.FinishedAt = time.Now().UTC()
-	if e = s.repo.Update(runCtx, t); e != nil {
-		return fail(e)
+	if e = s.repo.UpdateWithEvent(runCtx, t, "task.succeeded", map[string]any{"repair_attempts": t.RepairAttempts, "diff_bytes": len(diff)}); e != nil {
+		return fail(fmt.Errorf("persist succeeded task state/event: %w", e))
 	}
-	_ = s.repo.Event(runCtx, id, "task.succeeded", map[string]any{"repair_attempts": t.RepairAttempts, "diff_bytes": len(diff)})
 	return t, nil
 }
 func buildPrompt(t Task) string {
@@ -304,36 +323,38 @@ func (s *Service) Cancel(id string) error {
 	return nil
 }
 func (s *Service) Diff(ctx context.Context, id string) (string, error) {
+	unlock, locked := s.taskLocks.TryLock(id)
+	if !locked {
+		return "", ErrConflict
+	}
+	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return "", e
+	}
+	if isActive(t.Status) {
+		return "", ErrConflict
 	}
 	if t.WorkspacePath == "" {
 		return "", ErrConflict
 	}
 	return s.worktrees.Diff(ctx, workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath})
 }
-
-// lockTask serializes execution and workspace mutation for one task.
-func (s *Service) lockTask(id string) func() {
-	value, _ := s.workspaceLocks.LoadOrStore(id, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
-}
-
 func (s *Service) ApplyPatch(ctx context.Context, id, patch string) error {
-	unlock := s.lockTask(id)
+	unlock, locked := s.taskLocks.TryLock(id)
+	if !locked {
+		return ErrConflict
+	}
 	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
 	}
+	if isActive(t.Status) {
+		return ErrConflict
+	}
 	if t.WorkspacePath == "" || len(patch) == 0 || len(patch) > 2<<20 {
 		return ErrInvalidTask
-	}
-	if t.Status == StatusRunning || t.Status == StatusTesting || t.Status == StatusRepairing {
-		return ErrConflict
 	}
 	ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
 	if e = s.worktrees.ApplyPatch(ctx, ws, patch); e != nil {
@@ -342,13 +363,19 @@ func (s *Service) ApplyPatch(ctx context.Context, id, patch string) error {
 	return s.repo.Event(ctx, id, "patch.applied", map[string]int{"bytes": len(patch)})
 }
 func (s *Service) Revert(ctx context.Context, id string) error {
-	unlock := s.lockTask(id)
+	unlock, locked := s.taskLocks.TryLock(id)
+	if !locked {
+		return ErrConflict
+	}
 	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
 	}
-	if t.WorkspacePath == "" || t.Status == StatusRunning || t.Status == StatusTesting || t.Status == StatusRepairing {
+	if isActive(t.Status) {
+		return ErrConflict
+	}
+	if t.WorkspacePath == "" {
 		return ErrConflict
 	}
 	ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
@@ -358,27 +385,32 @@ func (s *Service) Revert(ctx context.Context, id string) error {
 	return e
 }
 func (s *Service) Cleanup(ctx context.Context, id string) error {
-	unlock := s.lockTask(id)
+	unlock, locked := s.taskLocks.TryLock(id)
+	if !locked {
+		return ErrConflict
+	}
 	defer unlock()
 	t, e := s.repo.Get(ctx, id)
 	if e != nil {
 		return e
 	}
+	if isActive(t.Status) {
+		return ErrConflict
+	}
 	if t.WorkspacePath == "" {
 		return nil
-	}
-	if t.Status == StatusRunning || t.Status == StatusTesting || t.Status == StatusRepairing {
-		return ErrConflict
 	}
 	ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
 	if e = s.worktrees.Remove(ctx, ws); e != nil {
 		return e
 	}
-	_, _ = git(ctx, t.RepositoryPath, "branch", "-D", t.BranchName)
+	if _, branchErr := git(ctx, t.RepositoryPath, "branch", "-D", t.BranchName); branchErr != nil {
+		return fmt.Errorf("delete coding branch: %w", branchErr)
+	}
 	t.WorkspaceID = ""
 	t.WorkspacePath = ""
 	t.BranchName = ""
-	return s.repo.Update(ctx, t)
+	return s.repo.UpdateWithEvent(ctx, t, "workspace.cleaned", nil)
 }
 
 func (s *Service) Recover(ctx context.Context) (int64, error) {
@@ -408,25 +440,39 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 	case s.maxConcurrent <- struct{}{}:
 	default:
 		s.mu.Unlock()
-		return Task{}, ErrConflict // bounded queue: reject instead of spawning waiters
+		return Task{}, ErrConflict
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go func() {
-		defer s.wg.Done()
-		defer func() { <-s.maxConcurrent }()
-		_, _ = s.run(s.ctx, id, false)
-	}()
+	go func() { defer s.wg.Done(); _, _ = s.run(s.ctx, id, true) }()
 	return task, nil
 }
-func (s *Service) Close() {
+
+// CloseContext cancels all service-owned runs and waits up to the caller's deadline.
+func (s *Service) CloseContext(ctx context.Context) error {
 	s.mu.Lock()
 	s.closed = true
 	if s.cancel != nil {
 		s.cancel()
 	}
 	s.mu.Unlock()
-	s.wg.Wait()
+	s.closeOnce.Do(func() { go func() { s.wg.Wait(); close(s.done) }() })
+	select {
+	case <-s.done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_ = s.CloseContext(ctx)
+}
+
+func isActive(status Status) bool {
+	return status == StatusRunning || status == StatusTesting || status == StatusRepairing
 }
 
 func (s *Service) Snapshots(ctx context.Context, id string) ([]Snapshot, error) {

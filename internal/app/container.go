@@ -3,8 +3,11 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
@@ -71,14 +74,27 @@ func (c *Container) Close() error {
 	if c == nil {
 		return nil
 	}
-	if c.CodingService != nil {
-		c.CodingService.Close()
-	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var shutdownErr error
+	// Stop all producers first; then wait for their in-flight work before DB close.
 	if c.workerCancel != nil {
 		c.workerCancel()
 	}
+	if c.CodingService != nil {
+		if err := c.CodingService.CloseContext(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown coding service: %w", err))
+		}
+	}
 	if c.workerDone != nil {
-		<-c.workerDone
+		select {
+		case <-c.workerDone:
+		case <-shutdownCtx.Done():
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown workers: %w", shutdownCtx.Err()))
+		}
+	}
+	if shutdownErr != nil {
+		return shutdownErr
 	}
 	if c.DB == nil {
 		return nil

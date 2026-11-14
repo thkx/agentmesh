@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	dom "github.com/thkx/agentmesh/internal/domain/tool"
@@ -27,15 +28,38 @@ func NewToolHandler(e *tools.Engine, r *tools.Registry, w *workspace.Manager, a 
 func (h *ToolHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g := r.Group("/tools")
 	g.GET("", h.list)
+	g.POST("/:name/approvals", h.issueApproval)
 	g.POST("/:name/invoke", h.invoke)
 	g.GET("/audit", h.listAudit)
 }
 func (h *ToolHandler) list(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"tools": h.registry.List()}) }
+func (h *ToolHandler) issueApproval(c *gin.Context) {
+	var in struct {
+		WorkspaceID string          `json:"workspace_id"`
+		Arguments   json.RawMessage `json:"arguments"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(400, gin.H{"code": "invalid_request"})
+		return
+	}
+	ws, err := h.workspaces.Resolve(in.WorkspaceID)
+	if err != nil {
+		c.JSON(400, gin.H{"code": "invalid_workspace"})
+		return
+	}
+	token, expires, err := h.engine.IssueApproval(c.Request.Context(), c.Param("name"), in.Arguments, ws.Path, 2*time.Minute)
+	if err != nil {
+		c.JSON(http.StatusConflict, gin.H{"code": "tool_approval_failed", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"approval_id": token, "expires_at": expires})
+}
+
 func (h *ToolHandler) invoke(c *gin.Context) {
 	var in struct {
 		WorkspaceID string          `json:"workspace_id"`
 		Arguments   json.RawMessage `json:"arguments"`
-		Approved    bool            `json:"approved"`
+		ApprovalID  string          `json:"approval_id"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		c.JSON(400, gin.H{"code": "invalid_request"})
@@ -52,7 +76,7 @@ func (h *ToolHandler) invoke(c *gin.Context) {
 		return
 	}
 	defer release()
-	result, err := h.engine.Invoke(c.Request.Context(), c.Param("name"), in.Arguments, ws.Path, in.Approved)
+	result, err := h.engine.InvokeWithApproval(c.Request.Context(), c.Param("name"), in.Arguments, ws.Path, in.ApprovalID)
 	if err != nil {
 		status := http.StatusBadRequest
 		switch {

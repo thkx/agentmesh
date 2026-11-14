@@ -298,6 +298,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	toolPolicy := toolpolicy.Static{ReadEnabled: true, WriteEnabled: true, ExecuteEnabled: true, RequireApprovalForWrite: true, RequireApprovalForExecute: true}
 	toolEngine := tools.NewEngine(toolRegistry, toolPolicy, toolAudit)
+	toolEngine.SetApprovalStore(toolAudit)
 	agentRuntime, err := agentruntime.New(gateway, toolEngine, workspaceManager, agentruntime.Config{DefaultMaxSteps: cfg.Agent.Runtime.MaxSteps, DefaultMaxToolCalls: cfg.Agent.Runtime.MaxToolCalls, MaxContextChars: cfg.Agent.Runtime.MaxContextChars, MaxContextTokens: cfg.Agent.Runtime.MaxContextTokens, MaxConcurrent: cfg.Agent.Runtime.MaxConcurrent, DefaultTimeout: time.Duration(cfg.Agent.Runtime.TimeoutSeconds) * time.Second})
 	if err != nil {
 		_ = sqliteDB.Close()

@@ -17,5 +17,5 @@ coverage.out
 
 m
 
-verify.sh
+verify*.sh
 apply_fixes.py

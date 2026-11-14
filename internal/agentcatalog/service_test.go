@@ -5,57 +5,114 @@ import (
 	"errors"
 	dom "github.com/thkx/agentmesh/internal/domain/agent"
 	"testing"
-	"time"
 )
 
-type fakeRepo struct {
-	d      dom.Definition
-	runs   []RunRecord
-	result dom.Result
+type catalogRepoFake struct {
+	definition dom.Definition
+	run        RunRecord
+	result     dom.Result
+	finishErr  error
 }
 
-func (f *fakeRepo) Create(_ context.Context, d dom.Definition) error { f.d = d; return nil }
-func (f *fakeRepo) Get(_ context.Context, id string) (dom.Definition, error) {
-	if id != f.d.ID {
+func (r *catalogRepoFake) Create(context.Context, dom.Definition) error { return nil }
+func (r *catalogRepoFake) Get(_ context.Context, id string) (dom.Definition, error) {
+	if id != r.definition.ID {
 		return dom.Definition{}, ErrNotFound
 	}
-	return f.d, nil
+	return r.definition, nil
 }
-func (f *fakeRepo) List(context.Context) ([]dom.Definition, error)   { return []dom.Definition{f.d}, nil }
-func (f *fakeRepo) Update(_ context.Context, d dom.Definition) error { f.d = d; return nil }
-func (f *fakeRepo) Delete(context.Context, string) error             { return nil }
-func (f *fakeRepo) RecordRun(_ context.Context, r RunRecord) error {
-	f.runs = append(f.runs, r)
-	return nil
+func (r *catalogRepoFake) List(context.Context) ([]dom.Definition, error) {
+	return []dom.Definition{r.definition}, nil
 }
-func (f *fakeRepo) FinishRun(_ context.Context, _ string, r dom.Result) error {
-	f.result = r
-	return nil
-}
-func (f *fakeRepo) GetRun(context.Context, string) (RunRecord, error) {
-	return RunRecord{}, ErrNotFound
-}
-func (f *fakeRepo) ListRuns(context.Context, string, int) ([]RunRecord, error) { return f.runs, nil }
-
-type fakeRunner struct{}
-
-func (fakeRunner) Run(_ context.Context, t dom.Task) (dom.Result, error) {
-	if t.SystemPrompt != "system" || t.Prompt != "do work" || t.Temperature == nil || *t.Temperature != 0.4 {
-		return dom.Result{}, errors.New("task mapping failed")
+func (r *catalogRepoFake) Update(context.Context, dom.Definition) error   { return nil }
+func (r *catalogRepoFake) Delete(context.Context, string) error           { return nil }
+func (r *catalogRepoFake) RecordRun(_ context.Context, v RunRecord) error { r.run = v; return nil }
+func (r *catalogRepoFake) FinishRun(_ context.Context, id string, v dom.Result) error {
+	if id != r.run.ID {
+		return ErrNotFound
 	}
-	return dom.Result{TaskID: t.ID, Status: dom.StatusSucceeded, FinishedAt: time.Now()}, nil
+	if r.finishErr != nil {
+		return r.finishErr
+	}
+	r.result = v
+	return nil
 }
-func TestServiceRunDefinition(t *testing.T) {
-	r := &fakeRepo{d: dom.Definition{ID: "a1", Name: "agent", SystemPrompt: "system", ModelID: "m1", Temperature: 0.4, Enabled: true}}
-	s, err := NewService(r, fakeRunner{})
+func (r *catalogRepoFake) GetRun(context.Context, string) (RunRecord, error) { return r.run, nil }
+func (r *catalogRepoFake) ListRuns(context.Context, string, int) ([]RunRecord, error) {
+	return []RunRecord{r.run}, nil
+}
+
+type catalogRunnerFake func(context.Context, dom.Task) (dom.Result, error)
+
+func (f catalogRunnerFake) Run(ctx context.Context, t dom.Task) (dom.Result, error) { return f(ctx, t) }
+func newCatalogTestService(t *testing.T, runner Runner, repo *catalogRepoFake) *Service {
+	t.Helper()
+	s, err := NewService(repo, runner)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := s.Run(context.Background(), "a1", "ws1", "do work")
-	if err != nil {
-		t.Fatal(err)
+	return s
+}
+func validDefinition() dom.Definition {
+	return dom.Definition{ID: "agent-1", Name: "Test Agent", SystemPrompt: "system", ModelID: "model-1", Enabled: true, MaxSteps: 4, MaxToolCalls: 4, TimeoutSeconds: 30}
+}
+
+func TestRunPersistsFailedStatusWhenRunnerFails(t *testing.T) {
+	repo := &catalogRepoFake{definition: validDefinition()}
+	want := errors.New("runtime failed")
+	service := newCatalogTestService(t, catalogRunnerFake(func(context.Context, dom.Task) (dom.Result, error) { return dom.Result{}, want }), repo)
+	result, err := service.Run(context.Background(), "agent-1", "workspace-1", "do work")
+	if !errors.Is(err, want) {
+		t.Fatalf("error=%v", err)
 	}
-	if got.Status != dom.StatusSucceeded || len(r.runs) != 1 || r.result.TaskID != got.TaskID {
-		t.Fatalf("unexpected result: %#v %#v", got, r)
+	if result.Status != dom.StatusFailed || repo.result.Status != dom.StatusFailed {
+		t.Fatalf("result=%s persisted=%s", result.Status, repo.result.Status)
+	}
+}
+
+func TestRunPersistsCanceledAndTimedOutStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		cause error
+		want  dom.Status
+	}{{"canceled", context.Canceled, dom.StatusCanceled}, {"timed_out", context.DeadlineExceeded, dom.StatusTimedOut}} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &catalogRepoFake{definition: validDefinition()}
+			service := newCatalogTestService(t, catalogRunnerFake(func(context.Context, dom.Task) (dom.Result, error) { return dom.Result{}, tc.cause }), repo)
+			result, err := service.Run(context.Background(), "agent-1", "workspace-1", "do work")
+			if !errors.Is(err, tc.cause) {
+				t.Fatalf("error=%v", err)
+			}
+			if result.Status != tc.want || repo.result.Status != tc.want {
+				t.Fatalf("result=%s persisted=%s want=%s", result.Status, repo.result.Status, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunReturnsFinishPersistenceFailure(t *testing.T) {
+	repo := &catalogRepoFake{definition: validDefinition(), finishErr: errors.New("disk unavailable")}
+	service := newCatalogTestService(t, catalogRunnerFake(func(context.Context, dom.Task) (dom.Result, error) {
+		return dom.Result{Status: dom.StatusSucceeded, Content: "done"}, nil
+	}), repo)
+	_, err := service.Run(context.Background(), "agent-1", "workspace-1", "do work")
+	if err == nil {
+		t.Fatal("expected finish persistence error")
+	}
+}
+
+func TestRunFinishPersistenceUsesIndependentBoundedContext(t *testing.T) {
+	repo := &catalogRepoFake{definition: validDefinition()}
+	service := newCatalogTestService(t, catalogRunnerFake(func(ctx context.Context, _ dom.Task) (dom.Result, error) {
+		return dom.Result{}, ctx.Err()
+	}), repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := service.Run(ctx, "agent-1", "workspace-1", "do work")
+	if err == nil {
+		t.Fatal("expected canceled runner result")
+	}
+	if repo.result.Status != dom.StatusCanceled {
+		t.Fatalf("persisted status=%s", repo.result.Status)
 	}
 }

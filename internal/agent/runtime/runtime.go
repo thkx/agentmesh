@@ -589,6 +589,10 @@ func stableLegacyCallID(taskID string, step int, name string, args []byte) strin
 }
 
 func (r *Runtime) invokeTool(ctx context.Context, taskID, callID, name string, args json.RawMessage, workspacePath string, approved bool) (any, error) {
+	ctx = tools.WithAgentInvocation(ctx)
+	if approved {
+		ctx = tools.WithAgentToolGrant(ctx, name)
+	}
 	r.mu.RLock()
 	ledger := r.toolLedger
 	r.mu.RUnlock()

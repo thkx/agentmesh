@@ -77,7 +77,14 @@ func (s *Service) Run(ctx context.Context, definitionID, workspaceID, prompt str
 		if result.Error == "" {
 			result.Error = runErr.Error()
 		}
-		result.Status = dom.StatusFailed
+		switch {
+		case errors.Is(runErr, context.Canceled):
+			result.Status = dom.StatusCanceled
+		case errors.Is(runErr, context.DeadlineExceeded):
+			result.Status = dom.StatusTimedOut
+		default:
+			result.Status = dom.StatusFailed
+		}
 	}
 	if result.Status == "" {
 		result.Status = dom.StatusFailed

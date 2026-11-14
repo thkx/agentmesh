@@ -29,11 +29,21 @@ func (r *Repository) Create(ctx context.Context, req CreateRequest) (Task, error
 	if t.TimeoutSeconds == 0 {
 		t.TimeoutSeconds = 1800
 	}
-	_, err := r.db.ExecContext(ctx, `INSERT INTO coding_tasks(id,title,repository_path,model_id,prompt,status,test_command_json,max_repair_attempts,timeout_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Title, t.RepositoryPath, t.ModelID, t.Prompt, t.Status, string(cmd), t.MaxRepairAttempts, t.TimeoutSeconds, now.Unix(), now.Unix())
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO coding_tasks(id,title,repository_path,model_id,prompt,status,test_command_json,max_repair_attempts,timeout_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Title, t.RepositoryPath, t.ModelID, t.Prompt, t.Status, string(cmd), t.MaxRepairAttempts, t.TimeoutSeconds, now.Unix(), now.Unix())
 	if err != nil {
 		return Task{}, fmt.Errorf("create coding task: %w", err)
 	}
-	_ = r.Event(ctx, t.ID, "task.created", map[string]any{"status": t.Status})
+	if err = insertEvent(ctx, tx, t.ID, "task.created", map[string]any{"status": t.Status}); err != nil {
+		return Task{}, fmt.Errorf("persist task.created event: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return Task{}, err
+	}
 	return t, nil
 }
 
@@ -100,13 +110,69 @@ func unix(t time.Time) int64 {
 	}
 	return t.Unix()
 }
-func (r *Repository) Event(ctx context.Context, taskID, kind string, payload any) error {
-	b, e := json.Marshal(payload)
-	if e != nil {
-		return e
+
+type eventExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertEvent(ctx context.Context, execer eventExecer, taskID, kind string, payload any) error {
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
 	}
-	_, e = r.db.ExecContext(ctx, `INSERT INTO coding_task_events(id,task_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?)`, uuid.NewString(), taskID, kind, string(b), time.Now().UTC().Unix())
-	return e
+	_, err = execer.ExecContext(ctx, `INSERT INTO coding_task_events(id,task_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?)`, uuid.NewString(), taskID, kind, string(b), time.Now().UTC().Unix())
+	return err
+}
+func (r *Repository) Event(ctx context.Context, taskID, kind string, payload any) error {
+	return insertEvent(ctx, r.db, taskID, kind, payload)
+}
+
+// ClaimWithEvent commits the claim and its event atomically.
+func (r *Repository) ClaimWithEvent(ctx context.Context, id, kind string, payload any) (bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Unix()
+	result, err := tx.ExecContext(ctx, `UPDATE coding_tasks SET status='running',started_at=?,finished_at=0,error='',updated_at=? WHERE id=? AND status='pending'`, now, now, id)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil || n != 1 {
+		return false, err
+	}
+	if err = insertEvent(ctx, tx, id, kind, payload); err != nil {
+		return false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// UpdateWithEvent atomically persists task state and the corresponding domain event.
+func (r *Repository) UpdateWithEvent(ctx context.Context, t Task, kind string, payload any) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	resultJSON, _ := json.Marshal(t.Result)
+	result, err := tx.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=? WHERE id=?`, t.Status, t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ID)
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := result.RowsAffected(); rowsErr != nil {
+		return rowsErr
+	} else if n != 1 {
+		return ErrNotFound
+	}
+	if err = insertEvent(ctx, tx, t.ID, kind, payload); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (r *Repository) AddStep(ctx context.Context, s Step) error {
 	inputJSON := encodeJSONText(s.Input)
@@ -152,12 +218,18 @@ func (r *Repository) Steps(ctx context.Context, id string) ([]Step, error) {
 	}
 	return out, rows.Err()
 }
+
 func (r *Repository) SaveSnapshot(ctx context.Context, s Snapshot) error {
 	_, e := r.db.ExecContext(ctx, `INSERT INTO coding_task_snapshots(id,task_id,label,commit_hash,diff,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), s.TaskID, s.Label, s.CommitHash, s.Diff, time.Now().UTC().Unix())
 	return e
 }
+
 func (r *Repository) Events(ctx context.Context, id string) ([]Event, error) {
-	rows, e := r.db.QueryContext(ctx, `SELECT id,task_id,event_type,payload_json,created_at FROM coding_task_events WHERE task_id=? ORDER BY created_at,id`, id)
+	// coding_task_events is an append-only SQLite event log. created_at currently
+	// has second precision, so ordering by (created_at, id) can reorder events
+	// created in the same second because IDs are random UUIDs. rowid preserves
+	// the actual insertion order for this rowid-backed table.
+	rows, e := r.db.QueryContext(ctx, `SELECT id,task_id,event_type,payload_json,created_at FROM coding_task_events WHERE task_id=? ORDER BY rowid`, id)
 	if e != nil {
 		return nil, e
 	}

@@ -83,3 +83,38 @@ func TestRepositoryPersistsStepOutputAsText(t *testing.T) {
 		t.Fatalf("unexpected steps: %#v", steps)
 	}
 }
+
+func TestRepositoryCreateClaimAndUpdateEventsAreAtomic(t *testing.T) {
+	r := testRepository(t)
+	ctx := context.Background()
+	task, err := r.Create(ctx, CreateRequest{ID: "events-1", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := r.Events(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "task.created" {
+		t.Fatalf("create event missing: %#v", events)
+	}
+	claimed, err := r.ClaimWithEvent(ctx, task.ID, "task.started", nil)
+	if err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
+	task, err = r.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Status = StatusSucceeded
+	if err = r.UpdateWithEvent(ctx, task, "task.succeeded", map[string]bool{"ok": true}); err != nil {
+		t.Fatal(err)
+	}
+	events, err = r.Events(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[1].Type != "task.started" || events[2].Type != "task.succeeded" {
+		t.Fatalf("unexpected lifecycle events: %#v", events)
+	}
+}
