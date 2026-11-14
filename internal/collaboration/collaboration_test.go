@@ -76,3 +76,17 @@ func TestInboxReceiptIsIdempotentPerAgent(t *testing.T){
  if len(items)!=1{t.Fatalf("expected one pending inbox event, got %d",len(items))}
  if err=s.AckInbox(ctx,a.ID,event.ID,"handled");err!=nil{t.Fatal(err)}
 }
+
+func TestDecisionGateRequiresApprovalForPrivilegedActions(t *testing.T){
+ ctx:=context.Background();s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Governed",Slug:"governed",AutonomyMode:"hybrid"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Delegate",Role:"planner"});if err!=nil{t.Fatal(err)}
+ decision,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"delegate",ResourceType:"task",ResourceID:"task-1",Reason:"split research"});if err!=nil{t.Fatal(err)}
+ if decision.Outcome!="approval_required"||decision.ApprovalID==""{t.Fatalf("expected approval gate, got %+v",decision)}
+ approvals,err:=s.ListApprovals(ctx,w.ID,"pending",10);if err!=nil{t.Fatal(err)}
+ if len(approvals)!=1||approvals[0].ID!=decision.ApprovalID{t.Fatalf("unexpected approvals: %+v",approvals)}
+ resolved,err:=s.ResolveApproval(ctx,decision.ApprovalID,"human-reviewer","approved","scope is safe");if err!=nil{t.Fatal(err)}
+ if resolved.Status!="approved"{t.Fatalf("expected approved, got %s",resolved.Status)}
+ allowed,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"claim"});if err!=nil{t.Fatal(err)}
+ if allowed.Outcome!="allowed"{t.Fatalf("claim should be allowed in hybrid mode: %+v",allowed)}
+}
