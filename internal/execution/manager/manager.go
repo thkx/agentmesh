@@ -236,6 +236,20 @@ func (m *Manager) Resolve(ctx context.Context, id string, status dom.LifecycleSt
 	if current.Status != dom.LifecycleInterrupted && current.Status != dom.LifecycleNeedsReconciliation {
 		return dom.Entity{}, dom.ErrInvalidTransition
 	}
+	attempts, err := m.store.ListAttempts(ctx, id)
+	if err != nil {
+		return dom.Entity{}, err
+	}
+	for _, attempt := range attempts {
+		if attempt.Status != dom.AttemptRunning {
+			continue
+		}
+		_, finishErr := m.store.FinishAttempt(ctx, attempt.ID, dom.AttemptUnknown, attempt.RuntimeRef, nil,
+			"runtime outcome unresolved; execution resolved by operator")
+		if finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
+			return dom.Entity{}, finishErr
+		}
+	}
 	updated, err := m.store.Transition(ctx, id,
 		[]dom.LifecycleStatus{dom.LifecycleInterrupted, dom.LifecycleNeedsReconciliation},
 		status, "operator resolution: "+reason, result)

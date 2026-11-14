@@ -282,6 +282,10 @@ func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
 		Input: json.RawMessage(`{"id":"task-needs-reconcile"}`), CreatedAt: now, UpdatedAt: now,
 	}
 	if _, err := store.Create(context.Background(), entity); err != nil { t.Fatal(err) }
+	if _, err := store.CreateAttempt(context.Background(), dom.Attempt{
+		ID: entity.ID + "-a-1", ExecutionID: entity.ID, Number: 1, Runtime: dom.RuntimeAgent,
+		Status: dom.AttemptRunning, Input: entity.Input, StartedAt: now,
+	}); err != nil { t.Fatal(err) }
 	result := json.RawMessage(`{"verified":true,"source":"operator"}`)
 	resolved, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, result, "verified the persisted artifact")
 	if err != nil { t.Fatal(err) }
@@ -290,6 +294,9 @@ func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
 	}
 	if resolved.Error != "operator resolution: verified the persisted artifact" {
 		t.Fatalf("resolution reason was not persisted: %q", resolved.Error)
+	}
+	if len(resolved.Attempts) != 1 || resolved.Attempts[0].Status != dom.AttemptUnknown {
+		t.Fatalf("uncertain runtime attempt must remain unknown: %+v", resolved.Attempts)
 	}
 }
 
