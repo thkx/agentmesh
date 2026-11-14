@@ -92,13 +92,15 @@ A queued runtime observation does not create a running Attempt. An Attempt is cr
 
 ## Recovery and safety
 
-At startup, the Execution Manager reconciles persisted queued and running executions after runtime adapters are registered:
+At startup, and periodically while the application is running, the Execution Manager reconciles persisted queued and running executions after runtime adapters are registered. Reconciliation scans bounded pages and repeats after transient adapter failures:
 
 - Queued executions are re-submitted through their runtime adapter. Adapters must make this operation idempotent against their existing runtime identity.
 - Running executions are observed, not blindly replayed.
 - Missing or ambiguous runtime outcomes are surfaced for reconciliation rather than silently marked successful.
 - Workflow cancellation is delegated to the Workflow Engine, which handles queued and active runs.
 - CLI work whose process state is lost is marked interrupted; it is not restarted automatically.
+- CLI executions are canceled and awaited during orderly application shutdown; queued CLI executions can be canceled before a process is launched.
+- Queued Coding tasks are canceled with a conditional SQLite state transition and an event in the same transaction, racing safely with worker claims.
 
 Runtime-specific queues and recovery mechanisms remain authoritative. The common Execution record is an observable coordination layer, not a replacement queue.
 

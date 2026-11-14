@@ -169,7 +169,7 @@ func TestGetQueuedDoesNotCreateRunningAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
+	a := &fakeAdapter{observation: Observation{Status: dom.LifecycleRunning}}
 	if err = m.Register(dom.RuntimeAgent, a); err != nil {
 		t.Fatal(err)
 	}
@@ -219,5 +219,8 @@ func TestReconcileScansAllPages(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if report.Scanned != 5 {
 		t.Fatalf("scanned=%d, want 5; report=%+v", report.Scanned, report)
+	}
+	if report.Recovered != 5 {
+		t.Fatalf("recovered=%d, want 5; report=%+v", report.Recovered, report)
 	}
 }
