@@ -1,29 +1,64 @@
-# AgentMesh Coding Event Order Fix
+# AgentMesh
 
-This is a minimal follow-up patch for the P0/P1 package. It changes only the event query ordering in `internal/coding/repository.go`.
+**AgentMesh is a local-first, Go-based platform for coordinating AI agents and their work.** It brings together model providers, tool execution, persistent Agent and Workflow runtimes, Coding Agent workspaces, and a common execution lifecycle.
 
-## Apply
+- English | [简体中文](README.zh-CN.md)
+- Documentation index: [docs/README.md](docs/README.md)
+- Unified execution management (P2): [docs/p2-execution.md](docs/p2-execution.md)
 
-From the AgentMesh repository root:
+## Project capabilities
+
+- **Model access:** provider and model registry, credential handling, routing and a common Model Gateway.
+- **Agent runtime:** persistent tasks, tool calling, capability checks, approvals, context and memory.
+- **Workflow runtime:** versioned DAGs, parallel branches, checkpoints, event history and recovery.
+- **Coding runtime:** isolated Git worktrees, coding-agent execution, sandboxed tests, patch inspection and repair.
+- **Unified execution (P2):** one Execution/Attempt lifecycle across Agent, Coding, Workflow and CLI runtimes, without replacing their existing queues.
+
+AgentMesh is a Go modular monolith backed by SQLite. Runtime-specific mechanisms remain in place and are integrated through adapters; P2 does not introduce a second generic job queue.
+
+## Requirements
+
+- Go **1.27.3** (see `go.mod`).
+- SQLite through `modernc.org/sqlite`; CGO is not required.
+- Docker and Git for sandboxed Coding Agent workflows.
+- Optional provider credentials and coding-agent CLIs, depending on the features you use.
+
+## Quick start
 
 ```bash
-git apply /path/to/fix.patch
+cp configs/config.example.yaml configs/config.yaml
+export OPENAI_PRIMARY_API_KEY="your-api-key"
+go run ./cmd/agentmesh --config configs/config.yaml
 ```
 
-If `git apply` reports that the patch does not apply, stop and send me the output; do not replace the whole repository file manually.
+The example configuration binds the HTTP server to `127.0.0.1:8080` and stores local data under `./data`. Adjust the configuration for your environment. Provider keys are supplied through environment variables; do not commit real credentials.
 
-## Root cause
-
-`coding_task_events.created_at` is stored with second precision (`Unix()`), while event IDs are random UUIDs. The previous query sorted by `created_at, id`, so events created within the same second could be returned in arbitrary UUID order, making a valid sequence such as `task.created -> task.started -> task.succeeded` appear out of order.
-
-The patch orders the current rowid-backed SQLite event table by `rowid`, which reflects insertion order. The current schema uses a TEXT primary key and does not declare `WITHOUT ROWID`.
-
-## Verify
+Health endpoints:
 
 ```bash
-gofmt -w internal/coding/repository.go
-go test -race ./internal/coding -run 'TestRepositoryCreateClaimAndUpdateEventsAreAtomic' -count=50
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8080/readyz
+```
+
+Keep the service on loopback unless you have explicitly configured and verified an appropriate authentication and network boundary. Do not expose a local development instance directly to the public internet.
+
+## Development and verification
+
+```bash
+go test ./...
 go test -race ./...
 go vet ./...
 go build ./...
 ```
+
+For the unified Execution layer:
+
+```bash
+bash scripts/verify-p2.sh
+```
+
+The P2 script formats Go files before running formatting, build, vet and race-test checks. Use the Go version declared by the repository.
+
+## Documentation
+
+Start with [docs/README.md](docs/README.md) for the documentation map, milestone history and source-of-truth rules. The root Chinese README contains the Chinese project overview. Historical milestone notes are retained as implementation records; their old validation notes describe the environment at the time they were written, not the current branch's CI status.

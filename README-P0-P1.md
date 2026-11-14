@@ -1,4 +1,6 @@
-# AgentMesh P0 / P1 修复包
+> Historical P0/P1 implementation note. This is not a current installation or patch-application guide. Use the current repository source, [project README](README.md), and [documentation index](docs/README.md) instead.
+
+# Historical notes: AgentMesh P0 / P1
 
 本包只覆盖 P0/P1 涉及的文件，不包含整个项目源码，也不会覆盖配置、路由静态资源等上一轮 hardening 文件。
 
