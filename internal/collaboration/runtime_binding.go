@@ -129,8 +129,7 @@ func (s *Service) RecordSessionExecution(ctx context.Context, sessionID, executi
 	now:=s.clock().UTC()
 	if terminal {
 		_,err:=s.db.ExecContext(ctx,`UPDATE agent_sessions SET current_execution_id=NULL,last_execution_id=?,last_task_id=?,
-			execution_count=execution_count+CASE WHEN COALESCE(last_execution_id,'')<>? THEN 1 ELSE 0 END,
-			updated_at=? WHERE id=? AND status='active'`,executionID,taskID,executionID,now.UnixMilli(),sessionID)
+			execution_count=execution_count+1,updated_at=? WHERE id=? AND status='active'`,executionID,taskID,now.UnixMilli(),sessionID)
 		return err
 	}
 	_,err:=s.db.ExecContext(ctx,`UPDATE agent_sessions SET current_execution_id=?,last_task_id=?,updated_at=?

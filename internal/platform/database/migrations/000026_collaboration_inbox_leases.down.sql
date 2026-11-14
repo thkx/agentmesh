@@ -1,3 +1,7 @@
 DROP INDEX IF EXISTS idx_collaboration_inbox_claim;
--- SQLite cannot drop added columns on all supported versions; migration rollback
--- intentionally preserves the additive lease metadata columns.
+ALTER TABLE collaboration_inbox DROP COLUMN last_error;
+ALTER TABLE collaboration_inbox DROP COLUMN next_attempt_at;
+ALTER TABLE collaboration_inbox DROP COLUMN attempts;
+ALTER TABLE collaboration_inbox DROP COLUMN lease_expires_at;
+ALTER TABLE collaboration_inbox DROP COLUMN lease_token;
+ALTER TABLE collaboration_inbox DROP COLUMN lease_owner;

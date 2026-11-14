@@ -82,7 +82,45 @@ func(s *Service) CreateChannel(ctx context.Context,v Channel)(Channel,error){if 
 }
 func(s *Service) GetChannel(ctx context.Context,id string)(Channel,error){var v Channel;var t int64;e:=s.db.QueryRowContext(ctx,"SELECT id,workspace_id,name,kind,conversation_id,created_by,created_at FROM collaboration_channels WHERE id=? AND archived_at IS NULL",id).Scan(&v.ID,&v.WorkspaceID,&v.Name,&v.Kind,&v.ConversationID,&v.CreatedBy,&t);if errors.Is(e,sql.ErrNoRows){return v,ErrNotFound};if e!=nil{return v,e};v.CreatedAt=time.UnixMilli(t).UTC();rows,e:=s.db.QueryContext(ctx,"SELECT agent_id FROM collaboration_channel_members WHERE channel_id=? ORDER BY joined_at",id);if e!=nil{return v,e};defer rows.Close();for rows.Next(){var a string;if e=rows.Scan(&a);e!=nil{return v,e};v.MemberIDs=append(v.MemberIDs,a)};return v,rows.Err()}
 func(s *Service) ListChannels(ctx context.Context,wid string)([]Channel,error){rows,e:=s.db.QueryContext(ctx,"SELECT id FROM collaboration_channels WHERE workspace_id=? AND archived_at IS NULL ORDER BY created_at DESC",wid);if e!=nil{return nil,e};defer rows.Close();ids:=[]string{};for rows.Next(){var id string;if e=rows.Scan(&id);e!=nil{return nil,e};ids=append(ids,id)};if e=rows.Err();e!=nil{return nil,e};out:=make([]Channel,0,len(ids));for _,id:=range ids{v,e:=s.GetChannel(ctx,id);if e!=nil{return nil,e};out=append(out,v)};return out,nil}
-func(s *Service) PostMessage(ctx context.Context,cid,role,name,content string)(conversation.Message,error){ch,e:=s.GetChannel(ctx,cid);if e!=nil{return conversation.Message{},e};m,e:=s.conversations.Append(ctx,ch.ConversationID,role,name,content,"","");if e!=nil{return m,e};_ = s.emit(ctx,ch.WorkspaceID,"channel",cid,"message.created",map[string]any{"channel_id":cid,"message_id":m.ID,"sequence":m.Sequence});return m,nil}
+func (s *Service) PostMessage(ctx context.Context, cid, role, name, content string) (conversation.Message, error) {
+	ch, err := s.GetChannel(ctx, cid)
+	if err != nil { return conversation.Message{}, err }
+	id, err := newID()
+	if err != nil { return conversation.Message{}, err }
+	now := s.clock().UTC()
+	message := conversation.Message{ID:id, ConversationID:ch.ConversationID, Role:role, Name:name, Content:content, CreatedAt:now}
+	if err = message.Validate(); err != nil { return conversation.Message{}, err }
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return conversation.Message{}, err }
+	defer tx.Rollback()
+	var archived int64
+	if err = tx.QueryRowContext(ctx, "SELECT archived_at FROM conversations WHERE id=?", ch.ConversationID).Scan(&archived); err != nil {
+		if errors.Is(err, sql.ErrNoRows) { return conversation.Message{}, conversation.ErrNotFound }
+		return conversation.Message{}, err
+	}
+	if archived != 0 { return conversation.Message{}, errors.New("conversation is archived") }
+	if err = tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(sequence),0)+1 FROM conversation_messages WHERE conversation_id=?", ch.ConversationID).Scan(&message.Sequence); err != nil {
+		return conversation.Message{}, err
+	}
+	message.TokenEstimate = (len([]rune(message.Content)) + 3) / 4
+	metadata, err := json.Marshal(message.Metadata)
+	if err != nil { return conversation.Message{}, err }
+	_, err = tx.ExecContext(ctx, `INSERT INTO conversation_messages
+		(id,conversation_id,sequence,role,name,content,tool_calls_json,tool_call_id,token_estimate,metadata_json,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, message.ID, message.ConversationID, message.Sequence, message.Role, message.Name,
+		message.Content, message.ToolCallsJSON, message.ToolCallID, message.TokenEstimate, string(metadata), now.UnixMilli())
+	if err != nil { return conversation.Message{}, err }
+	if _, err = tx.ExecContext(ctx, "UPDATE conversations SET updated_at=? WHERE id=?", now.UnixMilli(), ch.ConversationID); err != nil {
+		return conversation.Message{}, err
+	}
+	if err = s.writeEventTx(ctx, tx, ch.WorkspaceID, "channel", cid, "message.created",
+		map[string]any{"channel_id":cid,"message_id":message.ID,"sequence":message.Sequence}); err != nil {
+		return conversation.Message{}, err
+	}
+	if err = tx.Commit(); err != nil { return conversation.Message{}, err }
+	return message, nil
+}
 func(s *Service) Messages(ctx context.Context,cid string,after int64,limit int)([]conversation.Message,error){ch,e:=s.GetChannel(ctx,cid);if e!=nil{return nil,e};return s.conversations.Messages(ctx,ch.ConversationID,after,limit)}
 func(s *Service) CreateThread(ctx context.Context,v Thread)(Thread,error){if v.ID==""{v.ID,_=newID()};if _,e:=s.GetChannel(ctx,v.ChannelID);e!=nil{return v,e};v.CreatedAt=s.clock().UTC();_,e:=s.db.ExecContext(ctx,"INSERT INTO collaboration_threads(id,channel_id,title,root_message_id,created_by,created_at) VALUES(?,?,?,?,?,?)",v.ID,v.ChannelID,v.Title,v.RootMessageID,v.CreatedBy,v.CreatedAt.UnixMilli());return v,e}
 

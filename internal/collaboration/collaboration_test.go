@@ -183,3 +183,22 @@ func TestHandoffRequiresHumanApprovalInHybridMode(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	if child.ParentTaskID != parent.ID || assignment.AgentID != worker.ID { t.Fatalf("handoff did not complete after approval: %+v %+v", child, assignment) }
 }
+
+func TestPostMessageAndOutboxAreAtomic(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name:"Atomic",Slug:"atomic"})
+	if err != nil { t.Fatal(err) }
+	a, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Member",Role:"worker"})
+	if err != nil { t.Fatal(err) }
+	ch, err := s.CreateChannel(ctx, collaboration.Channel{WorkspaceID:w.ID,Name:"Atomic Channel",Kind:"team",MemberIDs:[]string{a.ID}})
+	if err != nil { t.Fatal(err) }
+	_, err = db.DB.ExecContext(ctx,`CREATE TRIGGER reject_message_outbox BEFORE INSERT ON collaboration_outbox
+		WHEN NEW.event_type='message.created' BEGIN SELECT RAISE(ABORT,'forced outbox failure'); END;`)
+	if err != nil { t.Fatal(err) }
+	if _, err = s.PostMessage(ctx,ch.ID,"user","operator","must roll back"); err == nil { t.Fatal("expected outbox failure") }
+	messages, err := s.Messages(ctx,ch.ID,0,20)
+	if err != nil { t.Fatal(err) }
+	if len(messages)!=0 { t.Fatalf("message persisted without its outbox event: %d",len(messages)) }
+}
