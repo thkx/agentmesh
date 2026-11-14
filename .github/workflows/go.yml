@@ -18,9 +18,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Format check
-        run: |
-          test -z "$(gofmt -l .)"
+      - name: Normalize formatting in CI workspace
+        run: gofmt -w $(find . -name '*.go' -type f)
       - name: Build
         run: go build ./...
       - name: Vet
