@@ -741,7 +741,7 @@ func (h *CollaborationHandler) addArtifactEvidence(c *gin.Context) {
 
 func (h *CollaborationHandler) verifyArtifact(c *gin.Context) {
 	var in struct {
-		Version int `json:"version"`
+		Version int                                      `json:"version"`
 		Policy  collaboration.ArtifactVerificationPolicy `json:"policy"`
 	}
 	if c.ShouldBindJSON(&in) != nil {
