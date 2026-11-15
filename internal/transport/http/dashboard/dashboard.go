@@ -15,7 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"sort"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -95,6 +95,8 @@ type pageData struct {
 	Artifacts     []artifactView
 	Evidence      []evidenceView
 	Events        []eventView
+	TimelineHasMore bool
+	TimelineNextURL string
 	RunResult     string
 }
 
@@ -171,6 +173,9 @@ func New(d Dependencies) *Handler {
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
+		executionRouter := gin.New()
+		handlers.NewUnifiedExecutionHandler(d.DB).RegisterRoutes(executionRouter.Group("/api/v1"))
+		h.executionAPI = executionRouter
 	}
 	if d.Catalog != nil {
 		catalogRouter := gin.New()
@@ -1095,49 +1100,48 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 	}
 
 	data.Events = []eventView{}
-	for _, stream := range []string{"lifecycle", "control"} {
-		table := "execution_events"
-		if stream == "control" {
-			table = "execution_control_events"
-		}
-		q := "SELECT sequence,event_type,actor_type,source,payload_json,occurred_at FROM " + table + " WHERE execution_id=? ORDER BY occurred_at DESC,sequence DESC LIMIT 100"
-		rows, err = h.db.QueryContext(c.Request.Context(), q, id)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
+	if h.executionAPI != nil {
+		query := url.Values{}
+		query.Set("limit", "50")
+		if raw := c.Query("after_time_ns"); raw != "" { query.Set("after_time_ns", raw) }
+		if raw := c.Query("after_stream"); raw != "" { query.Set("after_stream", raw) }
+		if raw := c.Query("after_sequence"); raw != "" { query.Set("after_sequence", raw) }
+		path := "/api/v1/managed-executions/" + url.PathEscape(id) + "/timeline?" + query.Encode()
+		req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(c.Request.Context())
+		rec := httptest.NewRecorder()
+		h.executionAPI.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK { return errors.New("could not load execution timeline") }
+		var response map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil { return err }
+		var items []map[string]json.RawMessage
+		if err := json.Unmarshal(response["items"], &items); err != nil { return err }
+		for _, item := range items {
 			var v eventView
-			var payload sql.NullString
-			var ts int64
-			v.Stream = stream
-			if err = rows.Scan(&v.Sequence, &v.Type, &v.Actor, &v.Source, &payload, &ts); err != nil {
-				rows.Close()
-				return err
-			}
-			v.Payload = payload.String
-			v.OccurredAt = time.Unix(0, ts).UTC().Format(time.RFC3339Nano)
-			v.OccurredNS = ts
+			var occurred time.Time
+			_ = json.Unmarshal(item["stream"], &v.Stream)
+			_ = json.Unmarshal(item["type"], &v.Type)
+			_ = json.Unmarshal(item["actor_type"], &v.Actor)
+			_ = json.Unmarshal(item["source"], &v.Source)
+			_ = json.Unmarshal(item["sequence"], &v.Sequence)
+			_ = json.Unmarshal(item["occurred_at"], &occurred)
+			v.OccurredAt = occurred.UTC().Format(time.RFC3339Nano)
 			data.Events = append(data.Events, v)
 		}
-		if err = rows.Err(); err != nil {
-			rows.Close()
-			return err
+		_ = json.Unmarshal(response["has_more"], &data.TimelineHasMore)
+		if data.TimelineHasMore {
+			var cursor map[string]json.RawMessage
+			if err := json.Unmarshal(response["next_cursor"], &cursor); err != nil { return err }
+			var afterTime, afterSequence int64
+			var afterStream string
+			_ = json.Unmarshal(cursor["after_time_ns"], &afterTime)
+			_ = json.Unmarshal(cursor["after_sequence"], &afterSequence)
+			_ = json.Unmarshal(cursor["after_stream"], &afterStream)
+			next := url.Values{}
+			next.Set("after_time_ns", strconv.FormatInt(afterTime, 10))
+			next.Set("after_sequence", strconv.FormatInt(afterSequence, 10))
+			next.Set("after_stream", afterStream)
+			data.TimelineNextURL = "/dashboard/executions/" + url.PathEscape(id) + "?" + next.Encode()
 		}
-		if err = rows.Close(); err != nil {
-			return err
-		}
-	}
-	sort.Slice(data.Events, func(i, j int) bool {
-		if data.Events[i].OccurredNS == data.Events[j].OccurredNS {
-			if data.Events[i].Stream == data.Events[j].Stream {
-				return data.Events[i].Sequence > data.Events[j].Sequence
-			}
-			return data.Events[i].Stream > data.Events[j].Stream
-		}
-		return data.Events[i].OccurredNS > data.Events[j].OccurredNS
-	})
-	if len(data.Events) > 100 {
-		data.Events = data.Events[:100]
 	}
 	return nil
 }
