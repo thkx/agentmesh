@@ -50,3 +50,8 @@ Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and 
 
 
 Workspace `max_agent_concurrency` is enforced inside the assignment-claim SQL statement. Expired leases do not consume capacity; active claimed assignments reserve one slot until completion, rejection or lease expiry. The limit is shared by all wakeup workers and API callers using the same SQLite database.
+
+
+Runtime bindings execute from their immutable definition snapshot, including the pinned model ID. The live definition is checked for continued enablement before execution, but editing a definition does not silently mutate an existing binding.
+
+Approval rejection is acknowledged only after the target assignment is rejected, or when it is already terminal. Transient claim failures are retried rather than silently discarded. Inbox retry exhaustion is covered by an explicit dead-letter test.

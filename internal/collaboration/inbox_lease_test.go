@@ -58,3 +58,17 @@ func TestInboxLeaseExpiryAndRetry(t *testing.T) {
 	if retry.Attempts != 2 { t.Fatalf("expected second attempt, got %d",retry.Attempts) }
 	if err = s.AckInboxLease(ctx,a.ID,retry.EventID,"worker-b",retry.LeaseToken,"ignored"); err != nil { t.Fatal(err) }
 }
+
+func TestInboxLeaseRetryExhaustionMovesToFailed(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=newInboxTestService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Dead Letter",Slug:"dead-letter"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Agent",Role:"worker"});if err!=nil{t.Fatal(err)}
+ if _,err=s.ReceiveEvent(ctx,a.ID,collaboration.Event{ID:"evt-dead",Type:"test.event",Payload:[]byte(`{"ok":true}`)});err!=nil{t.Fatal(err)}
+ lease,err:=s.ClaimInbox(ctx,a.ID,collaboration.InboxLeaseOptions{Owner:"worker",Duration:time.Minute,MaxAttempts:1});if err!=nil{t.Fatal(err)}
+ if _,err=s.FailInboxLease(ctx,a.ID,lease.EventID,"worker",lease.LeaseToken,"permanent failure",1);err!=nil{t.Fatal(err)}
+ var status,lastError string
+ if err=db.DB.QueryRowContext(ctx,"SELECT status,last_error FROM collaboration_inbox WHERE event_id='evt-dead'").Scan(&status,&lastError);err!=nil{t.Fatal(err)}
+ if status!="failed"||lastError!="permanent failure"{t.Fatalf("expected terminal failed event, got status=%q error=%q",status,lastError)}
+ if _,err=s.ClaimInbox(ctx,a.ID,collaboration.InboxLeaseOptions{Owner:"worker-2",Duration:time.Minute,MaxAttempts:1});!errors.Is(err,collaboration.ErrNotFound){t.Fatalf("failed event must not be claimable, got %v",err)}
+}

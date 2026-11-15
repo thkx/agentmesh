@@ -87,13 +87,15 @@ func (s *Service) GetRuntimeBinding(ctx context.Context, agentID string) (Runtim
 	var snapshot string
 	var enabled int
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT b.agent_id,b.definition_id,b.definition_version,d.model_id,
+	err := s.db.QueryRowContext(ctx, `SELECT b.agent_id,b.definition_id,b.definition_version,
 		b.runtime_workspace_id,b.definition_snapshot_json,b.enabled,b.created_at,b.updated_at
-		FROM agent_runtime_bindings b JOIN agent_definitions d ON d.id=b.definition_id
-		WHERE b.agent_id=?`, agentID).Scan(&out.AgentID,&out.DefinitionID,&out.DefinitionVersion,&out.ModelID,&out.RuntimeWorkspaceID,&snapshot,&enabled,&created,&updated)
+		FROM agent_runtime_bindings b
+		WHERE b.agent_id=?`, agentID).Scan(&out.AgentID,&out.DefinitionID,&out.DefinitionVersion,&out.RuntimeWorkspaceID,&snapshot,&enabled,&created,&updated)
 	if errors.Is(err,sql.ErrNoRows) { return out,ErrNotFound }
 	if err != nil { return out,err }
 	if err=json.Unmarshal([]byte(snapshot),&out.Definition);err!=nil{return out,err}
+	if out.Definition.ID!=out.DefinitionID||out.Definition.Version!=out.DefinitionVersion||strings.TrimSpace(out.Definition.ModelID)=="" { return out,ErrConflict }
+	out.ModelID=out.Definition.ModelID
 	out.Enabled=enabled==1
 	out.CreatedAt=time.UnixMilli(created).UTC()
 	out.UpdatedAt=time.UnixMilli(updated).UTC()

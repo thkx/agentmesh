@@ -113,7 +113,16 @@ func(w *WakeupWorker) handle(ctx context.Context, lease InboxLease) error {
 		if err!=nil{processErr=err;break}
 		if requester==lease.AgentID&&resourceType=="assignment"&&action=="claim"{
 			assignment,claimErr:=w.claimAssignmentForReject(ctx,resourceID)
-			if claimErr==nil{processErr=w.service.FailAssignment(ctx,assignment.ID,w.owner,assignment.ClaimVersion,"human rejected execution approval")}
+			if claimErr!=nil {
+				var assignmentStatus string
+				statusErr:=w.service.db.QueryRowContext(ctx,"SELECT status FROM task_assignments WHERE id=?",resourceID).Scan(&assignmentStatus)
+				if statusErr==nil&&(assignmentStatus=="completed"||assignmentStatus=="rejected") {
+					return w.service.AckInboxLease(ctx,lease.AgentID,lease.EventID,w.owner,lease.LeaseToken,"ignored")
+				}
+				processErr=claimErr
+			} else {
+				processErr=w.service.FailAssignment(ctx,assignment.ID,w.owner,assignment.ClaimVersion,"human rejected execution approval")
+			}
 		}
 	default:
 		return w.service.AckInboxLease(ctx,lease.AgentID,lease.EventID,w.owner,lease.LeaseToken,"ignored")
