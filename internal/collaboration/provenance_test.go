@@ -71,6 +71,15 @@ func TestArtifactExecutionAttemptProvenanceIsQueryableAndIdempotent(t *testing.T
 		t.Fatalf("unexpected evidence provenance: %+v", evidence)
 	}
 
+	if _, err = db.DB.ExecContext(ctx, `UPDATE collaboration_artifact_versions
+		SET source_attempt_id='attempt-other' WHERE id=?`, version.ID); err == nil {
+		t.Fatal("expected artifact version provenance to be immutable")
+	}
+	if _, err = db.DB.ExecContext(ctx, `UPDATE collaboration_artifact_evidence
+		SET attempt_id='attempt-other' WHERE id=?`, evidence.ID); err == nil {
+		t.Fatal("expected artifact evidence provenance to be immutable")
+	}
+
 	if _, err = service.CreateArtifactEvidenceWithProvenance(ctx, artifact.ID,
 		collaboration.CreateArtifactEvidenceProvenanceRequest{
 			VersionID: version.ID, Kind: "build", ExecutionID: "exec-source", AttemptID: "attempt-other",
