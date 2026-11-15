@@ -300,7 +300,10 @@ func TestRouterFailsOverAfterEndpointTimeout(t *testing.T) {
 	var secondCalls atomic.Int32
 	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		firstCalls.Add(1)
-		<-r.Context().Done()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(time.Second):
+		}
 	}))
 	defer first.Close()
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -328,7 +331,9 @@ func TestRouterFailsOverAfterEndpointTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := router.Generate(context.Background(), GenerateRequest{
+	requestCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	response, err := router.Generate(requestCtx, GenerateRequest{
 		Model: "timeout-model-key", Messages: []Message{{Role: "user", Content: "timeout"}},
 	})
 	if err != nil {
@@ -340,11 +345,11 @@ func TestRouterFailsOverAfterEndpointTimeout(t *testing.T) {
 	if firstCalls.Load() != 1 || secondCalls.Load() != 1 {
 		t.Fatalf("expected timeout failover, calls first=%d second=%d", firstCalls.Load(), secondCalls.Load())
 	}
-	var failures int
-	if err = db.QueryRow("SELECT COUNT(*) FROM ai_request_logs WHERE credential_id='timeout-credential-first' AND status='failure'").Scan(&failures); err != nil {
+	var failures, statusCode int
+	if err = db.QueryRow("SELECT COUNT(*),COALESCE(MAX(status_code),-1) FROM ai_request_logs WHERE credential_id='timeout-credential-first' AND status='failure'").Scan(&failures, &statusCode); err != nil {
 		t.Fatal(err)
 	}
-	if failures != 1 {
-		t.Fatalf("timed out attempt was not recorded as failure: %d", failures)
+	if failures != 1 || statusCode != 0 {
+		t.Fatalf("timed out attempt was not recorded as a network timeout: failures=%d status_code=%d", failures, statusCode)
 	}
 }
