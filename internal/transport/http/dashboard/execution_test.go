@@ -23,8 +23,8 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 		`CREATE TABLE execution_attempts (id TEXT PRIMARY KEY, execution_id TEXT, attempt_number INTEGER, runtime TEXT, status TEXT, started_at INTEGER, finished_at INTEGER)`,
 		`CREATE TABLE collaboration_artifact_versions (id TEXT, artifact_id TEXT, version INTEGER, media_type TEXT, content_sha256 TEXT, size_bytes INTEGER, source_execution_id TEXT, source_attempt_id TEXT)`,
 		`CREATE TABLE collaboration_artifact_evidence (id TEXT, artifact_id TEXT, version_id TEXT, kind TEXT, statement TEXT, execution_id TEXT, attempt_id TEXT, created_at INTEGER)`,
-		`CREATE TABLE execution_events (sequence INTEGER, event_type TEXT, actor_type TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT)`,
-		`CREATE TABLE execution_control_events (sequence INTEGER, event_type TEXT, actor_type TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT)`,
+		`CREATE TABLE execution_events (sequence INTEGER, event_id TEXT, event_key TEXT, event_type TEXT, actor_type TEXT, actor_id TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT, attempt_id TEXT)`,
+		`CREATE TABLE execution_control_events (sequence INTEGER, event_id TEXT, event_key TEXT, event_type TEXT, actor_type TEXT, actor_id TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT)`,
 		`INSERT INTO executions VALUES ('exec-1','agent','agent-runtime','task-1','succeeded',100,200)`,
 		`INSERT INTO execution_attempts VALUES ('attempt-1','exec-1',1,'agent-runtime','succeeded',100,200)`,
 		`INSERT INTO collaboration_artifact_versions VALUES ('version-1','artifact-1',1,'text/plain','abc123',12,'exec-1','attempt-1')`,
@@ -51,7 +51,7 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 			t.Fatalf("detail response missing %q: %s", want, rec.Body.String())
 		}
 	}
-	if strings.Index(rec.Body.String(), "attempt.succeeded") > strings.Index(rec.Body.String(), "cancel.requested") {
-		t.Fatal("timeline events are not ordered newest first")
+	if strings.Index(rec.Body.String(), "cancel.requested") > strings.Index(rec.Body.String(), "attempt.succeeded") {
+		t.Fatal("timeline events are not ordered oldest first")
 	}
 }
