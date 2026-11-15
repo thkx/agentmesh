@@ -155,6 +155,7 @@ func New(d Dependencies) *Handler {
 		agents:         d.AgentDefinitions,
 		workflowEngine: d.WorkflowEngine,
 		tmpl:           t,
+		loginAttempts: make(map[string][]time.Time),
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -267,7 +268,7 @@ func (h *Handler) login(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if !h.allowLogin(c.ClientIP()) {
+	if !h.allowLogin(remoteHost(c.Request)) {
 		c.AbortWithStatus(http.StatusTooManyRequests)
 		return
 	}
@@ -282,7 +283,7 @@ func (h *Handler) login(c *gin.Context) {
 	mac := hmac.New(sha256.New, []byte(h.token))
 	_, _ = mac.Write([]byte("agentmesh-dashboard-session:v1:" + value))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	h.clearLoginAttempts(c.ClientIP())
+	h.clearLoginAttempts(remoteHost(c.Request))
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    value + "." + sig,
@@ -1124,6 +1125,12 @@ func sameOrigin(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(u.Host, r.Host)
+}
+
+func remoteHost(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil { return r.RemoteAddr }
+	return host
 }
 
 func isLoopbackRequest(r *http.Request) bool {
