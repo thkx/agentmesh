@@ -141,7 +141,9 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 	case ProtocolGemini:
 		contents := make([]map[string]any, 0, len(messages))
 		for _, m := range messages {
-			contents = append(contents, map[string]any{"role": m["role"], "parts": []map[string]string{{"text": m["content"]}}})
+			role, _ := m["role"].(string)
+			content, _ := m["content"].(string)
+			contents = append(contents, map[string]any{"role": role, "parts": []map[string]string{{"text": content}}})
 		}
 		payload := map[string]any{"contents": contents}
 		if system != "" {
