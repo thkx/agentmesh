@@ -187,6 +187,10 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 		}
 	}
 
+	if observed.Status != e.Status && !dom.CanTransition(e.Status, observed.Status) {
+		return e, dom.ErrInvalidTransition
+	}
+
 	// A runtime can be queued between attempts or have a worker claim that has
 	// not crossed its execution boundary yet. Those are not running Attempts.
 	needsAttempt := !observed.AttemptNotStarted && (observed.Status == dom.LifecycleRunning ||
