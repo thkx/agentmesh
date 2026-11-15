@@ -3,8 +3,8 @@ package collaboration
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -13,16 +13,16 @@ import (
 const maxAgentSessionTranscriptEntryBytes = 256 << 10
 
 type AgentSessionTranscriptEntry struct {
-	ID              string    `json:"id"`
-	SessionID       string    `json:"session_id"`
-	AgentID         string    `json:"agent_id"`
-	ExecutionID     string    `json:"execution_id"`
-	TaskID          string    `json:"task_id"`
-	EntryType       string    `json:"entry_type"`
-	Content         string    `json:"content"`
-	ContentSHA256   string    `json:"content_sha256"`
-	ContentTruncated bool     `json:"content_truncated"`
-	CreatedAt       time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	SessionID        string    `json:"session_id"`
+	AgentID          string    `json:"agent_id"`
+	ExecutionID      string    `json:"execution_id"`
+	TaskID           string    `json:"task_id"`
+	EntryType        string    `json:"entry_type"`
+	Content          string    `json:"content"`
+	ContentSHA256    string    `json:"content_sha256"`
+	ContentTruncated bool      `json:"content_truncated"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 // AppendAgentSessionTranscript stores one immutable, idempotent execution
