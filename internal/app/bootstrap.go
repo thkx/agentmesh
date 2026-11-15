@@ -271,6 +271,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize provider runtime: %w", err)
 	}
+	// Agent Runtime, Workflow, Planner and Evaluator all share this gateway.
+	// Matching AI resource model keys are routed through the persisted
+	// multi-credential pool before any legacy single-key provider adapter.
+	gateway.SetDynamicRouter(airesource.NewModelGatewayRouter(aiResources, aiRouter))
 
 	credentialManager, err := appcredential.NewManager(credentialStore, credentialResolver, providers, providerRuntime)
 	if err != nil {
