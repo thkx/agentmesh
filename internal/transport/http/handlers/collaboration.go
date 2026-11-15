@@ -35,6 +35,7 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/agents/:id/runtime-binding", h.bindRuntime)
 	g.GET("/agents/:id/runtime-binding", h.getRuntimeBinding)
 	g.GET("/agents/:id/session", h.session)
+	g.GET("/agents/:id/session/transcript", h.sessionTranscript)
 	g.POST("/artifacts", h.createArtifact)
 	g.GET("/workspaces/:id/artifacts", h.listArtifacts)
 	g.GET("/artifacts/:id", h.getArtifact)
@@ -584,6 +585,26 @@ func (h *CollaborationHandler) session(c *gin.Context) {
 		return
 	}
 	c.JSON(200, v)
+}
+
+func (h *CollaborationHandler) sessionTranscript(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	items, err := h.service.ListAgentSessionTranscript(c, c.Param("id"), limit)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *CollaborationHandler) sessionTranscript(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	items, err := h.service.ListAgentSessionTranscript(c, c.Param("id"), limit)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 func (h *CollaborationHandler) agentTaskResults(c *gin.Context) {
