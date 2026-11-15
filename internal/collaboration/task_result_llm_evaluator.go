@@ -143,15 +143,32 @@ func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Conte
 	}
 
 	validRefs := make(map[string]struct{})
+	acceptanceRefs := make(map[string]struct{})
 	hasPassedVerification := false
 	for _, artifact := range evaluation.Artifacts {
+		// A previously rejected Artifact must not be reused as evidence for a
+		// later Assignment's acceptance decision.
+		if artifact.Artifact.Status == "rejected" {
+			continue
+		}
 		for _, evidence := range artifact.Evidence {
 			validRefs[evidence.ID] = struct{}{}
 		}
 		for _, verification := range artifact.Verifications {
 			validRefs[verification.ID] = struct{}{}
-			if verification.Outcome == "passed" {
-				hasPassedVerification = true
+		}
+		versionIsSubmitted := artifact.Artifact.SubmittedVersionID != "" &&
+			artifact.Artifact.SubmittedVersionID == artifact.Version.ID &&
+			(artifact.Artifact.Status == "submitted" || artifact.Artifact.Status == "accepted")
+		if versionIsSubmitted {
+			for _, evidence := range artifact.Evidence {
+				acceptanceRefs[evidence.ID] = struct{}{}
+			}
+			for _, verification := range artifact.Verifications {
+				acceptanceRefs[verification.ID] = struct{}{}
+				if verification.Outcome == "passed" {
+					hasPassedVerification = true
+				}
 			}
 		}
 	}
@@ -162,9 +179,14 @@ func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Conte
 		if _, ok := validRefs[ref]; !ok {
 			return humanReviewAssessment("reviewer cited evidence outside the supplied context; human review is required"), nil
 		}
+		if decision.Outcome == "accepted" {
+			if _, ok := acceptanceRefs[ref]; !ok {
+				return humanReviewAssessment("acceptance evidence must belong to the exact submitted Artifact Version"), nil
+			}
+		}
 	}
 	if decision.Outcome == "accepted" && !hasPassedVerification {
-		return humanReviewAssessment("acceptance requires at least one passed deterministic Artifact verification"), nil
+		return humanReviewAssessment("acceptance requires a passed verification for the exact submitted Artifact Version"), nil
 	}
 	return TaskResultAssessment{
 		Outcome: decision.Outcome, Reason: decision.Reason, Confidence: decision.Confidence,

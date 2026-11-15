@@ -35,7 +35,7 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 		Task:      collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
 		Result:    collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
 		Artifacts: []collaboration.TaskArtifactContext{{
-			Artifact:        collaboration.Artifact{ID: "artifact-1"},
+			Artifact:        collaboration.Artifact{ID: "artifact-1", Status: "submitted", SubmittedVersionID: "version-1"},
 			Version:         collaboration.ArtifactVersion{ID: "version-1", ContentSHA256: "digest"},
 			ContentIncluded: true,
 			Evidence:        []collaboration.ArtifactEvidence{{ID: evidenceID, Kind: "test"}},
@@ -64,6 +64,8 @@ func TestLLMTaskResultEvaluatorRejectsInventedEvidence(t *testing.T) {
 		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
 		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
+			Artifact:      collaboration.Artifact{Status: "submitted", SubmittedVersionID: "version-1"},
+			Version:       collaboration.ArtifactVersion{ID: "version-1"},
 			Evidence:      []collaboration.ArtifactEvidence{{ID: "real-evidence"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "real-verification", Outcome: "passed"}},
 		}},
@@ -87,6 +89,8 @@ func TestLLMTaskResultEvaluatorRequiresPassedArtifactVerificationForAcceptance(t
 		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
 		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
+			Artifact:      collaboration.Artifact{Status: "submitted", SubmittedVersionID: "version-1"},
+			Version:       collaboration.ArtifactVersion{ID: "version-1"},
 			Evidence:      []collaboration.ArtifactEvidence{{ID: "evidence-1"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "verification-1", Outcome: "needs_evidence"}},
 		}},
@@ -96,6 +100,56 @@ func TestLLMTaskResultEvaluatorRequiresPassedArtifactVerificationForAcceptance(t
 	}
 	if assessment.Outcome != "human_review" {
 		t.Fatalf("unverified artifact must require human review, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorCannotAcceptRejectedArtifactEvidence(t *testing.T) {
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(&fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"Looks good.","confidence":0.99,"evidence_refs":["evidence-old","verification-old"]}`,
+	}, func(context.Context, string) (string, error) { return "reviewer-model", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
+		Artifacts: []collaboration.TaskArtifactContext{{
+			Artifact:      collaboration.Artifact{ID: "old-artifact", Status: "rejected", SubmittedVersionID: "version-old"},
+			Version:       collaboration.ArtifactVersion{ID: "version-old"},
+			Evidence:      []collaboration.ArtifactEvidence{{ID: "evidence-old"}},
+			Verifications: []collaboration.ArtifactVerification{{ID: "verification-old", Outcome: "passed"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("rejected Artifact evidence must not support acceptance, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorRequiresSubmittedExactArtifactVersion(t *testing.T) {
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(&fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"Looks good.","confidence":0.99,"evidence_refs":["evidence-draft","verification-draft"]}`,
+	}, func(context.Context, string) (string, error) { return "reviewer-model", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
+		Artifacts: []collaboration.TaskArtifactContext{{
+			Artifact:      collaboration.Artifact{ID: "draft-artifact", Status: "draft"},
+			Version:       collaboration.ArtifactVersion{ID: "version-draft"},
+			Evidence:      []collaboration.ArtifactEvidence{{ID: "evidence-draft"}},
+			Verifications: []collaboration.ArtifactVerification{{ID: "verification-draft", Outcome: "passed"}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("draft Artifact evidence must not support acceptance, got %+v", assessment)
 	}
 }
 
