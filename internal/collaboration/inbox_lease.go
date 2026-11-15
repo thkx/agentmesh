@@ -168,7 +168,7 @@ func (s *Service) FailInboxLease(ctx context.Context, agentID, eventID, owner, t
 		return time.Time{}, err
 	}
 	if attempts >= maxAttempts {
-		_, err = s.db.ExecContext(ctx, `UPDATE collaboration_inbox
+		res, err := s.db.ExecContext(ctx, `UPDATE collaboration_inbox
 			SET status='failed', handled_at=?, lease_owner='', lease_token='', lease_expires_at=NULL, last_error=?
 			WHERE agent_id=? AND event_id=? AND status='processing' AND lease_owner=? AND lease_token=? AND lease_expires_at>?`,
 			now.UnixMilli(), cause, agentID, eventID, owner, token, now.UnixMilli())
