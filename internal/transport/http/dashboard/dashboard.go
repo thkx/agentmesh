@@ -21,17 +21,13 @@ import (
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
-	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
+	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/execution/manager"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
-	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
-	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
-	"github.com/thkx/agentmesh/internal/execution/manager"
-	"github.com/thkx/agentmesh/internal/workflow/authoring"
 )
 
 const sessionCookie = "agentmesh_dashboard"
