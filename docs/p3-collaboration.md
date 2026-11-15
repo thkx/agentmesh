@@ -110,6 +110,16 @@ A rejected result or a rejected submitted Artifact blocks its source Task. The e
 
 Artifact review and verification are separate: a deterministic verification pass does not constitute human acceptance. Each Artifact Version is immutable, evidence is tied to an exact version, submission pins a version, and a subsequent version must be verified and submitted again.
 
+## Agent Identity lifecycle
+
+Agent Identity lifecycle endpoints:
+
+- `POST /api/v1/collaboration/agents/:id/enable`
+- `POST /api/v1/collaboration/agents/:id/disable`
+- `DELETE /api/v1/collaboration/agents/:id` (recoverable soft-delete)
+- `POST /api/v1/collaboration/agents/:id/recover`
+
+Disable and delete are fenced while an unexpired Assignment lease is active. Deleted identities are omitted from active Workspace Agent listings; recovery restores the identity to `idle` without deleting historical execution or audit records.
 ## Additional collaboration API
 
 - `GET /api/v1/collaboration/agents/:id/task-results`
