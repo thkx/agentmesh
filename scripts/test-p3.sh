@@ -14,10 +14,10 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-API_BASE_URL="\${API_BASE_URL:-http://127.0.0.1:8080}"
-API_TOKEN="\${API_TOKEN:-}"
-SKIP_CODE_CHECKS="\${SKIP_CODE_CHECKS:-0}"
-SKIP_API_CHECKS="\${SKIP_API_CHECKS:-0}"
+API_BASE_URL="${API_BASE_URL:-http://127.0.0.1:8080}"
+API_TOKEN="${API_TOKEN:-}"
+SKIP_CODE_CHECKS="${SKIP_CODE_CHECKS:-0}"
+SKIP_API_CHECKS="${SKIP_API_CHECKS:-0}"
 PASS_COUNT=0
 FAIL_COUNT=0
 WARN_COUNT=0
@@ -156,7 +156,7 @@ if [ "$SKIP_API_CHECKS" != "1" ]; then
         check_array "Outbox dead letters" "/api/v1/collaboration/outbox/dead-letters" '.items'
 
         section "5. Optional Workspace and Agent checks"
-        if [ -n "\${P3_WORKSPACE_ID:-}" ]; then
+        if [ -n "${P3_WORKSPACE_ID:-}" ]; then
             check_http "Workspace detail" "/api/v1/collaboration/workspaces/$P3_WORKSPACE_ID" "200"
             check_array "Workspace agents" "/api/v1/collaboration/workspaces/$P3_WORKSPACE_ID/agents" '.items'
             check_array "Workspace channels" "/api/v1/collaboration/workspaces/$P3_WORKSPACE_ID/channels" '.items'
@@ -166,7 +166,7 @@ if [ "$SKIP_API_CHECKS" != "1" ]; then
         else
             warn "P3_WORKSPACE_ID not set; workspace-specific checks skipped"
         fi
-        if [ -n "\${P3_AGENT_ID:-}" ]; then
+        if [ -n "${P3_AGENT_ID:-}" ]; then
             check_http "Agent detail" "/api/v1/collaboration/agents/$P3_AGENT_ID" "200"
             check_http "Agent session" "/api/v1/collaboration/agents/$P3_AGENT_ID/session" "200"
             check_http "Agent transcript" "/api/v1/collaboration/agents/$P3_AGENT_ID/session/transcript" "200"
@@ -185,4 +185,8 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
     echo "P3 verification FAILED"
     exit 1
 fi
-echo "P3 verification completed without failed checks."
+if [ "$WARN_COUNT" -gt 0 ]; then
+    echo "P3 verification completed with warnings; review skipped checks above."
+else
+    echo "P3 verification PASSED."
+fi
