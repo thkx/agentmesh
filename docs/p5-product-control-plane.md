@@ -1,6 +1,6 @@
 # P5 Part 1 — Product Control Plane (M49–M52)
 
-**Status:** Architecture baseline  
+**Status:** Implementation in progress; see [Part 1 implementation record](p5-part1-implementation.md) and [delivery checklist](p5-part1-checklist.md). Acceptance is not declared until the exact final commit passes verification.  
 **Base:** `p4/unified-execution-core` at `46986d56828214e078515ab4dba664ba3ad49273`  
 **Implementation branch:** `p5/control-plane`  
 **Product decision:** Control Center first; Go `html/template` + HTMX + small amounts of vanilla JavaScript.
