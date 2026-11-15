@@ -41,11 +41,11 @@ func newRouterTestEnvironment(t *testing.T) (*Service, *sql.DB) {
 }
 
 func addRouterTestModel(t *testing.T, service *Service, modelID, modelKey string, endpoints []struct {
-	id string
-	url string
-	priority int
+	id           string
+	url          string
+	priority     int
 	credentialID string
-	key string
+	key          string
 }) {
 	t.Helper()
 	ctx := context.Background()
@@ -118,11 +118,11 @@ func TestRouterFailsOverAndPersistsHealthAndUsage(t *testing.T) {
 
 	service, db := newRouterTestEnvironment(t)
 	addRouterTestModel(t, service, "router-model", "router-model-key", []struct {
-		id string
-		url string
-		priority int
+		id           string
+		url          string
+		priority     int
 		credentialID string
-		key string
+		key          string
 	}{
 		{id: "endpoint-first", url: first.URL + "/v1", priority: 1, credentialID: "credential-first", key: "api-secret-first"},
 		{id: "endpoint-second", url: second.URL + "/v1", priority: 2, credentialID: "credential-second", key: "api-secret-second"},
