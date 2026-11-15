@@ -21,6 +21,9 @@ type upstreamError struct {
 func (e *upstreamError) Error() string {
 	return fmt.Sprintf("upstream request failed with status %d", e.Status)
 }
+
+// StatusCode lets the shared model gateway classify upstream failures.
+func (e *upstreamError) StatusCode() int { return e.Status }
 func endpointURL(base, path string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
 }
