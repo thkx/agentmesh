@@ -240,6 +240,29 @@ func TestDecisionGateRequiresApprovalForPrivilegedActions(t *testing.T) {
 	if allowed.Outcome != "allowed" { t.Fatalf("claim should be allowed in hybrid mode: %+v", allowed) }
 }
 
+func TestHandoffCreatesChildAndAssignmentAtomically(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Atomic Handoff",Slug:"atomic-handoff",AutonomyMode:"autonomous"});if err!=nil{t.Fatal(err)}
+ planner,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Planner",Role:"planner"});if err!=nil{t.Fatal(err)}
+ worker,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Worker",Role:"worker"});if err!=nil{t.Fatal(err)}
+ parent,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Parent task"});if err!=nil{t.Fatal(err)}
+ handoff:=collaboration.Handoff{RequesterAgentID:planner.ID,Goal:"Child task",Recipient:worker.ID,IdempotencyKey:"atomic-child",Reason:"split work"}
+ if _,err=db.DB.ExecContext(ctx,`CREATE TRIGGER reject_handoff_assignment BEFORE INSERT ON task_assignments
+  WHEN NEW.assigned_by='planner' BEGIN SELECT RAISE(ABORT,'forced assignment failure'); END;`);err!=nil{t.Fatal(err)}
+ if _,_,err=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);err==nil{t.Fatal("expected assignment insert failure")}
+ var children,childEvents int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_tasks WHERE parent_task_id=?",parent.ID).Scan(&children);err!=nil{t.Fatal(err)}
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_outbox WHERE event_type='task.created' AND aggregate_id IN (SELECT id FROM collaboration_tasks WHERE parent_task_id=?)",parent.ID).Scan(&childEvents);err!=nil{t.Fatal(err)}
+ if children!=0||childEvents!=0{t.Fatalf("handoff partially committed: children=%d child_events=%d",children,childEvents)}
+ if _,err=db.DB.ExecContext(ctx,"DROP TRIGGER reject_handoff_assignment");err!=nil{t.Fatal(err)}
+ child,assignment,err:=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);if err!=nil{t.Fatal(err)}
+ again,againAssignment,err:=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);if err!=nil{t.Fatal(err)}
+ if child.ID!=again.ID||assignment.ID!=againAssignment.ID{t.Fatal("handoff retry did not return the same child and assignment")}
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_tasks WHERE parent_task_id=?",parent.ID).Scan(&children);err!=nil{t.Fatal(err)}
+ if children!=1{t.Fatalf("expected one idempotent child task, got %d",children)}
+}
+
 func TestHandoffRequiresHumanApprovalInHybridMode(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)

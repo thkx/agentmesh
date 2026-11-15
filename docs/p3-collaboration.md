@@ -66,3 +66,6 @@ Pending approvals are expired by the Outbox dispatcher. Expiration is an atomic 
 
 
 An Agent Identity can hold only one live Assignment lease at a time. This protects its single active Session pointer when multiple application processes consume the same Inbox; workspace concurrency remains an independent upper bound across different agents.
+
+
+Task handoff is committed as one SQLite transaction: child Task, Assignment, state transition and both Outbox events either all persist or all roll back. A required handoff idempotency key ensures retries return the same child and assignment instead of creating duplicate delegated work.

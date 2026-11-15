@@ -236,16 +236,70 @@ func(s *Service) AckInbox(ctx context.Context,agentID,eventID,status string)erro
 
 func(s *Service) HandoffTask(ctx context.Context,parentID string,h Handoff,createdBy string)(Task,Assignment,error){
  parent,err:=s.GetTask(ctx,parentID);if err!=nil{return Task{},Assignment{},err}
- if strings.TrimSpace(h.Goal)==""||strings.TrimSpace(h.Recipient)==""||strings.TrimSpace(h.RequesterAgentID)==""||len(h.Goal)>240{return Task{},Assignment{},ErrInvalid}
+ h.Goal=strings.TrimSpace(h.Goal)
+ h.Recipient=strings.TrimSpace(h.Recipient)
+ h.RequesterAgentID=strings.TrimSpace(h.RequesterAgentID)
+ h.IdempotencyKey=strings.TrimSpace(h.IdempotencyKey)
+ if h.Goal==""||h.Recipient==""||h.RequesterAgentID==""||h.IdempotencyKey==""||len(h.Goal)>240{return Task{},Assignment{},ErrInvalid}
  requester,err:=s.GetAgent(ctx,h.RequesterAgentID);if err!=nil{return Task{},Assignment{},err}
  recipient,err:=s.GetAgent(ctx,h.Recipient);if err!=nil{return Task{},Assignment{},err}
  if requester.WorkspaceID!=parent.WorkspaceID||recipient.WorkspaceID!=parent.WorkspaceID{return Task{},Assignment{},ErrInvalid}
+ workspace,err:=s.GetWorkspace(ctx,parent.WorkspaceID);if err!=nil{return Task{},Assignment{},err}
+ if parent.DelegationDepth+1>workspace.MaxDelegationDepth{return Task{},Assignment{},ErrInvalid}
  decision,err:=s.EvaluateDecision(ctx,DecisionRequest{AgentID:requester.ID,Action:"delegate",ResourceType:"task",ResourceID:parent.ID,Reason:h.Reason})
- if err!=nil{return Task{},Assignment{},err};if decision.Outcome!="allowed"{return Task{},Assignment{},&ApprovalRequiredError{ApprovalID:decision.ApprovalID}}
+ if err!=nil{return Task{},Assignment{},err}
+ if decision.Outcome!="allowed"{return Task{},Assignment{},&ApprovalRequiredError{ApprovalID:decision.ApprovalID}}
  payload,err:=json.Marshal(h);if err!=nil{return Task{},Assignment{},err}
- key:=h.IdempotencyKey;if key!=""{key="handoff:"+parent.ID+":"+recipient.ID+":"+key}
- child,err:=s.CreateTask(ctx,Task{WorkspaceID:parent.WorkspaceID,ParentTaskID:parent.ID,Title:h.Goal,Description:string(payload),Type:parent.Type,Priority:parent.Priority,CreatedBy:createdBy,IdempotencyKey:key});if err!=nil{return Task{},Assignment{},err}
- assignment,err:=s.AssignTask(ctx,child.ID,recipient.ID,createdBy);if err!=nil{return Task{},Assignment{},err}
+ key:="handoff:"+parent.ID+":"+recipient.ID+":"+h.IdempotencyKey
+ now:=s.clock().UTC()
+ tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return Task{},Assignment{},err};defer tx.Rollback()
+
+ var child Task
+ var existingParent,existingKey sql.NullString
+ var createdAt,updatedAt int64
+ err=tx.QueryRowContext(ctx,`SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at
+  FROM collaboration_tasks WHERE workspace_id=? AND idempotency_key=?`,parent.WorkspaceID,key).
+  Scan(&child.ID,&child.WorkspaceID,&existingParent,&child.Title,&child.Description,&child.Type,&child.Status,&child.Priority,&child.CreatedBy,&existingKey,&child.DelegationDepth,&createdAt,&updatedAt)
+ if err==nil {
+  if !existingParent.Valid||existingParent.String!=parent.ID||child.Title!=h.Goal||child.Description!=string(payload)||!existingKey.Valid||existingKey.String!=key{return Task{},Assignment{},ErrConflict}
+  child.ParentTaskID=existingParent.String
+  child.IdempotencyKey=existingKey.String
+  child.CreatedAt=time.UnixMilli(createdAt).UTC()
+  child.UpdatedAt=time.UnixMilli(updatedAt).UTC()
+ } else if errors.Is(err,sql.ErrNoRows) {
+  childID,idErr:=newID();if idErr!=nil{return Task{},Assignment{},idErr}
+  child=Task{ID:childID,WorkspaceID:parent.WorkspaceID,ParentTaskID:parent.ID,Title:h.Goal,Description:string(payload),Type:parent.Type,Status:"open",Priority:parent.Priority,CreatedBy:createdBy,IdempotencyKey:key,DelegationDepth:parent.DelegationDepth+1,CreatedAt:now,UpdatedAt:now}
+  _,err=tx.ExecContext(ctx,`INSERT INTO collaboration_tasks(id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,child.ID,child.WorkspaceID,child.ParentTaskID,child.Title,child.Description,child.Type,child.Status,child.Priority,child.CreatedBy,child.IdempotencyKey,child.DelegationDepth,now.UnixMilli(),now.UnixMilli())
+  if err!=nil{return Task{},Assignment{},err}
+  if err=s.writeEventTx(ctx,tx,child.WorkspaceID,"task",child.ID,"task.created",child);err!=nil{return Task{},Assignment{},err}
+ } else { return Task{},Assignment{},err }
+
+ var assignment Assignment
+ var leaseExpiry sql.NullInt64
+ var assignmentCreated,assignmentUpdated int64
+ err=tx.QueryRowContext(ctx,`SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at
+  FROM task_assignments WHERE task_id=? AND agent_id=?`,child.ID,recipient.ID).
+  Scan(&assignment.ID,&assignment.TaskID,&assignment.AgentID,&assignment.Status,&assignment.AssignedBy,&assignment.LeaseOwner,&leaseExpiry,&assignment.ClaimVersion,&assignmentCreated,&assignmentUpdated)
+ if err==nil {
+  if leaseExpiry.Valid { v:=time.UnixMilli(leaseExpiry.Int64).UTC();assignment.LeaseExpiresAt=&v }
+  assignment.CreatedAt=time.UnixMilli(assignmentCreated).UTC()
+  assignment.UpdatedAt=time.UnixMilli(assignmentUpdated).UTC()
+  if err=tx.Commit();err!=nil{return Task{},Assignment{},err}
+  return child,assignment,nil
+ }
+ if !errors.Is(err,sql.ErrNoRows){return Task{},Assignment{},err}
+ if child.Status!="open"&&child.Status!="assigned"{return Task{},Assignment{},ErrConflict}
+ assignmentID,idErr:=newID();if idErr!=nil{return Task{},Assignment{},idErr}
+ assignment=Assignment{ID:assignmentID,TaskID:child.ID,AgentID:recipient.ID,Status:"pending",AssignedBy:createdBy,CreatedAt:now,UpdatedAt:now}
+ if _,err=tx.ExecContext(ctx,`INSERT INTO task_assignments(id,task_id,agent_id,status,assigned_by,created_at,updated_at)
+  VALUES(?,?,?,'pending',?,?,?)`,assignment.ID,assignment.TaskID,assignment.AgentID,assignment.AssignedBy,now.UnixMilli(),now.UnixMilli());err!=nil{return Task{},Assignment{},err}
+ res,err:=tx.ExecContext(ctx,`UPDATE collaboration_tasks SET status='assigned',updated_at=? WHERE id=? AND status IN ('open','assigned')`,now.UnixMilli(),child.ID)
+ if err!=nil{return Task{},Assignment{},err}
+ affected,err:=res.RowsAffected();if err!=nil{return Task{},Assignment{},err};if affected!=1{return Task{},Assignment{},ErrConflict}
+ child.Status="assigned";child.UpdatedAt=now
+ if err=s.writeEventTx(ctx,tx,child.WorkspaceID,"task",child.ID,"task.assigned",assignment);err!=nil{return Task{},Assignment{},err}
+ if err=tx.Commit();err!=nil{return Task{},Assignment{},err}
  return child,assignment,nil
 }
 func(s *Service) RenewAssignment(ctx context.Context,id,owner string,version int64,lease time.Duration)(Assignment,error){
