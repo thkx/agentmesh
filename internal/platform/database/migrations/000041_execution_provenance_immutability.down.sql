@@ -1,0 +1,2 @@
+DROP TRIGGER IF EXISTS artifact_evidence_provenance_validate_update;
+DROP TRIGGER IF EXISTS artifact_version_provenance_validate_update;
