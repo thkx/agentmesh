@@ -47,6 +47,7 @@ type AgentIdentity struct {
 	Capabilities []string  `json:"capabilities,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 type Channel struct {
 	ID             string    `json:"id,omitempty"`
@@ -299,7 +300,8 @@ func (s *Service) GetAgent(ctx context.Context, id string) (AgentIdentity, error
 	var d sql.NullString
 	var caps string
 	var c, u int64
-	e := s.db.QueryRowContext(ctx, "SELECT id,workspace_id,definition_id,name,description,role,status,capabilities_json,created_at,updated_at FROM agent_identities WHERE id=?", id).Scan(&v.ID, &v.WorkspaceID, &d, &v.Name, &v.Description, &v.Role, &v.Status, &caps, &c, &u)
+	var deleted sql.NullInt64
+	e := s.db.QueryRowContext(ctx, "SELECT a.id,a.workspace_id,a.definition_id,a.name,a.description,a.role,a.status,a.capabilities_json,a.created_at,a.updated_at,l.deleted_at FROM agent_identities a LEFT JOIN agent_identity_lifecycle l ON l.agent_id=a.id WHERE a.id=?", id).Scan(&v.ID, &v.WorkspaceID, &d, &v.Name, &v.Description, &v.Role, &v.Status, &caps, &c, &u, &deleted)
 	if errors.Is(e, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}
@@ -314,10 +316,11 @@ func (s *Service) GetAgent(ctx context.Context, id string) (AgentIdentity, error
 	}
 	v.CreatedAt = time.UnixMilli(c).UTC()
 	v.UpdatedAt = time.UnixMilli(u).UTC()
+	if deleted.Valid { value := time.UnixMilli(deleted.Int64).UTC(); v.DeletedAt = &value }
 	return v, nil
 }
 func (s *Service) ListAgents(ctx context.Context, wid string) ([]AgentIdentity, error) {
-	rows, e := s.db.QueryContext(ctx, "SELECT id FROM agent_identities WHERE workspace_id=? ORDER BY created_at", wid)
+	rows, e := s.db.QueryContext(ctx, "SELECT a.id FROM agent_identities a LEFT JOIN agent_identity_lifecycle l ON l.agent_id=a.id WHERE a.workspace_id=? AND l.deleted_at IS NULL ORDER BY a.created_at", wid)
 	if e != nil {
 		return nil, e
 	}
@@ -342,6 +345,94 @@ func (s *Service) ListAgents(ctx context.Context, wid string) ([]AgentIdentity, 
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// EnableAgent transitions a non-deleted Agent Identity to idle and emits an audit event.
+func (s *Service) EnableAgent(ctx context.Context, id string) (AgentIdentity, error) {
+	id = strings.TrimSpace(id)
+	if id == "" { return AgentIdentity{}, ErrInvalid }
+	agent, err := s.GetAgent(ctx, id)
+	if err != nil { return AgentIdentity{}, err }
+	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	now := s.clock().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return AgentIdentity{}, err }
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=? AND status<>'disabled' OR (id=? AND status='disabled' AND NOT EXISTS (SELECT 1 FROM agent_identity_lifecycle WHERE agent_id=? AND deleted_at IS NOT NULL))", now.UnixMilli(), id, id, id)
+	if err != nil { return AgentIdentity{}, err }
+	n, err := res.RowsAffected()
+	if err != nil { return AgentIdentity{}, err }
+	if n != 1 { return AgentIdentity{}, ErrConflict }
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.enabled", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
+	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	return s.GetAgent(ctx, id)
+}
+
+// DisableAgent prevents new assignment claims. Active leases must finish or expire first.
+func (s *Service) DisableAgent(ctx context.Context, id string) (AgentIdentity, error) {
+	id = strings.TrimSpace(id)
+	if id == "" { return AgentIdentity{}, ErrInvalid }
+	agent, err := s.GetAgent(ctx, id)
+	if err != nil { return AgentIdentity{}, err }
+	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	now := s.clock().UTC()
+	var active int
+	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil { return AgentIdentity{}, err }
+	if active > 0 { return AgentIdentity{}, ErrAgentBusy }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return AgentIdentity{}, err }
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=? AND status<>'disabled'", now.UnixMilli(), id)
+	if err != nil { return AgentIdentity{}, err }
+	n, err := res.RowsAffected()
+	if err != nil { return AgentIdentity{}, err }
+	if n != 1 { return AgentIdentity{}, ErrConflict }
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.disabled", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
+	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	return s.GetAgent(ctx, id)
+}
+
+// DeleteAgent is a recoverable soft-delete. Historical assignments and audit rows are preserved.
+func (s *Service) DeleteAgent(ctx context.Context, id string) (AgentIdentity, error) {
+	id = strings.TrimSpace(id)
+	if id == "" { return AgentIdentity{}, ErrInvalid }
+	agent, err := s.GetAgent(ctx, id)
+	if err != nil { return AgentIdentity{}, err }
+	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	now := s.clock().UTC()
+	var active int
+	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil { return AgentIdentity{}, err }
+	if active > 0 { return AgentIdentity{}, ErrAgentBusy }
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return AgentIdentity{}, err }
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "INSERT INTO agent_identity_lifecycle(agent_id,deleted_at,recovered_at) VALUES(?,?,NULL) ON CONFLICT(agent_id) DO UPDATE SET deleted_at=excluded.deleted_at,recovered_at=NULL", id, now.UnixMilli()); err != nil { return AgentIdentity{}, err }
+	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil { return AgentIdentity{}, err }
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.deleted", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
+	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	return s.GetAgent(ctx, id)
+}
+
+// RecoverAgent restores a soft-deleted Agent Identity without changing its historical records.
+func (s *Service) RecoverAgent(ctx context.Context, id string) (AgentIdentity, error) {
+	id = strings.TrimSpace(id)
+	if id == "" { return AgentIdentity{}, ErrInvalid }
+	agent, err := s.GetAgent(ctx, id)
+	if err != nil { return AgentIdentity{}, err }
+	if agent.DeletedAt == nil { return AgentIdentity{}, ErrConflict }
+	now := s.clock().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return AgentIdentity{}, err }
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identity_lifecycle SET deleted_at=NULL,recovered_at=? WHERE agent_id=? AND deleted_at IS NOT NULL", now.UnixMilli(), id)
+	if err != nil { return AgentIdentity{}, err }
+	n, err := res.RowsAffected()
+	if err != nil { return AgentIdentity{}, err }
+	if n != 1 { return AgentIdentity{}, ErrConflict }
+	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil { return AgentIdentity{}, err }
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.recovered", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
+	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	return s.GetAgent(ctx, id)
 }
 
 func (s *Service) CreateChannel(ctx context.Context, v Channel) (Channel, error) {
@@ -679,7 +770,7 @@ func (s *Service) AssignTask(ctx context.Context, tid, aid, by string) (Assignme
 	if t.WorkspaceID != a.WorkspaceID {
 		return Assignment{}, ErrInvalid
 	}
-	if a.Status == "disabled" {
+	if a.Status == "disabled" || a.DeletedAt != nil {
 		return Assignment{}, ErrConflict
 	}
 	if !hasRequiredCapabilities(a.Capabilities, t.RequiredCapabilities) {
@@ -756,7 +847,7 @@ func (s *Service) ClaimAssignment(ctx context.Context, id, owner string, lease t
 	defer tx.Rollback()
 	res, e := tx.ExecContext(ctx, `UPDATE task_assignments
  SET status='claimed',lease_owner=?,lease_expires_at=?,claim_version=claim_version+1,updated_at=?
- WHERE id=? AND (status='pending' OR (status='claimed' AND lease_expires_at<?))
+ WHERE id=? AND EXISTS (SELECT 1 FROM agent_identities ai LEFT JOIN agent_identity_lifecycle lifecycle ON lifecycle.agent_id=ai.id WHERE ai.id=task_assignments.agent_id AND ai.status<>'disabled' AND lifecycle.deleted_at IS NULL) AND (status='pending' OR (status='claimed' AND lease_expires_at<?))
  AND NOT EXISTS (
    SELECT 1 FROM task_assignments same_agent
    WHERE same_agent.agent_id=(SELECT agent_id FROM task_assignments WHERE id=?)
