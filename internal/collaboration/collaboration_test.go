@@ -263,6 +263,19 @@ func TestHandoffCreatesChildAndAssignmentAtomically(t *testing.T) {
  if children!=1{t.Fatalf("expected one idempotent child task, got %d",children)}
 }
 
+func TestPendingApprovalHasDatabaseLevelDeduplication(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Approval Dedupe",Slug:"approval-dedupe",AutonomyMode:"hybrid"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Planner",Role:"planner"});if err!=nil{t.Fatal(err)}
+ first,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"delegate",ResourceType:"task",ResourceID:"task-dedupe",Reason:"dedupe"});if err!=nil{t.Fatal(err)}
+ second,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"delegate",ResourceType:"task",ResourceID:"task-dedupe",Reason:"dedupe"});if err!=nil{t.Fatal(err)}
+ if first.ApprovalID==""||second.ApprovalID!=first.ApprovalID{t.Fatalf("pending approval was not reused: first=%q second=%q",first.ApprovalID,second.ApprovalID)}
+ var count int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_approvals WHERE workspace_id=? AND requester_agent_id=? AND resource_type='task' AND resource_id='task-dedupe' AND action='delegate' AND status='pending'",w.ID,a.ID).Scan(&count);err!=nil{t.Fatal(err)}
+ if count!=1{t.Fatalf("expected one pending approval, got %d",count)}
+}
+
 func TestHandoffRequiresHumanApprovalInHybridMode(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)

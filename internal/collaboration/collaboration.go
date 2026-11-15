@@ -340,8 +340,14 @@ func(s *Service) EvaluateDecision(ctx context.Context,req DecisionRequest)(Decis
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return DecisionResult{},err};defer tx.Rollback()
  if requiresApproval{
   expires:=now.Add(24*time.Hour)
-  _,err=tx.ExecContext(ctx,"INSERT INTO collaboration_approvals(id,workspace_id,requester_agent_id,resource_type,resource_id,action,reason,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?,'pending',?,?)",approvalID,agent.WorkspaceID,agent.ID,req.ResourceType,req.ResourceID,req.Action,req.Reason,now.UnixMilli(),expires.UnixMilli());if err!=nil{return DecisionResult{},err}
-  if err=s.writeEventTx(ctx,tx,agent.WorkspaceID,"approval",approvalID,"approval.requested",map[string]any{"approval_id":approvalID,"agent_id":agent.ID,"action":req.Action,"resource_type":req.ResourceType,"resource_id":req.ResourceID});err!=nil{return DecisionResult{},err}
+  res,insertErr:=tx.ExecContext(ctx,"INSERT OR IGNORE INTO collaboration_approvals(id,workspace_id,requester_agent_id,resource_type,resource_id,action,reason,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?,'pending',?,?)",approvalID,agent.WorkspaceID,agent.ID,req.ResourceType,req.ResourceID,req.Action,req.Reason,now.UnixMilli(),expires.UnixMilli());if insertErr!=nil{return DecisionResult{},insertErr}
+  inserted,rowsErr:=res.RowsAffected();if rowsErr!=nil{return DecisionResult{},rowsErr}
+  if inserted==0 {
+   lookupErr:=tx.QueryRowContext(ctx,"SELECT id FROM collaboration_approvals WHERE workspace_id=? AND requester_agent_id=? AND resource_type=? AND resource_id=? AND action=? AND status='pending' AND expires_at>?",agent.WorkspaceID,agent.ID,req.ResourceType,req.ResourceID,req.Action,now.UnixMilli()).Scan(&approvalID)
+   if lookupErr!=nil{return DecisionResult{},errors.Join(ErrConflict,lookupErr)}
+  } else {
+   if err=s.writeEventTx(ctx,tx,agent.WorkspaceID,"approval",approvalID,"approval.requested",map[string]any{"approval_id":approvalID,"agent_id":agent.ID,"action":req.Action,"resource_type":req.ResourceType,"resource_id":req.ResourceID});err!=nil{return DecisionResult{},err}
+  }
  }
  _,err=tx.ExecContext(ctx,"INSERT INTO collaboration_decision_audit(id,workspace_id,agent_id,event_id,action,resource_type,resource_id,outcome,approval_id,reason,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",auditID,agent.WorkspaceID,agent.ID,req.EventID,req.Action,req.ResourceType,req.ResourceID,outcome,null(approvalID),req.Reason,now.UnixMilli());if err!=nil{return DecisionResult{},err}
  if err=tx.Commit();err!=nil{return DecisionResult{},err}
