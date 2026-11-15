@@ -105,6 +105,20 @@ func (s *Service) BindArtifactVersionAttempt(ctx context.Context, artifactID str
 		return err
 	}
 	if changed != 1 {
+		// A concurrent request may have won with the exact same binding.
+		var currentExecution, currentAttempt string
+		readErr := s.db.QueryRowContext(ctx, `SELECT COALESCE(source_execution_id,''),COALESCE(source_attempt_id,'')
+			FROM collaboration_artifact_versions WHERE artifact_id=? AND version=?`, artifactID, versionNumber).
+			Scan(&currentExecution, &currentAttempt)
+		if readErr != nil {
+			if errors.Is(readErr, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return readErr
+		}
+		if currentExecution == in.ExecutionID && currentAttempt == in.AttemptID {
+			return nil
+		}
 		return ErrConflict
 	}
 	return nil
