@@ -26,6 +26,9 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 		`CREATE TABLE execution_events (sequence INTEGER, event_id TEXT, event_key TEXT, event_type TEXT, actor_type TEXT, actor_id TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT, attempt_id TEXT)`,
 		`CREATE TABLE execution_control_events (sequence INTEGER, event_id TEXT, event_key TEXT, event_type TEXT, actor_type TEXT, actor_id TEXT, source TEXT, payload_json TEXT, occurred_at INTEGER, execution_id TEXT)`,
 		`INSERT INTO executions VALUES ('exec-1','agent','agent-runtime','task-1','succeeded',100,200)`,
+		`INSERT INTO executions VALUES ('exec-coding','coding','coding-runtime','task-coding','running',400,500)`,
+		`INSERT INTO executions VALUES ('exec-workflow','workflow','workflow-runtime','task-workflow','queued',400,500)`,
+		`INSERT INTO executions VALUES ('exec-cli','cli','cli-runtime','task-cli','failed',400,500)`,
 		`INSERT INTO execution_attempts VALUES ('attempt-1','exec-1',1,'agent-runtime','succeeded',100,200)`,
 		`INSERT INTO collaboration_artifact_versions VALUES ('version-1','artifact-1',1,'text/plain','abc123',12,'exec-1','attempt-1')`,
 		`INSERT INTO collaboration_artifact_evidence VALUES ('evidence-1','artifact-1','version-1','test','verified output','exec-1','attempt-1',200)`,
@@ -63,5 +66,23 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 	}
 	if strings.Contains(cursorResponse.Body.String(), "cancel.requested") || !strings.Contains(cursorResponse.Body.String(), "attempt.succeeded") {
 		t.Fatalf("timeline cursor did not advance correctly: %s", cursorResponse.Body.String())
+	}
+
+	for _, tc := range []struct{ kind, id string }{
+		{kind: "agent", id: "exec-1"},
+		{kind: "coding", id: "exec-coding"},
+		{kind: "workflow", id: "exec-workflow"},
+		{kind: "cli", id: "exec-cli"},
+	} {
+		listResponse := httptest.NewRecorder()
+		r.ServeHTTP(listResponse, httptest.NewRequest(http.MethodGet, "/dashboard/executions?kind="+tc.kind, nil))
+		if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), tc.id) {
+			t.Fatalf("kind filter %q did not show %q: status=%d body=%s", tc.kind, tc.id, listResponse.Code, listResponse.Body.String())
+		}
+	}
+	taskResponse := httptest.NewRecorder()
+	r.ServeHTTP(taskResponse, httptest.NewRequest(http.MethodGet, "/dashboard/executions?task=task-coding", nil))
+	if taskResponse.Code != http.StatusOK || !strings.Contains(taskResponse.Body.String(), "exec-coding") || strings.Contains(taskResponse.Body.String(), "exec-cli") {
+		t.Fatalf("task filter did not isolate the expected execution: %s", taskResponse.Body.String())
 	}
 }
