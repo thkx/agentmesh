@@ -597,16 +597,6 @@ func (h *CollaborationHandler) sessionTranscript(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
-func (h *CollaborationHandler) sessionTranscript(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	items, err := h.service.ListAgentSessionTranscript(c, c.Param("id"), limit)
-	if err != nil {
-		h.fail(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"items": items})
-}
-
 func (h *CollaborationHandler) agentTaskResults(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	results, err := h.service.ListTaskResults(c, c.Param("id"), limit)
