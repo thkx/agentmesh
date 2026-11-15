@@ -84,7 +84,7 @@ func (a *AgentAdapter) Observe(ctx context.Context, e dom.Entity) (Observation, 
 			// Claim/lease acquisition is not yet an execution attempt. If a prior
 			// safe attempt failed, preserve the Execution as Running while the
 			// next worker crosses its execution boundary.
-			if e.Status == dom.LifecycleRunning && job.Attempts > 1 && job.LastError != "" {
+			if job.Attempts > 1 && job.LastError != "" {
 				return Observation{
 					Status: dom.LifecycleRunning, CompletedAttempt: job.Attempts - 1,
 					AttemptOutcome: dom.AttemptFailed, AttemptError: job.LastError,
