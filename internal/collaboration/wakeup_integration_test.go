@@ -91,6 +91,10 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	observer, err := service.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: collabWorkspace.ID, Name: "Task Owner", Role: "lead"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	channel, err := service.CreateChannel(ctx, collaboration.Channel{
 		WorkspaceID: collabWorkspace.ID, Name: "Engineering Decisions", Kind: "team",
@@ -126,7 +130,7 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	task, err := service.CreateTask(ctx, collaboration.Task{WorkspaceID: collabWorkspace.ID, Title: "Run integration task", Description: "Verify durable collaboration wakeup."})
+	task, err := service.CreateTask(ctx, collaboration.Task{WorkspaceID: collabWorkspace.ID, Title: "Run integration task", Description: "Verify durable collaboration wakeup.", CreatedBy: observer.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,6 +206,32 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if completion.ExecutionID == "" || !strings.Contains(string(completion.Result), "completed by test runtime") {
 		cancel()
 		t.Fatalf("execution result missing from durable completion event: %+v", completion)
+	}
+	// The completion event must be routed to the task's Agent creator, not
+	// broadcast to every Agent in the workspace.
+	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
+		cancel()
+		t.Fatalf("dispatch task completion: %v", err)
+	}
+	var ownerInboxPayload string
+	if err = db.DB.QueryRowContext(ctx, `SELECT payload_json FROM collaboration_inbox
+		WHERE agent_id=? AND event_type='task.completed' ORDER BY received_at DESC LIMIT 1`, observer.ID).Scan(&ownerInboxPayload); err != nil {
+		cancel()
+		t.Fatalf("task completion was not delivered to its Agent creator: %v", err)
+	}
+	if !strings.Contains(ownerInboxPayload, "completed by test runtime") {
+		cancel()
+		t.Fatalf("delivered completion inbox payload lost runtime result: %s", ownerInboxPayload)
+	}
+	var executorInboxCount int
+	if err = db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM collaboration_inbox
+		WHERE agent_id=? AND event_type='task.completed'`, identity.ID).Scan(&executorInboxCount); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if executorInboxCount != 0 {
+		cancel()
+		t.Fatalf("task completion was incorrectly broadcast to executor: %d", executorInboxCount)
 	}
 	select {
 	case submittedExecution := <-submitted:

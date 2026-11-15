@@ -272,6 +272,35 @@ func routeRecipients(ctx context.Context, tx *sql.Tx, event Event) ([]string, er
 		}
 		return []string{p.AgentID}, nil
 
+	case "task.completed":
+		var p struct {
+			TaskID string `json:"task_id"`
+		}
+		if err := json.Unmarshal(event.Payload, &p); err != nil {
+			return nil, fmt.Errorf("decode task.completed payload: %w", err)
+		}
+		if p.TaskID == "" || p.TaskID != event.AggregateID {
+			return nil, errors.New("task.completed event has an invalid task_id")
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT DISTINCT recipient_id FROM (
+			SELECT a.id AS recipient_id
+			FROM collaboration_tasks t
+			JOIN agent_identities a ON a.id=t.created_by
+			WHERE t.id=? AND t.workspace_id=? AND a.status<>'disabled'
+			UNION
+			SELECT a.id AS recipient_id
+			FROM collaboration_tasks child
+			JOIN task_assignments parent_assignment ON parent_assignment.task_id=child.parent_task_id
+			JOIN agent_identities a ON a.id=parent_assignment.agent_id
+			WHERE child.id=? AND child.workspace_id=?
+			  AND parent_assignment.status='claimed' AND a.status<>'disabled'
+		) ORDER BY recipient_id`, p.TaskID, event.WorkspaceID, p.TaskID, event.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanRecipients(rows)
+
 	case "message.created":
 		var p struct {
 			ChannelID string `json:"channel_id"`
