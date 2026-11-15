@@ -20,7 +20,10 @@ P3 is the collaboration and governed execution foundation layered on top of the 
 | Session | Persistent active Session and execution history pointer |
 | Wakeup | Assigned Task and approved/rejected Assignment events feed the P2 Execution Manager through an idempotency key derived from Assignment ID; promoted global and Agent-scoped memories are injected as untrusted reference context |
 | Recovery | Expired Inbox leases are reclaimable; duplicate wakeups reuse the same Execution; expired Assignment claims can be reclaimed using fencing |
-| Verification | Build, Vet, full Race suite, migration-backed service tests and a Wakeup-to-Execution integration test |
+| Verification | Build, Vet, full Race suite, migration-backed service tests and Wakeup-to-Execution integration test |
+| Agent result evaluation | Pinned-model evaluation with strict structured output, evidence-reference validation and Workspace autonomy gate |
+| Rework lifecycle | Rejected results and rejected linked Artifacts block Tasks; a new Agent can receive a new Assignment without mutating prior attempts |
+| Audit history | Agent decision audit and immutable Artifact review history are queryable through bounded APIs |
 
 ## Verification
 
@@ -47,7 +50,7 @@ GitHub Actions runs the same build, vet and race verification on every push to `
 These are intentionally not represented as completed P3 behavior:
 
 1. `message.created` is delivered only to channel members as a notification. It does not automatically invoke an LLM or generate a chat reply. Inbox delivery is not equivalent to an Agent decision.
-2. Persistent Session records track execution continuity. Assignment wakeup retrieves promoted global and Agent-scoped memories, but does not yet assemble full Channel/Thread conversation history into each Agent Session.
+2. Persistent Session records track execution continuity. Assignment wakeup injects a bounded recent Channel-message snapshot for explicit members, but does not yet maintain full Channel/Thread history as a durable, resumable Agent Session transcript.
 3. The Wakeup integration test uses a deterministic fake Execution adapter. A real provider/model/runtime smoke test must be run with the deployment's actual credentials and configured adapter.
 4. The collaboration API is delivered; a dedicated collaboration UI, multi-computer Runner fleet, artifact review UI and automatic agent-to-agent conversational loop are later work.
 
@@ -72,7 +75,7 @@ A successful Agent execution now completes its Assignment and writes a `task.com
 
 ### Durable Agent result receipt
 
-A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker and materialized into agent_task_results. The ledger preserves the originating Workspace, Task, Assignment, Execution, recipient Agent and raw JSON result. A unique (assignment_id, recipient_agent_id) constraint makes delivery idempotent across worker crashes and retries. The recipient can retrieve its newest results through the collaboration service's ListTaskResults method. This is durable result receipt, not yet an LLM-driven follow-up decision or automatic parent-task completion.
+A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker and materialized into agent_task_results. The ledger preserves the originating Workspace, Task, Assignment, Execution, recipient Agent and raw JSON result. A unique (assignment_id, recipient_agent_id) constraint makes delivery idempotent across worker crashes and retries. The recipient can retrieve its newest results through the collaboration service's ListTaskResults method. The result then passes through the configured result evaluator; model assessment does not automatically complete the parent Task.
 
 
 ### Result decision boundary (P3-2)
@@ -115,14 +118,14 @@ Additional endpoints:
 - `POST /api/v1/collaboration/artifacts/:id/submit`
 - `POST /api/v1/collaboration/artifacts/:id/review`
 
-Artifact discovery and audit history are also available through `GET /api/v1/collaboration/workspaces/:id/artifacts` and `GET /api/v1/collaboration/artifacts/:id/verifications`. Listing endpoints return bounded metadata/history; version content is fetched separately by exact version number.
+Artifact discovery and audit history are also available through `GET /api/v1/collaboration/workspaces/:id/artifacts` and `GET /api/v1/collaboration/artifacts/:id/verifications`. Evidence, verification and review history lists are capped at 200 records per request; version content is fetched separately by exact version number.
 
 
 ### P3-4 Artifact-aware Agent result evaluation
 
 The result-evaluation seam now supports an optional contextual evaluator. In addition to the Task and durable Runtime result, it can receive a bounded snapshot of Artifacts explicitly linked to that Task, including the exact current immutable version, SHA-256 digest, evidence records and recent deterministic verification history.
 
-The context is Workspace-scoped and bounded to eight Artifacts, 4 MiB of included Artifact content, 50 evidence records and five verification records per Artifact. When the content budget is exhausted, the evaluator still receives version metadata and digest with `content_included=false`; it must not infer that omitted content was inspected. Existing `TaskResultEvaluator` implementations remain compatible and continue receiving the original Task/Result pair. The conservative default still returns `human_review`; this feature does not silently auto-accept results.
+The context is Workspace-scoped and bounded to eight Artifacts, 4 MiB of included Artifact content, 50 evidence records and five verification records per Artifact. When the content budget is exhausted, the evaluator still receives version metadata and digest with `content_included=false`; it must not infer that omitted content was inspected. Existing `TaskResultEvaluator` implementations remain compatible and continue receiving the original Task/Result pair. A directly constructed Wakeup Worker defaults to conservative `human_review`; application bootstrap wires the pinned-model evaluator. This feature does not silently auto-accept results without the configured autonomy and evidence gates.
 
 
 Model-based result assessment also respects Workspace autonomy: `directed` always returns `human_review` without invoking the model; `hybrid` and `autonomous` may use the evidence-grounded evaluator. Missing or invalid autonomy policy fails closed to human review. This is an assessment of a child result, not permission to execute tools, delegate, or complete the parent Task.

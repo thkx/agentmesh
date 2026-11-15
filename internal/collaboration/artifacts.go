@@ -376,7 +376,7 @@ func (s *Service) ListArtifactEvidence(ctx context.Context, artifactID string) (
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,created_at
-		FROM collaboration_artifact_evidence WHERE artifact_id=? ORDER BY created_at,id`, artifactID)
+		FROM collaboration_artifact_evidence WHERE artifact_id=? ORDER BY created_at,id LIMIT 200`, artifactID)
 	if err != nil {
 		return nil, err
 	}
@@ -700,7 +700,7 @@ func (s *Service) ListArtifactVerifications(ctx context.Context, artifactID stri
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,outcome,policy_json,evidence_summary_json,reason,created_at
-		FROM collaboration_artifact_verifications WHERE artifact_id=? ORDER BY created_at DESC,id DESC`, artifactID)
+		FROM collaboration_artifact_verifications WHERE artifact_id=? ORDER BY created_at DESC,id DESC LIMIT 200`, artifactID)
 	if err != nil {
 		return nil, err
 	}

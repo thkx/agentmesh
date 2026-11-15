@@ -233,7 +233,7 @@ func (s *Service) ListTaskResultReviewAudit(ctx context.Context, recipientID, as
 	if _, err := s.GetTaskResultAssessment(ctx, recipientID, assignmentID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,assessment_id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,reviewer_id,outcome,note,created_at FROM agent_task_result_review_audit WHERE recipient_agent_id=? AND assignment_id=? ORDER BY created_at,id`, recipientID, assignmentID)
+	rows, err := s.db.QueryContext(ctx, `SELECT id,assessment_id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,reviewer_id,outcome,note,created_at FROM agent_task_result_review_audit WHERE recipient_agent_id=? AND assignment_id=? ORDER BY created_at,id LIMIT 200`, recipientID, assignmentID)
 	if err != nil {
 		return nil, err
 	}
