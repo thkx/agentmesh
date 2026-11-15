@@ -34,11 +34,11 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 		Task: collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
 		Result: collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
 		Artifacts: []collaboration.TaskArtifactContext{{
-			Artifact: collaboration.Artifact{ID: "artifact-1"},
-			Version: collaboration.ArtifactVersion{ID: "version-1", ContentSHA256: "digest"},
+			Artifact:        collaboration.Artifact{ID: "artifact-1"},
+			Version:         collaboration.ArtifactVersion{ID: "version-1", ContentSHA256: "digest"},
 			ContentIncluded: true,
-			Evidence: []collaboration.ArtifactEvidence{{ID: evidenceID, Kind: "test"}},
-			Verifications: []collaboration.ArtifactVerification{{ID: verificationID, Outcome: "passed"}},
+			Evidence:        []collaboration.ArtifactEvidence{{ID: evidenceID, Kind: "test"}},
+			Verifications:   []collaboration.ArtifactVerification{{ID: verificationID, Outcome: "passed"}},
 		}},
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func TestLLMTaskResultEvaluatorRejectsInventedEvidence(t *testing.T) {
 	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
 		Result: collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
-			Evidence: []collaboration.ArtifactEvidence{{ID: "real-evidence"}},
+			Evidence:      []collaboration.ArtifactEvidence{{ID: "real-evidence"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "real-verification", Outcome: "passed"}},
 		}},
 	})
@@ -84,7 +84,7 @@ func TestLLMTaskResultEvaluatorRequiresPassedArtifactVerificationForAcceptance(t
 	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
 		Result: collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
-			Evidence: []collaboration.ArtifactEvidence{{ID: "evidence-1"}},
+			Evidence:      []collaboration.ArtifactEvidence{{ID: "evidence-1"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "verification-1", Outcome: "needs_evidence"}},
 		}},
 	})
