@@ -113,12 +113,23 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 		reason := "runtime submission outcome uncertain: " + err.Error()
 		pending, transitionErr := m.store.Transition(context.Background(), created.ID,
 			[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleNeedsReconciliation, reason, nil)
-		return pending, errors.Join(err, transitionErr)
+		if transitionErr != nil {
+			latest, readErr := m.store.Get(context.Background(), created.ID)
+			return latest, errors.Join(err, transitionErr, readErr)
+		}
+		return pending, err
 	}
 	if ref != "" {
 		created, err = m.store.BindRuntimeRef(ctx, created.ID, ref)
 		if err != nil {
-			return created, fmt.Errorf("bind runtime reference; runtime may already have accepted the execution: %w", err)
+			reason := "runtime accepted submission but reference binding failed: " + err.Error()
+			pending, transitionErr := m.store.Transition(context.Background(), created.ID,
+				[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleNeedsReconciliation, reason, nil)
+			if transitionErr != nil {
+				latest, readErr := m.store.Get(context.Background(), created.ID)
+				return latest, errors.Join(err, transitionErr, readErr)
+			}
+			return pending, fmt.Errorf("runtime accepted submission; execution requires reconciliation: %w", err)
 		}
 	}
 	created.Attempts, _ = m.store.ListAttempts(ctx, created.ID)
