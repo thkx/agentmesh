@@ -246,11 +246,11 @@ func(s *Service) HandoffTask(ctx context.Context,parentID string,h Handoff,creat
  if requester.WorkspaceID!=parent.WorkspaceID||recipient.WorkspaceID!=parent.WorkspaceID{return Task{},Assignment{},ErrInvalid}
  workspace,err:=s.GetWorkspace(ctx,parent.WorkspaceID);if err!=nil{return Task{},Assignment{},err}
  if parent.DelegationDepth+1>workspace.MaxDelegationDepth{return Task{},Assignment{},ErrInvalid}
- decision,err:=s.EvaluateDecision(ctx,DecisionRequest{AgentID:requester.ID,Action:"delegate",ResourceType:"task",ResourceID:parent.ID,Reason:h.Reason})
+ key:="handoff:"+parent.ID+":"+recipient.ID+":"+h.IdempotencyKey
+ decision,err:=s.EvaluateDecision(ctx,DecisionRequest{AgentID:requester.ID,Action:"delegate",ResourceType:"handoff",ResourceID:key,Reason:h.Reason})
  if err!=nil{return Task{},Assignment{},err}
  if decision.Outcome!="allowed"{return Task{},Assignment{},&ApprovalRequiredError{ApprovalID:decision.ApprovalID}}
  payload,err:=json.Marshal(h);if err!=nil{return Task{},Assignment{},err}
- key:="handoff:"+parent.ID+":"+recipient.ID+":"+h.IdempotencyKey
  now:=s.clock().UTC()
  tx,err:=s.db.BeginTx(ctx,nil);if err!=nil{return Task{},Assignment{},err};defer tx.Rollback()
 

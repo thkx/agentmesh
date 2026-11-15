@@ -240,6 +240,27 @@ func TestDecisionGateRequiresApprovalForPrivilegedActions(t *testing.T) {
 	if allowed.Outcome != "allowed" { t.Fatalf("claim should be allowed in hybrid mode: %+v", allowed) }
 }
 
+func TestHandoffApprovalIsBoundToExactRequest(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Scoped Approval",Slug:"scoped-approval",AutonomyMode:"hybrid"});if err!=nil{t.Fatal(err)}
+ planner,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Planner",Role:"planner"});if err!=nil{t.Fatal(err)}
+ worker,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Worker",Role:"worker"});if err!=nil{t.Fatal(err)}
+ parent,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Parent"});if err!=nil{t.Fatal(err)}
+ first:=collaboration.Handoff{RequesterAgentID:planner.ID,Goal:"Collect public sources",Recipient:worker.ID,IdempotencyKey:"handoff-a"}
+ _,_,err=s.HandoffTask(ctx,parent.ID,first,planner.ID)
+ var approvalErr *collaboration.ApprovalRequiredError
+ if !errors.As(err,&approvalErr){t.Fatalf("expected first approval, got %v",err)}
+ firstApproval:=approvalErr.ApprovalID
+ if _,err=s.ResolveApproval(ctx,firstApproval,"human","approved","approved exact request");err!=nil{t.Fatal(err)}
+ if _,_,err=s.HandoffTask(ctx,parent.ID,first,planner.ID);err!=nil{t.Fatalf("approved request should be allowed on retry: %v",err)}
+ second:=collaboration.Handoff{RequesterAgentID:planner.ID,Goal:"Write implementation",Recipient:worker.ID,IdempotencyKey:"handoff-b"}
+ _,_,err=s.HandoffTask(ctx,parent.ID,second,planner.ID)
+ var secondApproval *collaboration.ApprovalRequiredError
+ if !errors.As(err,&secondApproval){t.Fatalf("different handoff should require a new approval, got %v",err)}
+ if secondApproval.ApprovalID==firstApproval{t.Fatal("approval for one handoff was reused for a different request")}
+}
+
 func TestHandoffCreatesChildAndAssignmentAtomically(t *testing.T) {
  ctx:=context.Background()
  s,db:=testService(t);defer db.Close()

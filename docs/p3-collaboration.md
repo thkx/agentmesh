@@ -72,3 +72,6 @@ Task handoff is committed as one SQLite transaction: child Task, Assignment, sta
 
 
 A partial unique index enforces one pending approval per Workspace, requester, resource and action. Concurrent decision requests reuse the persisted pending approval rather than creating multiple review requests.
+
+
+Delegation approval is bound to the exact handoff idempotency key, parent Task and recipient. Approving one handoff cannot authorize a different goal or recipient under the same parent Task.
