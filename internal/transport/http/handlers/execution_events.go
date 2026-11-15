@@ -110,10 +110,10 @@ func (h *ExecutionEventsHandler) list(c *gin.Context) {
 		next = items[len(items)-1].Sequence
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"items": items,
-		"limit": limit,
+		"items":          items,
+		"limit":          limit,
 		"after_sequence": after,
-		"next_sequence": next,
-		"has_more": hasMore,
+		"next_sequence":  next,
+		"has_more":       hasMore,
 	})
 }
