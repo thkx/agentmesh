@@ -63,3 +63,8 @@ The Decision Gate currently exposes executable privileged actions only for Assig
 ### Cross-session collaboration context
 
 Assigned Agent wakeups assemble a bounded snapshot of recent messages from channels where that Agent is an explicit member. The snapshot is limited to five channels, twelve recent messages per channel, and 12,000 characters by default. Only user and assistant messages are included; system/developer instructions and tool payloads are excluded. Conversation content is injected as untrusted task reference context. Channel membership and Workspace identity are checked in the query; messages from unrelated Workspace channels are never included. The wakeup integration test verifies that an Agent's channel history reaches the Runtime task prompt.
+
+
+### Durable execution result handoff
+
+A successful Agent execution now completes its Assignment and writes a `task.completed` Outbox event in the same SQLite transaction. The event includes the Task ID, Assignment ID, Execution ID, and the Runtime result payload. The Outbox is the durable boundary for subsequent result delivery/materialization; the Wakeup worker does not rely on an in-memory callback after execution. The integration test verifies that the execution result is present in the persisted completion event.
