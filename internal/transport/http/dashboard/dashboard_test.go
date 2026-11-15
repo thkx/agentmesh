@@ -125,3 +125,72 @@ func TestDashboardLoginRateLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardRejectsTamperedAndExpiredSessions(t *testing.T) {
+	const token = "session-token"
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := New(Dependencies{APIToken: token})
+	h.RegisterRoutes(r)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token="+token))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginReq.Header.Set("Origin", "http://127.0.0.1")
+	loginReq.Host = "127.0.0.1"
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	var session *http.Cookie
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == sessionCookie { session = cookie }
+	}
+	if session == nil { t.Fatal("login did not issue a session cookie") }
+
+	tampered := *session
+	tampered.Value = tampered.Value[:len(tampered.Value)-1] + "x"
+	tamperedReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	tamperedReq.AddCookie(&tampered)
+	tamperedRec := httptest.NewRecorder()
+	r.ServeHTTP(tamperedRec, tamperedReq)
+	if tamperedRec.Code != http.StatusSeeOther { t.Fatalf("tampered session status = %d", tamperedRec.Code) }
+
+	expiredReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	expiredReq.AddCookie(&http.Cookie{Name: sessionCookie, Value: "1.invalid"})
+	expiredRec := httptest.NewRecorder()
+	r.ServeHTTP(expiredRec, expiredReq)
+	if expiredRec.Code != http.StatusSeeOther { t.Fatalf("expired session status = %d", expiredRec.Code) }
+}
+
+func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
+	const token = "logout-token"
+	r := testRouter(token)
+	loginReq := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token="+token))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginReq.Header.Set("Origin", "http://127.0.0.1")
+	loginReq.Host = "127.0.0.1"
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	var session *http.Cookie
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == sessionCookie { session = cookie }
+	}
+	if session == nil { t.Fatal("login did not issue a session cookie") }
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/dashboard/logout", nil)
+	logoutReq.Header.Set("Origin", "https://attacker.example")
+	logoutReq.Host = "127.0.0.1"
+	logoutReq.AddCookie(session)
+	logoutRec := httptest.NewRecorder()
+	r.ServeHTTP(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusForbidden { t.Fatalf("cross-origin logout status = %d", logoutRec.Code) }
+}
+
+func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
+	r := testRouter("")
+	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/workflows", "/dashboard/executions"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK { t.Fatalf("%s returned %d: %s", path, rec.Code, rec.Body.String()) }
+	}
+}
