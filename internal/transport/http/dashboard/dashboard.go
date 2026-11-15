@@ -50,6 +50,7 @@ type Dependencies struct {
 	Models              *domainprovider.ModelRegistry
 	Credentials         appcredential.Manager
 	AgentDefinitions    *agentcatalog.Service
+	Collaboration       *collaboration.Service
 	WorkflowEngine      *workflowruntime.Engine
 	WorkflowMaxAttempts int
 	Catalog             *handlers.CatalogHandler
@@ -88,6 +89,7 @@ type pageData struct {
 	ProviderRows     []providerView
 	ModelRows        []modelView
 	AgentRows        []agentView
+	IdentityRows     []identityView
 	TaskRows         []taskView
 	WorkspaceOptions []workspaceOption
 	WorkflowRows     []workflowView
@@ -119,6 +121,7 @@ type modelView struct {
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
 type agentOption struct{ ID, Name, Role, Status, Capabilities string }
+type identityView struct{ ID, WorkspaceID, DefinitionID, Name, Description, Role, Status, Capabilities string }
 type taskView struct {
 	TaskID, WorkspaceID, ParentTaskID, Title, Type, Status, CreatedAt, ExecutionID string
 	Priority                                                                       int
