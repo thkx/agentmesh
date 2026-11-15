@@ -12,7 +12,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |
 | [P4 Unified Execution Core](p4-unified-execution-core.md) | Cross-runtime Task, Execution, Attempt, Event, Evidence, Artifact, lifecycle and recovery contract |
 | [P4 M42 Audit](p4-m42-audit.md) | Source-level mapping of existing P2/P3 contracts and M43/M44 implementation gaps |
-| [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |
+| [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |\n| [P4 Part 3 Implementation](p4-part3-implementation.md) | M47/M48 unified execution detail, merged history timeline and release acceptance |
 
 ## Architecture and implementation history
 
@@ -64,3 +64,5 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 - Implementation record: [p4-part2-implementation.md](p4-part2-implementation.md)
 - Verification entry point: `bash scripts/verify-p4-part2.sh`
 - Migration: `internal/platform/database/migrations/000043_execution_lifecycle_enforcement.*.sql`
+
+\n## P4 Part 3\n\n- Implementation record: [p4-part3-implementation.md](p4-part3-implementation.md)\n- Verification entry point: `bash scripts/verify-p4-part3.sh`\n- Additive HTTP read APIs: `/api/v1/managed-executions/:id/detail` and `/api/v1/managed-executions/:id/timeline`\n
