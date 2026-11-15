@@ -739,50 +739,175 @@ func TestPostMessageAndOutboxAreAtomic(t *testing.T) {
 }
 
 func TestTaskResultHumanReviewAuditIsIdempotent(t *testing.T) {
- ctx:=context.Background();s,db:=testService(t);defer db.Close()
- w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Review Audit",Slug:"review-audit"});if err!=nil{t.Fatal(err)}
- a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Reviewer"});if err!=nil{t.Fatal(err)}
- task,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Review me"});if err!=nil{t.Fatal(err)}
- as,err:=s.AssignTask(ctx,task.ID,a.ID,"test");if err!=nil{t.Fatal(err)}
- if _,err=db.DB.ExecContext(ctx,"UPDATE task_assignments SET status='completed' WHERE id=?",as.ID);err!=nil{t.Fatal(err)}
- if err=s.StoreTaskResult(ctx,a.ID,task.ID,as.ID,"exec-review",[]byte(`{"ok":true}`));err!=nil{t.Fatal(err)}
- result,err:=s.GetTaskResult(ctx,a.ID,as.ID);if err!=nil{t.Fatal(err)}
- if err=s.StoreTaskResultAssessment(ctx,collaboration.TaskResultAssessment{ResultID:result.ID,RecipientAgentID:a.ID,Outcome:"human_review",Reason:"needs review",Evidence:[]byte("[]")});err!=nil{t.Fatal(err)}
- got,err:=s.ResolveTaskResultAssessment(ctx,a.ID,as.ID,"human","accepted","verified");if err!=nil{t.Fatal(err)}
- if got.ReviewerID!="human"||got.Outcome!="accepted"||got.ReviewedAt==nil{t.Fatalf("unexpected resolution: %+v",got)}
- if _,err=s.ResolveTaskResultAssessment(ctx,a.ID,as.ID,"human","accepted","verified");err!=nil{t.Fatalf("idempotent retry: %v",err)}
- if _,err=s.ResolveTaskResultAssessment(ctx,a.ID,as.ID,"other","rejected","different");!errors.Is(err,collaboration.ErrConflict){t.Fatalf("expected conflict: %v",err)}
- audit,err:=s.ListTaskResultReviewAudit(ctx,a.ID,as.ID);if err!=nil{t.Fatal(err)};if len(audit)!=1||audit[0].Outcome!="accepted"{t.Fatalf("audit: %+v",audit)}
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Review Audit", Slug: "review-audit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, Title: "Review me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	as, err := s.AssignTask(ctx, task.ID, a.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE task_assignments SET status='completed' WHERE id=?", as.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResult(ctx, a.ID, task.ID, as.ID, "exec-review", []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.GetTaskResult(ctx, a.ID, as.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResultAssessment(ctx, collaboration.TaskResultAssessment{ResultID: result.ID, RecipientAgentID: a.ID, Outcome: "human_review", Reason: "needs review", Evidence: []byte("[]")}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ResolveTaskResultAssessment(ctx, a.ID, as.ID, "human", "accepted", "verified")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ReviewerID != "human" || got.Outcome != "accepted" || got.ReviewedAt == nil {
+		t.Fatalf("unexpected resolution: %+v", got)
+	}
+	if _, err = s.ResolveTaskResultAssessment(ctx, a.ID, as.ID, "human", "accepted", "verified"); err != nil {
+		t.Fatalf("idempotent retry: %v", err)
+	}
+	if _, err = s.ResolveTaskResultAssessment(ctx, a.ID, as.ID, "other", "rejected", "different"); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("expected conflict: %v", err)
+	}
+	audit, err := s.ListTaskResultReviewAudit(ctx, a.ID, as.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audit) != 1 || audit[0].Outcome != "accepted" {
+		t.Fatalf("audit: %+v", audit)
+	}
 }
 
 func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
- ctx:=context.Background();s,db:=testService(t);defer db.Close()
- w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Retry",Slug:"retry"});if err!=nil{t.Fatal(err)}
- a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Worker"});if err!=nil{t.Fatal(err)}
- task,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Retryable"});if err!=nil{t.Fatal(err)}
- as,err:=s.AssignTask(ctx,task.ID,a.ID,"test");if err!=nil{t.Fatal(err)}
- claimed,err:=s.ClaimAssignment(ctx,as.ID,"runner",time.Minute);if err!=nil{t.Fatal(err)}
- if err=s.FailAssignment(ctx,claimed.ID,"runner",claimed.ClaimVersion,"temporary",true);err!=nil{t.Fatal(err)}
- got,err:=s.RetryAssignment(ctx,as.ID,"operator");if err!=nil{t.Fatal(err)};if got.Status!="pending"{t.Fatalf("status=%s",got.Status)}
- for i:=0;i<3;i++{claimed,err=s.ClaimAssignment(ctx,as.ID,"runner",time.Minute);if err!=nil{t.Fatal(err)};if err=s.FailAssignment(ctx,claimed.ID,"runner",claimed.ClaimVersion,"again",true);err!=nil{t.Fatal(err)};if i<2{if _,err=s.RetryAssignment(ctx,as.ID,"operator");err!=nil{t.Fatal(err)}}}
- if _,err=s.RetryAssignment(ctx,as.ID,"operator");!errors.Is(err,collaboration.ErrConflict){t.Fatalf("retry limit: %v",err)}
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Retry", Slug: "retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, Title: "Retryable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	as, err := s.AssignTask(ctx, task.ID, a.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimAssignment(ctx, as.ID, "runner", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailAssignment(ctx, claimed.ID, "runner", claimed.ClaimVersion, "temporary", true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.RetryAssignment(ctx, as.ID, "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("status=%s", got.Status)
+	}
+	for i := 0; i < 3; i++ {
+		claimed, err = s.ClaimAssignment(ctx, as.ID, "runner", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = s.FailAssignment(ctx, claimed.ID, "runner", claimed.ClaimVersion, "again", true); err != nil {
+			t.Fatal(err)
+		}
+		if i < 2 {
+			if _, err = s.RetryAssignment(ctx, as.ID, "operator"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err = s.RetryAssignment(ctx, as.ID, "operator"); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("retry limit: %v", err)
+	}
 }
 
 func TestParentTaskProgressRequiresParentAgentAcceptance(t *testing.T) {
- ctx:=context.Background();s,db:=testService(t);defer db.Close()
- w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Progress",Slug:"progress"});if err!=nil{t.Fatal(err)}
- pa,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Parent"});if err!=nil{t.Fatal(err)}
- ca,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Child"});if err!=nil{t.Fatal(err)}
- parent,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Parent"});if err!=nil{t.Fatal(err)}
- if _,err=s.AssignTask(ctx,parent.ID,pa.ID,"test");err!=nil{t.Fatal(err)}
- child,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,ParentTaskID:parent.ID,Title:"Child"});if err!=nil{t.Fatal(err)}
- as,err:=s.AssignTask(ctx,child.ID,ca.ID,"test");if err!=nil{t.Fatal(err)}
- if _,err=db.DB.ExecContext(ctx,"UPDATE task_assignments SET status='completed' WHERE id=?",as.ID);err!=nil{t.Fatal(err)}
- if _,err=db.DB.ExecContext(ctx,"UPDATE collaboration_tasks SET status='completed' WHERE id=?",child.ID);err!=nil{t.Fatal(err)}
- if err=s.StoreTaskResult(ctx,pa.ID,child.ID,as.ID,"exec-parent",[]byte(`{"ok":true}`));err!=nil{t.Fatal(err)}
- p,err:=s.GetTaskChildProgress(ctx,parent.ID);if err!=nil{t.Fatal(err)};if p.ReadyForParentReview{t.Fatal("unreviewed result cannot pass")}
- res,err:=s.GetTaskResult(ctx,pa.ID,as.ID);if err!=nil{t.Fatal(err)}
- if err=s.StoreTaskResultAssessment(ctx,collaboration.TaskResultAssessment{ResultID:res.ID,RecipientAgentID:pa.ID,Outcome:"human_review",Reason:"verify",Evidence:[]byte("[]")});err!=nil{t.Fatal(err)}
- if _,err=s.ResolveTaskResultAssessment(ctx,pa.ID,as.ID,"human","accepted","verified");err!=nil{t.Fatal(err)}
- p,err=s.GetTaskChildProgress(ctx,parent.ID);if err!=nil{t.Fatal(err)};if !p.ReadyForParentReview{t.Fatalf("progress not ready: %+v",p)}
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Progress", Slug: "progress"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pa, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, Title: "Parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AssignTask(ctx, parent.ID, pa.ID, "test"); err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, ParentTaskID: parent.ID, Title: "Child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	as, err := s.AssignTask(ctx, child.ID, ca.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE task_assignments SET status='completed' WHERE id=?", as.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE collaboration_tasks SET status='completed' WHERE id=?", child.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResult(ctx, pa.ID, child.ID, as.ID, "exec-parent", []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.GetTaskChildProgress(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ReadyForParentReview {
+		t.Fatal("unreviewed result cannot pass")
+	}
+	res, err := s.GetTaskResult(ctx, pa.ID, as.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResultAssessment(ctx, collaboration.TaskResultAssessment{ResultID: res.ID, RecipientAgentID: pa.ID, Outcome: "human_review", Reason: "verify", Evidence: []byte("[]")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ResolveTaskResultAssessment(ctx, pa.ID, as.ID, "human", "accepted", "verified"); err != nil {
+		t.Fatal(err)
+	}
+	p, err = s.GetTaskChildProgress(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.ReadyForParentReview {
+		t.Fatalf("progress not ready: %+v", p)
+	}
 }

@@ -566,45 +566,94 @@ func (h *CollaborationHandler) session(c *gin.Context) {
 func (h *CollaborationHandler) agentTaskResults(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	results, err := h.service.ListTaskResults(c, c.Param("id"), limit)
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	assessments := make([]collaboration.TaskResultAssessment, 0, len(results))
 	for _, result := range results {
 		assessment, readErr := h.service.GetTaskResultAssessment(c, c.Param("id"), result.AssignmentID)
-		if readErr == nil { assessments = append(assessments, assessment) } else if !errors.Is(readErr, collaboration.ErrNotFound) { h.fail(c, readErr); return }
+		if readErr == nil {
+			assessments = append(assessments, assessment)
+		} else if !errors.Is(readErr, collaboration.ErrNotFound) {
+			h.fail(c, readErr)
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"items": results, "assessments": assessments})
 }
 func (h *CollaborationHandler) agentTaskResult(c *gin.Context) {
 	result, err := h.service.GetTaskResult(c, c.Param("id"), c.Param("assignment_id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	assessment, err := h.service.GetTaskResultAssessment(c, c.Param("id"), c.Param("assignment_id"))
-	if err != nil && !errors.Is(err, collaboration.ErrNotFound) { h.fail(c, err); return }
+	if err != nil && !errors.Is(err, collaboration.ErrNotFound) {
+		h.fail(c, err)
+		return
+	}
 	audit, err := h.service.ListTaskResultReviewAudit(c, c.Param("id"), c.Param("assignment_id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"result": result, "assessment": assessment, "review_audit": audit})
 }
 func (h *CollaborationHandler) reviewAgentTaskResult(c *gin.Context) {
-	var in struct { ReviewerID string `json:"reviewer_id"`; Outcome string `json:"outcome"`; Note string `json:"note"` }
-	if c.ShouldBindJSON(&in) != nil { c.JSON(http.StatusBadRequest, gin.H{"error":"invalid_request"}); return }
+	var in struct {
+		ReviewerID string `json:"reviewer_id"`
+		Outcome    string `json:"outcome"`
+		Note       string `json:"note"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
 	assessment, err := h.service.ResolveTaskResultAssessment(c, c.Param("id"), c.Param("assignment_id"), in.ReviewerID, in.Outcome, in.Note)
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, assessment)
 }
 func (h *CollaborationHandler) taskProgress(c *gin.Context) {
 	progress, err := h.service.GetTaskChildProgress(c, c.Param("id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, progress)
 }
 func (h *CollaborationHandler) failAssignment(c *gin.Context) {
-	var in struct { Owner string `json:"owner"`; Version int64 `json:"version"`; Reason string `json:"reason"`; Retryable bool `json:"retryable"` }
-	if c.ShouldBindJSON(&in) != nil { c.JSON(http.StatusBadRequest, gin.H{"error":"invalid_request"}); return }
-	if err := h.service.FailAssignment(c, c.Param("id"), in.Owner, in.Version, in.Reason, in.Retryable); err != nil { h.fail(c, err); return }
-	c.JSON(http.StatusAccepted, gin.H{"status":"failed","retryable":in.Retryable})
+	var in struct {
+		Owner     string `json:"owner"`
+		Version   int64  `json:"version"`
+		Reason    string `json:"reason"`
+		Retryable bool   `json:"retryable"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	if err := h.service.FailAssignment(c, c.Param("id"), in.Owner, in.Version, in.Reason, in.Retryable); err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"status": "failed", "retryable": in.Retryable})
 }
 func (h *CollaborationHandler) retryAssignment(c *gin.Context) {
-	var in struct { RequestedBy string `json:"requested_by"` }
-	if c.ShouldBindJSON(&in) != nil { c.JSON(http.StatusBadRequest, gin.H{"error":"invalid_request"}); return }
+	var in struct {
+		RequestedBy string `json:"requested_by"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
 	assignment, err := h.service.RetryAssignment(c, c.Param("id"), in.RequestedBy)
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
 	c.JSON(http.StatusAccepted, assignment)
 }
