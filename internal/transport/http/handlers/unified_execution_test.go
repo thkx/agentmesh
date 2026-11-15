@@ -153,15 +153,25 @@ func TestUnifiedExecutionDetailIsRuntimeNeutral(t *testing.T) {
 	}
 	router := gin.New()
 	NewUnifiedExecutionHandler(db).RegisterRoutes(router.Group(""))
-	for _, runtime := range []string{"agent", "coding", "workflow", "cli"} {
+	// The shared fixture's Agent Execution is exec-1; the remaining
+	// runtime fixtures use their runtime name as the ID suffix.
+	for _, fixture := range []struct {
+		runtime string
+		id      string
+	}{
+		{runtime: "agent", id: "exec-1"},
+		{runtime: "coding", id: "exec-coding"},
+		{runtime: "workflow", id: "exec-workflow"},
+		{runtime: "cli", id: "exec-cli"},
+	} {
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
-			"/managed-executions/exec-"+runtime+"/detail", nil))
+			"/managed-executions/"+fixture.id+"/detail", nil))
 		if recorder.Code != http.StatusOK {
-			t.Fatalf("%s detail status=%d body=%s", runtime, recorder.Code, recorder.Body.String())
+			t.Fatalf("%s detail status=%d body=%s", fixture.runtime, recorder.Code, recorder.Body.String())
 		}
-		if !strings.Contains(recorder.Body.String(), `"runtime":"`+runtime+`"`) {
-			t.Fatalf("%s detail returned the wrong runtime: %s", runtime, recorder.Body.String())
+		if !strings.Contains(recorder.Body.String(), `"runtime":"`+fixture.runtime+`"`) {
+			t.Fatalf("%s detail returned the wrong runtime: %s", fixture.runtime, recorder.Body.String())
 		}
 	}
 }
