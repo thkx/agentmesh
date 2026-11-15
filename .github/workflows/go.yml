@@ -7,7 +7,7 @@ on:
     branches: ["main"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -18,15 +18,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Normalize Go formatting
+      - name: Check Go formatting
         run: |
-          gofmt -w $(find . -type f -name '*.go' -not -path './.git/*')
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u -- '*.go'
-            git commit -m "style(p3): normalize Go formatting"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
+          files="$(gofmt -l $(find . -type f -name '*.go' -not -path './.git/*'))"
+          if [ -n "$files" ]; then
+            echo "Go files require gofmt:"
+            echo "$files"
+            exit 1
           fi
       - name: Build
         run: go build ./...
