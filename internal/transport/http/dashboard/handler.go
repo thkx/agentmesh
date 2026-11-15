@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -132,15 +133,15 @@ func (h *Handler) login(c *gin.Context) {
 	}
 	expires := h.now().Add(sessionTTL).Unix()
 	value := strconv.FormatInt(expires, 10) + "." + h.signature(expires)
-	c.SetCookie(sessionCookie, value, int(sessionTTL.Seconds()), "/dashboard", "", c.Request.TLS != nil, true)
 	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(sessionCookie, value, int(sessionTTL.Seconds()), "/dashboard", "", c.Request.TLS != nil, true)
 	c.Redirect(http.StatusSeeOther, "/dashboard")
 }
 
 func (h *Handler) logout(c *gin.Context) {
 	if !h.sameOrigin(c) { c.AbortWithStatus(http.StatusForbidden); return }
-	c.SetCookie(sessionCookie, "", -1, "/dashboard", "", c.Request.TLS != nil, true)
 	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie(sessionCookie, "", -1, "/dashboard", "", c.Request.TLS != nil, true)
 	c.Redirect(http.StatusSeeOther, "/dashboard/login")
 }
 
@@ -198,8 +199,6 @@ func (h *Handler) overview(c *gin.Context) {
 	h.render(c, data)
 }
 
-func timeBoundContext(c *gin.Context, timeout time.Duration) (interface{ Done() <-chan struct{}; Err() error; Deadline() (time.Time, bool); Value(any) any }, func()) {
-	// Kept as a small helper to bound dashboard reads to the request lifetime.
-	ctx, cancel := contextWithTimeout(c, timeout)
-	return ctx, cancel
+func timeBoundContext(c *gin.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(c.Request.Context(), timeout)
 }
