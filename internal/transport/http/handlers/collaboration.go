@@ -32,6 +32,10 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/workspaces/:id/agents", h.agents)
 	g.POST("/agents", h.createAgent)
 	g.GET("/agents/:id", h.getAgent)
+	g.POST("/agents/:id/enable", h.enableAgent)
+	g.POST("/agents/:id/disable", h.disableAgent)
+	g.DELETE("/agents/:id", h.deleteAgent)
+	g.POST("/agents/:id/recover", h.recoverAgent)
 	g.POST("/agents/:id/runtime-binding", h.bindRuntime)
 	g.GET("/agents/:id/runtime-binding", h.getRuntimeBinding)
 	g.GET("/agents/:id/session", h.session)
@@ -147,6 +151,26 @@ func (h *CollaborationHandler) createAgent(c *gin.Context) {
 		return
 	}
 	c.JSON(201, o)
+}
+func (h *CollaborationHandler) enableAgent(c *gin.Context) {
+	agent, err := h.service.EnableAgent(c, c.Param("id"))
+	if err != nil { h.fail(c, err); return }
+	c.JSON(http.StatusOK, agent)
+}
+func (h *CollaborationHandler) disableAgent(c *gin.Context) {
+	agent, err := h.service.DisableAgent(c, c.Param("id"))
+	if err != nil { h.fail(c, err); return }
+	c.JSON(http.StatusOK, agent)
+}
+func (h *CollaborationHandler) deleteAgent(c *gin.Context) {
+	agent, err := h.service.DeleteAgent(c, c.Param("id"))
+	if err != nil { h.fail(c, err); return }
+	c.JSON(http.StatusOK, agent)
+}
+func (h *CollaborationHandler) recoverAgent(c *gin.Context) {
+	agent, err := h.service.RecoverAgent(c, c.Param("id"))
+	if err != nil { h.fail(c, err); return }
+	c.JSON(http.StatusOK, agent)
 }
 func (h *CollaborationHandler) getAgent(c *gin.Context) {
 	v, e := h.service.GetAgent(c, c.Param("id"))
