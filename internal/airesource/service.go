@@ -320,6 +320,26 @@ func (s *Service) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	return out, rows.Err()
 }
+// GetModelByID resolves a configured AI Resource model by its stable internal ID.
+func (s *Service) GetModelByID(ctx context.Context, id string) (Model, error) {
+	var m Model
+	var enabled, streaming int
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT id,model_key,display_name,enabled,supports_streaming,created_at,updated_at FROM ai_models WHERE id=?`, id).
+		Scan(&m.ID, &m.ModelKey, &m.DisplayName, &enabled, &streaming, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Model{}, ErrNotFound
+	}
+	if err != nil {
+		return Model{}, err
+	}
+	m.Enabled = enabled == 1
+	m.SupportsStreaming = streaming == 1
+	m.CreatedAt = time.UnixMilli(created).UTC()
+	m.UpdatedAt = time.UnixMilli(updated).UTC()
+	return m, nil
+}
+
 func (s *Service) BindModel(ctx context.Context, b BindingInput) error {
 	if b.CredentialID == "" || b.ModelID == "" || strings.TrimSpace(b.UpstreamModel) == "" {
 		return fmt.Errorf("credential_id, model_id and upstream_model are required")
