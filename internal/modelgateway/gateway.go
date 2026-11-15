@@ -22,12 +22,37 @@ var (
 	ErrInvalidStreamEvent             = errors.New("provider returned an invalid stream event")
 	ErrNativeToolCallingUnsupported   = errors.New("provider adapter does not support native tool calling")
 	ErrNativeToolStreamingUnsupported = errors.New("provider adapter does not support native tool calling in streaming mode")
+	ErrDynamicStreamingUnsupported    = errors.New("dynamic credential routing does not support streaming yet")
 )
 
+// DynamicModelResolver optionally resolves AI Resource model IDs without requiring
+// a duplicate legacy provider/model catalog entry.
+type DynamicModelResolver interface {
+	ResolveModel(context.Context, string) (provider.Model, bool, error)
+}
+
+// DynamicStreamingRouter is implemented by dynamic credential pools that support SSE.
+type DynamicStreamingRouter interface {
+	Stream(context.Context, GenerateRequest) (<-chan StreamEvent, error)
+}
+
+// DynamicRouter routes configured model keys through the persisted AI resource pool.
+type DynamicRouter interface {
+	Supports(context.Context, string) (bool, error)
+	Generate(context.Context, GenerateRequest) (*GenerateResponse, error)
+}
+
 type Gateway struct {
-	registry  *Registry
-	resolver  Resolver
-	providers *provider.ProviderRegistry
+	registry      *Registry
+	resolver      Resolver
+	providers     *provider.ProviderRegistry
+	dynamicRouter DynamicRouter
+}
+
+// SetDynamicRouter installs the optional database-backed credential router.
+// Bootstrap must call this before the gateway starts serving requests.
+func (g *Gateway) SetDynamicRouter(router DynamicRouter) {
+	g.dynamicRouter = router
 }
 
 func NewGateway(registry *Registry, resolver Resolver) (*Gateway, error) {
@@ -72,6 +97,26 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	if err != nil {
 		return nil, err
 	}
+	if g.dynamicRouter != nil {
+		supported, supportErr := g.dynamicRouter.Supports(ctx, resolvedReq.ProviderModel)
+		if supportErr != nil {
+			return nil, fmt.Errorf("resolve dynamic credential route: %w", supportErr)
+		}
+		if supported {
+			resp, dynamicErr := g.dynamicRouter.Generate(ctx, resolvedReq)
+			if dynamicErr != nil {
+				return nil, NormalizeError(model.ProviderID, dynamicErr)
+			}
+			if resp == nil {
+				return nil, ErrNilResponse
+			}
+			normalizeResponse(resp, model)
+			return resp, nil
+		}
+	}
+	if adapter == nil {
+		return nil, fmt.Errorf("%w: provider %s", appcredential.ErrCredentialUnavailable, model.ProviderID)
+	}
 	if len(req.Tools) > 0 {
 		capability, ok := adapter.(interface{ SupportsNativeToolCalling() bool })
 		if !ok || !capability.SupportsNativeToolCalling() {
@@ -113,6 +158,55 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if g.dynamicRouter != nil {
+		supported, supportErr := g.dynamicRouter.Supports(ctx, resolvedReq.ProviderModel)
+		if supportErr != nil {
+			return nil, fmt.Errorf("resolve dynamic credential route: %w", supportErr)
+		}
+		if supported {
+			if !model.SupportsStreaming {
+				return nil, fmt.Errorf("%w: %s", ErrStreamingDisabled, model.ID)
+			}
+			streamRouter, ok := g.dynamicRouter.(DynamicStreamingRouter)
+			if !ok {
+				return nil, ErrDynamicStreamingUnsupported
+			}
+			source, streamErr := streamRouter.Stream(ctx, resolvedReq)
+			if streamErr != nil {
+				return nil, streamErr
+			}
+			if source == nil {
+				return nil, ErrNilStream
+			}
+			output := make(chan StreamEvent)
+			go func() {
+				defer close(output)
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case event, open := <-source:
+						if !open {
+							return
+						}
+						normalizeStreamEvent(&event, model)
+						select {
+						case output <- event:
+						case <-ctx.Done():
+							return
+						}
+						if event.Type == StreamEventError || event.Type == StreamEventCompleted {
+							return
+						}
+					}
+				}
+			}()
+			return output, nil
+		}
+	}
+	if adapter == nil {
+		return nil, fmt.Errorf("%w: provider %s", appcredential.ErrCredentialUnavailable, model.ProviderID)
 	}
 	if len(req.Tools) > 0 {
 		capability, ok := adapter.(interface{ SupportsNativeToolStreaming() bool })
@@ -173,8 +267,27 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 
 // SupportsNativeToolCalling reports whether the resolved adapter implements provider-native function calling.
 func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string) bool {
-	_, adapter, _, err := g.resolve(ctx, GenerateRequest{ModelID: modelID, Messages: []Message{{Role: RoleUser, Content: "capability probe"}}})
+	_, adapter, resolvedReq, err := g.resolve(ctx, GenerateRequest{ModelID: modelID, Messages: []Message{{Role: RoleUser, Content: "capability probe"}}})
 	if err != nil {
+		return false
+	}
+	if g.dynamicRouter != nil {
+		supported, supportErr := g.dynamicRouter.Supports(ctx, resolvedReq.ProviderModel)
+		if supportErr != nil {
+			return false
+		}
+		if supported {
+			capability, ok := g.dynamicRouter.(interface {
+				SupportsNativeToolCalling(context.Context, string) (bool, error)
+			})
+			if !ok {
+				return false
+			}
+			enabled, capabilityErr := capability.SupportsNativeToolCalling(ctx, resolvedReq.ProviderModel)
+			return capabilityErr == nil && enabled
+		}
+	}
+	if adapter == nil {
 		return false
 	}
 	capability, ok := adapter.(interface{ SupportsNativeToolCalling() bool })
@@ -183,32 +296,44 @@ func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string)
 
 func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Model, Model, GenerateRequest, error) {
 	model, err := g.resolver.Resolve(ctx, req.ModelID)
+	dynamicModel := false
 	if err != nil {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("resolve model: %w", err)
+		if resolver, ok := g.dynamicRouter.(DynamicModelResolver); ok {
+			resolved, found, dynamicErr := resolver.ResolveModel(ctx, req.ModelID)
+			if dynamicErr != nil {
+				return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve dynamic model: %w", dynamicErr)
+			}
+			if found {
+				model = resolved
+				dynamicModel = true
+				err = nil
+			}
+		}
 	}
-
+	if err != nil {
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve model: %w", err)
+	}
 	if err := model.Validate(); err != nil {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("invalid resolved model: %w", err)
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("invalid resolved model: %w", err)
 	}
-
 	if !model.Enabled {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("%w: %s", provider.ErrModelDisabled, model.ID)
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: %s", provider.ErrModelDisabled, model.ID)
 	}
-
-	// The model catalog is the authority for the maximum output size.
-	// Input token counting is intentionally left to provider tokenizers; the
-	// gateway must not pretend that character counts are token counts.
 	if model.MaxOutputTokens > 0 && req.MaxOutputTokens > model.MaxOutputTokens {
 		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf(
 			"%w: requested=%d allowed=%d model=%s",
-			ErrOutputTokenLimitExceeded,
-			req.MaxOutputTokens,
-			model.MaxOutputTokens,
-			model.ID,
+			ErrOutputTokenLimitExceeded, req.MaxOutputTokens, model.MaxOutputTokens, model.ID,
 		)
+	}
+
+	resolvedReq := req
+	resolvedReq.ProviderID = model.ProviderID
+	resolvedReq.ProviderModel = model.Name
+
+	// Dynamic models are backed by AI Resource credentials and must not be
+	// coupled to the legacy ProviderRegistry or its single-key adapter.
+	if dynamicModel {
+		return model, nil, resolvedReq, nil
 	}
 
 	var providerInstance *provider.Provider
@@ -222,19 +347,16 @@ func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Mo
 			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: %s", provider.ErrProviderDisabled, p.ID)
 		}
 	}
-
 	adapter, err := g.registry.Get(model.ProviderID)
 	if err != nil {
-		if providerInstance != nil && providerInstance.Kind == provider.KindCloud {
+		if providerInstance != nil && providerInstance.Kind == provider.KindCloud && g.dynamicRouter != nil {
+			adapter = nil
+		} else if providerInstance != nil && providerInstance.Kind == provider.KindCloud {
 			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: provider %s", appcredential.ErrCredentialUnavailable, model.ProviderID)
+		} else {
+			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve provider adapter: %w", err)
 		}
-		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve provider adapter: %w", err)
 	}
-
-	resolvedReq := req
-	resolvedReq.ProviderID = model.ProviderID
-	resolvedReq.ProviderModel = model.Name
-
 	return model, adapter, resolvedReq, nil
 }
 

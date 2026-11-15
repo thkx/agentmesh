@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/airesource"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
 	"github.com/thkx/agentmesh/internal/modelgateway"
@@ -19,17 +20,30 @@ import (
 type CatalogHandler struct {
 	// writeMu serializes catalog mutations so snapshot persistence and in-memory
 	// registry publication cannot overwrite concurrent updates.
-	writeMu   sync.Mutex
-	providers *provider.ProviderRegistry
-	models    *provider.ModelRegistry
-	adapters  *modelgateway.Registry
-	runtime   *modelgateway.ProviderRuntime
-	repo      provider.CatalogRepository
-	gateway   *modelgateway.Gateway
+	writeMu       sync.Mutex
+	providers     *provider.ProviderRegistry
+	models        *provider.ModelRegistry
+	adapters      *modelgateway.Registry
+	runtime       *modelgateway.ProviderRuntime
+	repo          provider.CatalogRepository
+	gateway       *modelgateway.Gateway
+	dynamicModels interface {
+		ListModels(context.Context) ([]airesource.Model, error)
+		GetModelByID(context.Context, string) (airesource.Model, error)
+	}
 }
 
 func NewCatalogHandler(pr *provider.ProviderRegistry, mr *provider.ModelRegistry, ar *modelgateway.Registry, runtime *modelgateway.ProviderRuntime, repo provider.CatalogRepository, gateway *modelgateway.Gateway) *CatalogHandler {
 	return &CatalogHandler{providers: pr, models: mr, adapters: ar, runtime: runtime, repo: repo, gateway: gateway}
+}
+
+// SetDynamicModelCatalog merges AI Resource models into the public model catalog.
+// Configure it during bootstrap before serving requests.
+func (h *CatalogHandler) SetDynamicModelCatalog(catalog interface {
+	ListModels(context.Context) ([]airesource.Model, error)
+	GetModelByID(context.Context, string) (airesource.Model, error)
+}) {
+	h.dynamicModels = catalog
 }
 
 func (h *CatalogHandler) RegisterRoutes(r *gin.RouterGroup) {
@@ -85,6 +99,8 @@ type modelAPIResponse struct {
 	Status            string    `json:"status"`
 	CreatedAt         time.Time `json:"created_at,omitempty"`
 	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+	Source            string    `json:"source,omitempty"`
+	ModelKey          string    `json:"model_key,omitempty"`
 }
 
 func toProviderAPI(p provider.Provider) providerAPIResponse {
@@ -304,10 +320,8 @@ func (h *CatalogHandler) testProvider(c *gin.Context) {
 		apiError(c, 409, "provider_disabled", "Provider is disabled")
 		return
 	}
-	if !h.adapters.Has(id) {
-		apiError(c, 503, "provider_not_ready", "Provider adapter is not initialized; configure credentials first")
-		return
-	}
+	// The shared gateway may satisfy this provider through the dynamic
+	// multi-credential pool even when no legacy single-key adapter exists.
 	var selected *provider.Model
 	for _, item := range h.models.List() {
 		if item.ProviderID == id && item.Enabled {
@@ -344,18 +358,61 @@ func (h *CatalogHandler) testProvider(c *gin.Context) {
 func (h *CatalogHandler) listModels(c *gin.Context) {
 	items := h.models.List()
 	out := make([]modelAPIResponse, 0, len(items))
+	seen := make(map[string]bool, len(items))
 	for _, m := range items {
-		out = append(out, toModelAPI(m))
+		item := toModelAPI(m)
+		item.Source = "provider"
+		out = append(out, item)
+		seen[m.ID] = true
+	}
+	if h.dynamicModels != nil {
+		dynamic, err := h.dynamicModels.ListModels(c.Request.Context())
+		if err != nil {
+			apiError(c, 500, "dynamic_model_catalog_failed", "Could not load AI Resource models")
+			return
+		}
+		for _, m := range dynamic {
+			if seen[m.ID] {
+				continue
+			}
+			status := "disabled"
+			if m.Enabled {
+				status = "enabled"
+			}
+			out = append(out, modelAPIResponse{
+				ID: m.ID, ProviderID: "ai-resource", Name: m.ModelKey,
+				DisplayName: m.DisplayName, SupportsStreaming: m.SupportsStreaming,
+				Enabled: m.Enabled, Status: status, CreatedAt: m.CreatedAt,
+				UpdatedAt: m.UpdatedAt, Source: "ai_resource", ModelKey: m.ModelKey,
+			})
+		}
 	}
 	c.JSON(200, gin.H{"data": out})
 }
 func (h *CatalogHandler) getModel(c *gin.Context) {
 	m, ok := h.models.Get(c.Param("id"))
-	if !ok {
-		apiError(c, 404, "model_not_found", "Model does not exist")
+	if ok {
+		item := toModelAPI(m)
+		item.Source = "provider"
+		c.JSON(200, item)
 		return
 	}
-	c.JSON(200, toModelAPI(m))
+	if h.dynamicModels != nil {
+		dynamic, err := h.dynamicModels.GetModelByID(c.Request.Context(), c.Param("id"))
+		if err == nil {
+			status := "disabled"
+			if dynamic.Enabled {
+				status = "enabled"
+			}
+			c.JSON(200, modelAPIResponse{ID: dynamic.ID, ProviderID: "ai-resource", Name: dynamic.ModelKey, DisplayName: dynamic.DisplayName, SupportsStreaming: dynamic.SupportsStreaming, Enabled: dynamic.Enabled, Status: status, CreatedAt: dynamic.CreatedAt, UpdatedAt: dynamic.UpdatedAt, Source: "ai_resource", ModelKey: dynamic.ModelKey})
+			return
+		}
+		if !errors.Is(err, airesource.ErrNotFound) {
+			apiError(c, 500, "dynamic_model_lookup_failed", "Could not load AI Resource model")
+			return
+		}
+	}
+	apiError(c, 404, "model_not_found", "Model does not exist")
 }
 func (h *CatalogHandler) createModel(c *gin.Context) {
 	h.writeMu.Lock()
@@ -631,9 +688,13 @@ func writeGatewayError(c *gin.Context, err error) {
 		status = 400
 		code = "invalid_request"
 	}
-	if errors.Is(err, modelgateway.ErrStreamingDisabled) {
+	if errors.Is(err, modelgateway.ErrStreamingDisabled) || errors.Is(err, modelgateway.ErrDynamicStreamingUnsupported) {
 		status = 409
 		code = "streaming_unsupported"
+	}
+	if errors.Is(err, modelgateway.ErrNativeToolCallingUnsupported) || errors.Is(err, modelgateway.ErrNativeToolStreamingUnsupported) {
+		status = 409
+		code = "native_tool_calling_unsupported"
 	}
 	if errors.Is(err, provider.ErrModelDisabled) || errors.Is(err, provider.ErrProviderDisabled) {
 		status = 409

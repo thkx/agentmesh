@@ -21,6 +21,9 @@ type upstreamError struct {
 func (e *upstreamError) Error() string {
 	return fmt.Sprintf("upstream request failed with status %d", e.Status)
 }
+
+// StatusCode lets the shared model gateway classify upstream failures.
+func (e *upstreamError) StatusCode() int { return e.Status }
 func endpointURL(base, path string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
 }
@@ -71,8 +74,8 @@ func doJSON(ctx context.Context, client *http.Client, method, target, key string
 	}
 	return data, resp.StatusCode, nil
 }
-func normalizeMessages(messages []Message) ([]map[string]string, string) {
-	out := make([]map[string]string, 0, len(messages))
+func normalizeMessages(messages []Message) ([]map[string]any, string) {
+	out := make([]map[string]any, 0, len(messages))
 	system := []string{}
 	for _, m := range messages {
 		if m.Role == "system" || m.Role == "developer" {
@@ -80,14 +83,27 @@ func normalizeMessages(messages []Message) ([]map[string]string, string) {
 			continue
 		}
 		role := m.Role
-		if role != "assistant" {
+		if role != "assistant" && role != "tool" {
 			role = "user"
 		}
-		out = append(out, map[string]string{"role": role, "content": m.Content})
+		item := map[string]any{"role": role, "content": m.Content}
+		if m.Name != "" {
+			item["name"] = m.Name
+		}
+		if m.ToolCallID != "" {
+			item["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.ToolCalls) > 0 {
+			item["tool_calls"] = m.ToolCalls
+		}
+		out = append(out, item)
 	}
 	return out, strings.Join(system, "\n\n")
 }
 func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateResponse, int, error) {
+	if len(req.Tools) > 0 && c.Provider.Protocol != ProtocolOpenAI {
+		return GenerateResponse{}, 0, ErrNativeToolCallingUnsupported
+	}
 	timeout := time.Duration(c.Endpoint.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -109,6 +125,12 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 		if req.MaxTokens > 0 {
 			payload["max_tokens"] = req.MaxTokens
 		}
+		if len(req.Tools) > 0 {
+			payload["tools"] = req.Tools
+			if req.ToolChoice != "" {
+				payload["tool_choice"] = req.ToolChoice
+			}
+		}
 		raw, status, err = doJSON(ctx, client, http.MethodPost, endpointURL(c.Endpoint.BaseURL, "chat/completions"), c.Secret, c.Provider.Protocol, payload)
 	case ProtocolAnthropic:
 		payload := map[string]any{"model": c.UpstreamModel, "messages": messages, "max_tokens": req.MaxTokens}
@@ -125,7 +147,9 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 	case ProtocolGemini:
 		contents := make([]map[string]any, 0, len(messages))
 		for _, m := range messages {
-			contents = append(contents, map[string]any{"role": m["role"], "parts": []map[string]string{{"text": m["content"]}}})
+			role, _ := m["role"].(string)
+			content, _ := m["content"].(string)
+			contents = append(contents, map[string]any{"role": role, "parts": []map[string]string{{"text": content}}})
 		}
 		payload := map[string]any{"contents": contents}
 		if system != "" {

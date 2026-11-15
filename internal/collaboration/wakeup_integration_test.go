@@ -1,0 +1,349 @@
+package collaboration_test
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	agentcatalog "github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/collaboration"
+	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
+	execdom "github.com/thkx/agentmesh/internal/domain/execution"
+	executionmanager "github.com/thkx/agentmesh/internal/execution/manager"
+	executionrepository "github.com/thkx/agentmesh/internal/execution/repository"
+	"github.com/thkx/agentmesh/internal/workspace"
+)
+
+type immediateSuccessAdapter struct {
+	submitted chan execdom.Entity
+}
+
+func (a immediateSuccessAdapter) Submit(_ context.Context, entity execdom.Entity) (string, error) {
+	if a.submitted != nil {
+		a.submitted <- entity
+	}
+	return "immediate-success", nil
+}
+func (immediateSuccessAdapter) Observe(context.Context, execdom.Entity) (executionmanager.Observation, error) {
+	result, _ := json.Marshal(map[string]string{"content": "completed by test runtime"})
+	return executionmanager.Observation{Status: execdom.LifecycleSucceeded, Attempt: 1, Result: result}, nil
+}
+func (immediateSuccessAdapter) Cancel(context.Context, execdom.Entity) error { return nil }
+
+type staticMemoryRetriever struct {
+	value string
+}
+
+func (r staticMemoryRetriever) Retrieve(context.Context, string, string, []string, int) (string, error) {
+	return r.value, nil
+}
+
+type unusedCatalogRunner struct{}
+
+func (unusedCatalogRunner) Run(context.Context, agentdom.Task) (agentdom.Result, error) {
+	return agentdom.Result{}, errors.New("catalog runner must not be called by execution manager path")
+}
+
+func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
+	ctx := context.Background()
+	service, db := newInboxTestService(t)
+	defer db.Close()
+
+	now := time.Now().UTC().UnixNano()
+	if _, err := db.DB.ExecContext(ctx, `INSERT INTO providers(id,type,name,kind,enabled,created_at,updated_at)
+		VALUES('provider-test','openai','Test Provider','cloud',1,?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.ExecContext(ctx, `INSERT INTO models(id,provider_id,name,display_name,context_window,max_output_tokens,supports_streaming,enabled,created_at,updated_at)
+		VALUES('model-test','provider-test','test-model','Test Model',8192,1024,1,1,?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	catalogRepo, err := agentcatalog.NewSQLiteRepository(db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := agentdom.Definition{
+		ID: "definition-test", Name: "Integration Agent", SystemPrompt: "You are an integration test agent.",
+		ModelID: "model-test", Temperature: 0, MaxSteps: 4, MaxToolCalls: 4, MaxOutputTokens: 1024,
+		TimeoutSeconds: 30, Enabled: true,
+	}
+	if err = catalogRepo.Create(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	definition, err = catalogRepo.Get(ctx, definition.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions, err := agentcatalog.NewService(catalogRepo, unusedCatalogRunner{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collabWorkspace, err := service.CreateWorkspace(ctx, collaboration.Workspace{Name: "Wakeup Integration", Slug: "wakeup-integration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := service.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: collabWorkspace.ID, Name: "Executor", Role: "worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer, err := service.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: collabWorkspace.ID, Name: "Task Owner", Role: "lead"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	channel, err := service.CreateChannel(ctx, collaboration.Channel{
+		WorkspaceID: collabWorkspace.ID, Name: "Engineering Decisions", Kind: "team",
+		MemberIDs: []string{identity.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.PostMessage(ctx, channel.ID, "user", "Project Lead", "Keep the database migration backward compatible and document rollback steps."); err != nil {
+		t.Fatal(err)
+	}
+	filesystemWorkspaces, err := workspace.NewManager(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = filesystemWorkspaces.Create(ctx, "agent-work"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.BindRuntime(ctx, identity.ID, "agent-work", definition); err != nil {
+		t.Fatal(err)
+	}
+
+	executionStore, err := executionrepository.NewSQLiteStore(db.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := executionmanager.New(executionStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted := make(chan execdom.Entity, 1)
+	if err = executions.Register(execdom.RuntimeAgent, immediateSuccessAdapter{submitted: submitted}); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := service.CreateTask(ctx, collaboration.Task{WorkspaceID: collabWorkspace.ID, Title: "Run integration task", Description: "Verify durable collaboration wakeup.", CreatedBy: observer.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := service.AssignTask(ctx, task.ID, identity.ID, "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := collaboration.NewDispatcher(db.DB, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	wakeup, err := collaboration.NewWakeupWorker(service, definitions, executions, filesystemWorkspaces, collaboration.WakeupConfig{
+		WorkerID: "integration", PollInterval: 5 * time.Millisecond, InboxLease: time.Minute,
+		AssignmentLease: time.Minute, MaxInboxAttempts: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeup.SetMemoryRetriever(staticMemoryRetriever{value: "Remember: this workspace requires migration-safe schema changes."})
+	workerCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- wakeup.Run(workerCtx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		var assignmentStatus, inboxStatus string
+		err = db.DB.QueryRowContext(ctx, "SELECT status FROM task_assignments WHERE id=?", assignment.ID).Scan(&assignmentStatus)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		err = db.DB.QueryRowContext(ctx, "SELECT status FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assigned' ORDER BY received_at DESC LIMIT 1", identity.ID).Scan(&inboxStatus)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if assignmentStatus == "completed" && inboxStatus == "handled" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	var assignmentStatus, taskStatus string
+	if err = db.DB.QueryRowContext(ctx, "SELECT status FROM task_assignments WHERE id=?", assignment.ID).Scan(&assignmentStatus); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if err = db.DB.QueryRowContext(ctx, "SELECT status FROM collaboration_tasks WHERE id=?", task.ID).Scan(&taskStatus); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if assignmentStatus != "completed" || taskStatus != "completed" {
+		cancel()
+		t.Fatalf("wakeup did not complete task: assignment=%s task=%s", assignmentStatus, taskStatus)
+	}
+
+	var completionPayload string
+	if err = db.DB.QueryRowContext(ctx, "SELECT payload_json FROM collaboration_outbox WHERE event_type='task.completed' AND aggregate_id=? ORDER BY created_at DESC LIMIT 1", task.ID).Scan(&completionPayload); err != nil {
+		cancel()
+		t.Fatalf("task completion result was not persisted to the outbox: %v", err)
+	}
+	var completion struct {
+		ExecutionID string          `json:"execution_id"`
+		Result      json.RawMessage `json:"result"`
+	}
+	if err = json.Unmarshal([]byte(completionPayload), &completion); err != nil {
+		cancel()
+		t.Fatalf("decode task completion payload: %v", err)
+	}
+	if completion.ExecutionID == "" || !strings.Contains(string(completion.Result), "completed by test runtime") {
+		cancel()
+		t.Fatalf("execution result missing from durable completion event: %+v", completion)
+	}
+	// Stop the polling worker before dispatching the completion event.
+	// This keeps the SQLite integration test deterministic under -race.
+	cancel()
+	if err = <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stop wakeup worker: expected context cancellation, got %v", err)
+	}
+	// The completion event must be routed to the task's Agent creator, not
+	// broadcast to every Agent in the workspace.
+	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
+		cancel()
+		t.Fatalf("dispatch task completion: %v", err)
+	}
+	var ownerInboxPayload string
+	if err = db.DB.QueryRowContext(ctx, `SELECT payload_json FROM collaboration_inbox
+		WHERE agent_id=? AND event_type='task.completed' ORDER BY received_at DESC LIMIT 1`, observer.ID).Scan(&ownerInboxPayload); err != nil {
+		cancel()
+		t.Fatalf("task completion was not delivered to its Agent creator: %v", err)
+	}
+	if !strings.Contains(ownerInboxPayload, "completed by test runtime") {
+		cancel()
+		t.Fatalf("delivered completion inbox payload lost runtime result: %s", ownerInboxPayload)
+	}
+	var executorInboxCount int
+	if err = db.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM collaboration_inbox
+		WHERE agent_id=? AND event_type='task.completed'`, identity.ID).Scan(&executorInboxCount); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if executorInboxCount != 0 {
+		cancel()
+		t.Fatalf("task completion was incorrectly broadcast to executor: %d", executorInboxCount)
+	}
+	// A recipient Agent consumes the completion Inbox item into its durable
+	// task-result ledger. The ledger is independent of the Runtime process.
+	receiverCtx, receiverCancel := context.WithCancel(context.Background())
+	receiverDone := make(chan error, 1)
+	go func() { receiverDone <- wakeup.Run(receiverCtx) }()
+	var receivedResults int
+	for waitUntil := time.Now().Add(5 * time.Second); time.Now().Before(waitUntil); {
+		err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_task_results WHERE recipient_agent_id=? AND assignment_id=?", observer.ID, assignment.ID).Scan(&receivedResults)
+		if err != nil {
+			receiverCancel()
+			t.Fatal(err)
+		}
+		if receivedResults == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if receivedResults != 1 {
+		receiverCancel()
+		_ = <-receiverDone
+		t.Fatalf("task completion was not consumed into durable result ledger: count=%d", receivedResults)
+	}
+	// Result persistence and assessment are separate durable steps because an
+	// evaluator may call an external model. Wait for the assessment before
+	// stopping the receiver so the test verifies the complete processing path.
+	var assessmentCount int
+	for waitUntil := time.Now().Add(5 * time.Second); time.Now().Before(waitUntil); {
+		if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_task_result_assessments WHERE recipient_agent_id=? AND assignment_id=?", observer.ID, assignment.ID).Scan(&assessmentCount); err != nil {
+			receiverCancel()
+			_ = <-receiverDone
+			t.Fatal(err)
+		}
+		if assessmentCount == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	receiverCancel()
+	if err = <-receiverDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stop result receiver: expected context cancellation, got %v", err)
+	}
+	if assessmentCount != 1 {
+		t.Fatalf("task result was not assessed: count=%d", assessmentCount)
+	}
+	var storedResult string
+	if err = db.DB.QueryRowContext(ctx, "SELECT result_json FROM agent_task_results WHERE recipient_agent_id=? AND assignment_id=?", observer.ID, assignment.ID).Scan(&storedResult); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(storedResult, "completed by test runtime") {
+		t.Fatalf("durable recipient result lost runtime output: %s", storedResult)
+	}
+	assessment, err := service.GetTaskResultAssessment(ctx, observer.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("get durable task result assessment: %v", err)
+	}
+	if assessment.Outcome != "human_review" || assessment.ResultID == "" {
+		t.Fatalf("default result evaluator must preserve conservative human review: %+v", assessment)
+	}
+	select {
+	case submittedExecution := <-submitted:
+		var submittedTask agentdom.Task
+		if err = json.Unmarshal(submittedExecution.Input, &submittedTask); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if !strings.Contains(submittedTask.SystemPrompt, "migration-safe schema changes") {
+			cancel()
+			t.Fatalf("long-term memory was not injected into runtime context: %q", submittedTask.SystemPrompt)
+		}
+		if !strings.Contains(submittedTask.Prompt, "Keep the database migration backward compatible") {
+			cancel()
+			t.Fatalf("recent Agent channel conversation was not injected into runtime prompt: %q", submittedTask.Prompt)
+		}
+	default:
+		cancel()
+		t.Fatal("execution adapter did not receive the assigned task")
+	}
+	session, err := service.GetActiveAgentSession(ctx, identity.ID)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if session.CurrentExecutionID != "" || session.LastExecutionID == "" || session.ExecutionCount != 1 {
+		cancel()
+		t.Fatalf("unexpected agent session after execution: %+v", session)
+	}
+	transcript, err := service.ListAgentSessionTranscript(ctx, identity.ID, 10)
+	if err != nil {
+		cancel()
+		t.Fatalf("list persisted Agent Session transcript: %v", err)
+	}
+	if len(transcript) != 2 || transcript[0].EntryType != "execution_input" || transcript[1].EntryType != "execution_result" {
+		cancel()
+		t.Fatalf("expected durable execution input and result transcript, got %+v", transcript)
+	}
+	if !strings.Contains(transcript[0].Content, "Verify durable collaboration wakeup") ||
+		!strings.Contains(transcript[1].Content, "completed by test runtime") {
+		cancel()
+		t.Fatalf("Agent Session transcript lost execution input or result: %+v", transcript)
+	}
+	var handled int
+	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assigned' AND status='handled'", identity.ID).Scan(&handled); err != nil {
+		t.Fatal(err)
+	}
+	if handled != 1 {
+		t.Fatalf("expected one handled assignment event, got %d", handled)
+	}
+}

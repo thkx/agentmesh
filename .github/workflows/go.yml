@@ -2,7 +2,7 @@ name: Go CI
 
 on:
   push:
-    branches: ["main", "p2/**", "p2-a/**"]
+    branches: ["main", "p2/**", "p2-a/**", "p3/**"]
   pull_request:
     branches: ["main"]
 
@@ -18,8 +18,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Normalize formatting in CI workspace
-        run: gofmt -w $(find . -name '*.go' -type f)
+      - name: Check Go formatting
+        run: |
+          files="$(gofmt -l $(find . -type f -name '*.go' -not -path './.git/*'))"
+          if [ -n "$files" ]; then
+            echo "Go files require gofmt:"
+            echo "$files"
+            gofmt -d $files
+            exit 1
+          fi
+      - name: Check P3 acceptance scripts
+        run: bash -n scripts/test-p3.sh scripts/e2e-p3.sh scripts/verify-p3.sh
       - name: Build
         run: go build ./...
       - name: Vet

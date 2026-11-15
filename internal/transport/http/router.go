@@ -16,10 +16,11 @@ import (
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/coding"
-	"github.com/thkx/agentmesh/internal/execution/manager"
+	"github.com/thkx/agentmesh/internal/collaboration"
 	"github.com/thkx/agentmesh/internal/conversation"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
+	"github.com/thkx/agentmesh/internal/execution/manager"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/memory"
@@ -61,7 +62,9 @@ type Dependencies struct {
 	ToolEngine            *tools.Engine
 	ToolAudit             audit.Store
 	AIResourceHandler     *airesource.HTTPHandler
+	AIResources           *airesource.Service
 	AgentDefinitions      *agentcatalog.Service
+	Collaboration         *collaboration.Service
 	CodingService         *coding.Service
 	APIToken              string
 }
@@ -112,6 +115,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
 	}
 	h := handlers.NewCatalogHandler(deps.Providers, deps.Models, deps.Adapters, deps.ProviderRuntime, deps.Repository, deps.Gateway)
+	if deps.AIResources != nil {
+		h.SetDynamicModelCatalog(deps.AIResources)
+	}
 	h.RegisterRoutes(api)
 	if deps.CredentialManager != nil {
 		handlers.NewCredentialHandler(deps.CredentialManager).RegisterRoutes(api)
@@ -152,6 +158,11 @@ func NewRouter(deps Dependencies) http.Handler {
 		workflowHandler := handlers.NewWorkflowHandler(deps.WorkflowEngine)
 		workflowHandler.SetMaxAttempts(deps.WorkflowMaxAttempts)
 		workflowHandler.RegisterRoutes(api)
+	}
+	if deps.Collaboration != nil {
+		collaborationHandler := handlers.NewCollaborationHandler(deps.Collaboration)
+		collaborationHandler.SetRuntimeBindingDependencies(deps.AgentDefinitions, deps.Workspaces)
+		collaborationHandler.RegisterRoutes(api)
 	}
 	if deps.DB != nil {
 		if repo, err := conversation.NewSQLiteRepository(deps.DB); err == nil {

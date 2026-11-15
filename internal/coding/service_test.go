@@ -216,7 +216,6 @@ func TestTaskMutationRejectsRunningTask(t *testing.T) {
 	}
 }
 
-
 func TestCancelContextCancelsQueuedTaskBeforeWorkerClaim(t *testing.T) {
 	repo := testRepository(t)
 	ctx := context.Background()
@@ -224,15 +223,29 @@ func TestCancelContextCancelsQueuedTaskBeforeWorkerClaim(t *testing.T) {
 		ID: "cancel-service-pending", RepositoryPath: "/tmp/repo",
 		ModelID: "test-model", Prompt: "do work",
 	})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := NewService(repo, fakeCodingAgent{}, t.TempDir(), "golang:1.27.3", false)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer service.Close()
-	if err := service.CancelContext(ctx, task.ID); err != nil { t.Fatal(err) }
+	if err := service.CancelContext(ctx, task.ID); err != nil {
+		t.Fatal(err)
+	}
 	got, err := service.Get(ctx, task.ID)
-	if err != nil { t.Fatal(err) }
-	if got.Status != StatusCanceled { t.Fatalf("status=%s, want canceled", got.Status) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusCanceled {
+		t.Fatalf("status=%s, want canceled", got.Status)
+	}
 	claimed, err := repo.Claim(ctx, task.ID)
-	if err != nil { t.Fatal(err) }
-	if claimed { t.Fatal("canceled task was claimable") }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("canceled task was claimable")
+	}
 }

@@ -35,7 +35,9 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 		ID: "cli-task-1", Provider: dom.ProviderCodex, Prompt: "test",
 		WorkspacePath: t.TempDir(), PermissionMode: dom.PermissionWorkspaceWrite,
 	})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	entity := dom.Entity{
 		ID: "execution-cli-1", Kind: dom.KindCLI, Runtime: dom.RuntimeCLI,
 		TaskID: "cli-task-1", Status: dom.LifecycleQueued,
@@ -44,11 +46,15 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 	store.values[entity.ID] = entity
 	exec := &blockingCLIExecutor{started: make(chan struct{})}
 	adapter, err := NewCLIAdapter(exec, store)
-	if err != nil { t.Fatal(err) }
-	if _, err := adapter.Submit(context.Background(), entity); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Submit(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case <-exec.started:
-	case <-time.After(2*time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("CLI executor did not start")
 	}
 	// A reconciliation racing the initial submit must reuse the active process.
@@ -57,14 +63,20 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 	}
 	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := adapter.CloseContext(closeCtx); err != nil { t.Fatalf("close adapter: %v", err) }
+	if err := adapter.CloseContext(closeCtx); err != nil {
+		t.Fatalf("close adapter: %v", err)
+	}
 	got, err := store.Get(context.Background(), entity.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != dom.LifecycleCanceled {
 		t.Fatalf("execution status=%s, want canceled (error=%s)", got.Status, got.Error)
 	}
 	attempts, err := store.ListAttempts(context.Background(), entity.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(attempts) != 1 || attempts[0].Status != dom.AttemptCanceled {
 		t.Fatalf("attempts=%+v, want one canceled attempt", attempts)
 	}
@@ -72,7 +84,6 @@ func TestCLIAdapterCloseWaitsForCancellationAndPersistence(t *testing.T) {
 		t.Fatalf("second close: %v", err)
 	}
 }
-
 
 func TestCLIAdapterCancelsQueuedExecutionWithoutLaunchingProcess(t *testing.T) {
 	store := newMemoryStore()
@@ -85,19 +96,28 @@ func TestCLIAdapterCancelsQueuedExecutionWithoutLaunchingProcess(t *testing.T) {
 	store.values[entity.ID] = entity
 	exec := &blockingCLIExecutor{started: make(chan struct{})}
 	adapter, err := NewCLIAdapter(exec, store)
-	if err != nil { t.Fatal(err) }
-	if err := adapter.Cancel(context.Background(), entity); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Cancel(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
 	got, err := store.Get(context.Background(), entity.ID)
-	if err != nil { t.Fatal(err) }
-	if got.Status != dom.LifecycleCanceled { t.Fatalf("status=%s, want canceled", got.Status) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != dom.LifecycleCanceled {
+		t.Fatalf("status=%s, want canceled", got.Status)
+	}
 	select {
 	case <-exec.started:
 		t.Fatal("queued cancellation unexpectedly launched the CLI executor")
 	default:
 	}
-	if err := adapter.CloseContext(context.Background()); err != nil { t.Fatal(err) }
+	if err := adapter.CloseContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
-
 
 func TestCLIAdapterRejectsMismatchedTaskIdentity(t *testing.T) {
 	store := newMemoryStore()
@@ -105,14 +125,18 @@ func TestCLIAdapterRejectsMismatchedTaskIdentity(t *testing.T) {
 	entity := dom.Entity{
 		ID: "execution-cli-mismatch", Kind: dom.KindCLI, Runtime: dom.RuntimeCLI,
 		TaskID: "expected-task", Status: dom.LifecycleQueued,
-		Input: json.RawMessage(`{"id":"different-task","provider":"codex","prompt":"test","workspace_path":"/tmp"}`),
+		Input:     json.RawMessage(`{"id":"different-task","provider":"codex","prompt":"test","workspace_path":"/tmp"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	store.values[entity.ID] = entity
 	adapter, err := NewCLIAdapter(&blockingCLIExecutor{started: make(chan struct{})}, store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := adapter.Submit(context.Background(), entity); err != dom.ErrInvalidEntity {
 		t.Fatalf("mismatched task ID error=%v, want ErrInvalidEntity", err)
 	}
-	if err := adapter.CloseContext(context.Background()); err != nil { t.Fatal(err) }
+	if err := adapter.CloseContext(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -54,18 +54,32 @@ func (s *memoryStore) ListAttempts(_ context.Context, executionID string) ([]dom
 func (s *memoryStore) List(_ context.Context, f dom.ListFilter) ([]dom.Entity, error) {
 	out := make([]dom.Entity, 0, len(s.values))
 	for _, e := range s.values {
-		if f.Status != "" && e.Status != f.Status { continue }
-		if f.Kind != "" && e.Kind != f.Kind { continue }
-		if f.Runtime != "" && e.Runtime != f.Runtime { continue }
-		if f.TaskID != "" && e.TaskID != f.TaskID { continue }
+		if f.Status != "" && e.Status != f.Status {
+			continue
+		}
+		if f.Kind != "" && e.Kind != f.Kind {
+			continue
+		}
+		if f.Runtime != "" && e.Runtime != f.Runtime {
+			continue
+		}
+		if f.TaskID != "" && e.TaskID != f.TaskID {
+			continue
+		}
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	start := f.Offset
-	if start < 0 { start = 0 }
-	if start >= len(out) { return []dom.Entity{}, nil }
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(out) {
+		return []dom.Entity{}, nil
+	}
 	end := len(out)
-	if f.Limit > 0 && start+f.Limit < end { end = start+f.Limit }
+	if f.Limit > 0 && start+f.Limit < end {
+		end = start + f.Limit
+	}
 	return out[start:end], nil
 }
 
@@ -201,13 +215,16 @@ func TestGetQueuedDoesNotCreateRunningAttempt(t *testing.T) {
 	}
 }
 
-
 func TestReconcileScansAllPages(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleRunning}}
-	if err := m.Register(dom.RuntimeAgent, adapter); err != nil { t.Fatal(err) }
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	for _, id := range []string{"exec-a", "exec-b", "exec-c", "exec-d", "exec-e"} {
 		_, err := store.Create(context.Background(), dom.Entity{
@@ -215,10 +232,14 @@ func TestReconcileScansAllPages(t *testing.T) {
 			Status: dom.LifecycleQueued, Input: json.RawMessage(`{"id":"task"}`),
 			CreatedAt: now, UpdatedAt: now,
 		})
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	report, err := m.Reconcile(context.Background(), 2)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if report.Scanned != 5 {
 		t.Fatalf("scanned=%d, want 5; report=%+v", report.Scanned, report)
 	}
@@ -227,68 +248,93 @@ func TestReconcileScansAllPages(t *testing.T) {
 	}
 }
 
-
 func TestSubmitIdempotencyKeyReusesExecutionAndRejectsChangedPayload(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
-	if err := m.Register(dom.RuntimeAgent, adapter); err != nil { t.Fatal(err) }
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
 	input := json.RawMessage(`{"id":"task-1","prompt":"same"}`)
 	request := SubmitRequest{
 		Kind: dom.KindAgent, Runtime: dom.RuntimeAgent, TaskID: "task-1",
 		Input: input, IdempotencyKey: "request-key-1",
 	}
 	first, err := m.Submit(context.Background(), request)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	second, err := m.Submit(context.Background(), request)
-	if err != nil { t.Fatal(err) }
-	if first.ID != second.ID { t.Fatalf("idempotent submit returned different IDs: %s != %s", first.ID, second.ID) }
-	if adapter.submitCount != 1 { t.Fatalf("adapter submissions=%d, want 1", adapter.submitCount) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("idempotent submit returned different IDs: %s != %s", first.ID, second.ID)
+	}
+	if adapter.submitCount != 1 {
+		t.Fatalf("adapter submissions=%d, want 1", adapter.submitCount)
+	}
 
 	request.Input = json.RawMessage(`{"id":"task-1","prompt":"changed"}`)
 	if _, err := m.Submit(context.Background(), request); err != dom.ErrConflict {
 		t.Fatalf("changed payload error=%v, want ErrConflict", err)
 	}
-	if adapter.submitCount != 1 { t.Fatalf("conflicting request reached adapter: submissions=%d", adapter.submitCount) }
+	if adapter.submitCount != 1 {
+		t.Fatalf("conflicting request reached adapter: submissions=%d", adapter.submitCount)
+	}
 }
-
 
 func TestSubmitDerivesCLIIdentityFromInput(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleQueued}}
-	if err := m.Register(dom.RuntimeCLI, adapter); err != nil { t.Fatal(err) }
+	if err := m.Register(dom.RuntimeCLI, adapter); err != nil {
+		t.Fatal(err)
+	}
 	input := json.RawMessage(`{"id":"cli-task-derived","prompt":"run","workspace_path":"/tmp"}`)
 	entity, err := m.Submit(context.Background(), SubmitRequest{
 		Kind: dom.KindCLI, Runtime: dom.RuntimeCLI, Input: input,
 	})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if entity.TaskID != "cli-task-derived" {
 		t.Fatalf("task ID=%q, want derived CLI request ID", entity.TaskID)
 	}
 }
 
-
 func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	entity := dom.Entity{
 		ID: "execution-needs-reconcile", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
 		TaskID: "task-needs-reconcile", Status: dom.LifecycleNeedsReconciliation,
 		Input: json.RawMessage(`{"id":"task-needs-reconcile"}`), CreatedAt: now, UpdatedAt: now,
 	}
-	if _, err := store.Create(context.Background(), entity); err != nil { t.Fatal(err) }
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.CreateAttempt(context.Background(), dom.Attempt{
 		ID: entity.ID + "-a-1", ExecutionID: entity.ID, Number: 1, Runtime: dom.RuntimeAgent,
 		Status: dom.AttemptRunning, Input: entity.Input, StartedAt: now,
-	}); err != nil { t.Fatal(err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
 	result := json.RawMessage(`{"verified":true,"source":"operator"}`)
 	resolved, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, result, "verified the persisted artifact")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resolved.Status != dom.LifecycleSucceeded || string(resolved.Result) != string(result) {
 		t.Fatalf("unexpected resolved execution: %+v", resolved)
 	}
@@ -303,14 +349,18 @@ func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
 func TestResolveRejectsUnsafeOrInvalidResolution(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	entity := dom.Entity{
 		ID: "execution-running", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
 		TaskID: "task-running", Status: dom.LifecycleRunning,
 		Input: json.RawMessage(`{"id":"task-running"}`), CreatedAt: now, UpdatedAt: now,
 	}
-	if _, err := store.Create(context.Background(), entity); err != nil { t.Fatal(err) }
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, json.RawMessage(`{"ok":true}`), "confirmed"); err != dom.ErrInvalidTransition {
 		t.Fatalf("running resolution error=%v, want invalid transition", err)
 	}

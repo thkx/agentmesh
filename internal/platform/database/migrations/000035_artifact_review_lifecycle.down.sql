@@ -1,0 +1,6 @@
+DROP TRIGGER IF EXISTS collaboration_artifact_verifications_no_delete;
+DROP TRIGGER IF EXISTS collaboration_artifact_verifications_no_update;
+DROP TRIGGER IF EXISTS collaboration_artifact_reviews_no_delete;
+DROP TRIGGER IF EXISTS collaboration_artifact_reviews_no_update;
+DROP TABLE IF EXISTS collaboration_artifact_reviews;
+ALTER TABLE collaboration_artifacts DROP COLUMN submitted_version_id;

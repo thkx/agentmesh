@@ -168,8 +168,12 @@ func (a *CLIAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 				latest, readErr := a.store.Get(persistCtx, e.ID)
 				if readErr == nil && latest.Status != dom.LifecycleRunning {
 					target = latest.Status
-					if len(latest.Result) > 0 { raw = latest.Result }
-					if latest.Error != "" { message = latest.Error }
+					if len(latest.Result) > 0 {
+						raw = latest.Result
+					}
+					if latest.Error != "" {
+						message = latest.Error
+					}
 				} else {
 					target = dom.LifecycleNeedsReconciliation
 					message = fmt.Sprintf("persist CLI execution result: %v", transitionErr)

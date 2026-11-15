@@ -55,12 +55,12 @@ type Store interface {
 type subworkflowDepthKey struct{}
 
 type Engine struct {
-	store        Store
-	agent        AgentRunner
-	policy       policy.Policy
-	capabilities *capability.Registry
-	locks        sync.Map
-	cancels      sync.Map
+	store          Store
+	agent          AgentRunner
+	policy         policy.Policy
+	capabilities   *capability.Registry
+	locks          sync.Map
+	cancels        sync.Map
 	cancelRequests sync.Map
 }
 
@@ -241,7 +241,10 @@ func (e *Engine) ProcessLeased(ctx context.Context, runID, owner string, fenceTo
 		return r, err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
-	if _, loaded := e.cancels.LoadOrStore(runID, cancel); loaded { cancel(); return r, errors.New("workflow run is already executing in this process") }
+	if _, loaded := e.cancels.LoadOrStore(runID, cancel); loaded {
+		cancel()
+		return r, errors.New("workflow run is already executing in this process")
+	}
 	defer func() { e.cancels.Delete(runID); e.cancelRequests.Delete(runID); cancel() }()
 	return e.executeOwned(runCtx, c, r, owner, fenceToken, lease)
 }
@@ -518,7 +521,9 @@ func (e *Engine) CancelRun(ctx context.Context, runID string) error {
 		value.(context.CancelFunc)()
 		return nil
 	}
-	if store, ok := e.store.(interface { CancelQueuedRun(context.Context,string) error }); ok {
+	if store, ok := e.store.(interface {
+		CancelQueuedRun(context.Context, string) error
+	}); ok {
 		return store.CancelQueuedRun(ctx, runID)
 	}
 	return errors.New("workflow run is not active or queued cancellation is unsupported")
@@ -554,7 +559,11 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 	ledger, hasLedger := e.store.(NodeLedger)
 	for {
 		if err := ctx.Err(); err != nil {
-			if _, requested := e.cancelRequests.Load(r.ID); requested { r.Status = wf.RunCanceled } else { r.Status = wf.RunFailed }
+			if _, requested := e.cancelRequests.Load(r.ID); requested {
+				r.Status = wf.RunCanceled
+			} else {
+				r.Status = wf.RunFailed
+			}
 			r.Error = err.Error()
 			r.FinishedAt = time.Now().UTC()
 			_ = e.persistRun(context.WithoutCancel(ctx), r, owner, fenceToken)
