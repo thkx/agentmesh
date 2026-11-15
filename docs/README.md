@@ -9,7 +9,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [Project overview (English)](../README.md) | Product summary, requirements and quick start |
 | [项目说明（简体中文）](../README.zh-CN.md) | 中文项目概览、环境要求与快速开始 |
 | [P2 Unified Execution](p2-execution.md) | Execution/Attempt model, Runtime adapters, HTTP API, cancellation and recovery |
-| [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |
+| [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |\n| [P4 Unified Execution Core](p4-unified-execution-core.md) | Cross-runtime Task, Execution, Attempt, Event, Evidence, Artifact, lifecycle and recovery contract |
 
 ## Architecture and implementation history
 
