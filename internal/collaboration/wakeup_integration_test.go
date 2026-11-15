@@ -239,6 +239,37 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		cancel()
 		t.Fatalf("task completion was incorrectly broadcast to executor: %d", executorInboxCount)
 	}
+	// A recipient Agent consumes the completion Inbox item into its durable
+	// task-result ledger. The ledger is independent of the Runtime process.
+	receiverCtx, receiverCancel := context.WithCancel(context.Background())
+	receiverDone := make(chan error, 1)
+	go func() { receiverDone <- wakeup.Run(receiverCtx) }()
+	var receivedResults int
+	for waitUntil := time.Now().Add(5 * time.Second); time.Now().Before(waitUntil); {
+		err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_task_results WHERE recipient_agent_id=? AND assignment_id=?", observer.ID, assignment.ID).Scan(&receivedResults)
+		if err != nil {
+			receiverCancel()
+			t.Fatal(err)
+		}
+		if receivedResults == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	receiverCancel()
+	if err = <-receiverDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("stop result receiver: expected context cancellation, got %v", err)
+	}
+	if receivedResults != 1 {
+		t.Fatalf("task completion was not consumed into durable result ledger: count=%d", receivedResults)
+	}
+	var storedResult string
+	if err = db.DB.QueryRowContext(ctx, "SELECT result_json FROM agent_task_results WHERE recipient_agent_id=? AND assignment_id=?", observer.ID, assignment.ID).Scan(&storedResult); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(storedResult, "completed by test runtime") {
+		t.Fatalf("durable recipient result lost runtime output: %s", storedResult)
+	}
 	select {
 	case submittedExecution := <-submitted:
 		var submittedTask agentdom.Task
