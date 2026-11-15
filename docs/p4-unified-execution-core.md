@@ -113,7 +113,7 @@ M43/M44 implementation tests are included for event ordering/pagination, append-
 - Migration 000042 replaces the P3 blanket Artifact Version update trigger with a field-aware immutability guard. Content and identity fields remain immutable; one-time Execution/Attempt provenance binding is allowed only through the existing 000041 validation triggers.
 - A regression test proves that the provenance bind succeeds while content and metadata updates remain rejected.
 
-**Verification status remains pending:** this environment cannot execute the repository's Go toolchain or SQLite migration suite. Run `bash scripts/verify-p4-part1.sh` on the target Go 1.27.3 environment before treating Part 1 as accepted.
+**Verification status:** the user ran `bash scripts/verify-p4-part1.sh` on Go 1.27.3 and reported `P4 Part 1 verification passed.` Part 1 is locally accepted; this is not a CI result.
 
 ## 8. Part 2 implementation record (M45–M46)
 
@@ -126,7 +126,7 @@ The implementation details and recovery matrix are recorded in [P4 Part 2 Implem
 - Queued recovery may repeat Submit only under the Adapter contract that the stable Task/Execution identity is idempotent. Running executions are observed, never resubmitted.
 - SQLite integration tests exercise the migration, idempotent cancellation intent, terminal-state protection and immutable accepted input.
 
-**Verification status:** implementation is committed. Run `bash scripts/verify-p4-part2.sh` on Go 1.27.3; no Part 2 build, vet or race result has yet been observed.
+**Verification status:** the user ran `bash scripts/verify-p4-part2.sh` on Go 1.27.3. Formatting, build, vet and the full race suite passed; the script ended with `P4 Part 2 verification passed.` Part 2 is locally accepted; this is not a CI result.
 
 
 ## 9. Part 3 implementation record (M47–M48)
