@@ -8,7 +8,8 @@ P3 is the collaboration and governed execution foundation layered on top of the 
 |---|---|
 | Collaboration identity | Persisted Workspace and Agent Identity, separate from Agent Definition, filesystem Workspace and Runtime Session |
 | Conversation | Channels and threads reuse the existing Conversation message store |
-| Task model | General collaboration Tasks, Assignments, delegation lineage and idempotency |
+| Task model | General collaboration Tasks, Assignments, delegation lineage, idempotency and normalized required-capability constraints |
+| Capability routing | Assignment and Handoff reject Agents missing any required capability; Wakeup rechecks before starting the Runtime |
 | Assignment safety | Atomic claim, lease expiry, fencing version, renewal and terminal transitions |
 | Agent serialization | One active Assignment lease per Agent Identity |
 | Workspace governance | `max_agent_concurrency` enforced in the claim statement across all agents in a Workspace |
@@ -143,3 +144,8 @@ Decision policy history is queryable per Agent Identity through `GET /api/v1/col
 
 
 Immutable Artifact review history is available through `GET /api/v1/collaboration/artifacts/:id/reviews`, ordered newest first across all Artifact Versions. This complements the exact-version verification history endpoint.
+
+
+### P3 capability-constrained assignment
+
+Task requirements are persisted as normalized capability identifiers. Both direct assignment and Handoff validate that the target Agent Identity advertises every required capability; the Wakeup worker repeats the check at the execution boundary and fails the Assignment safely if the persisted Agent/Task contract no longer matches. Capability mismatches never trigger an LLM fallback or an implicit broadening of permissions.

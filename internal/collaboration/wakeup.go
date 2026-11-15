@@ -281,14 +281,25 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	var task Task
 	var title, description string
 	var createdAt, updatedAt int64
-	err = w.service.db.QueryRowContext(ctx, "SELECT id,workspace_id,title,description,task_type,status,priority,created_by,delegation_depth,created_at,updated_at FROM collaboration_tasks WHERE id=?", assignment.TaskID).
-		Scan(&task.ID, &task.WorkspaceID, &title, &description, &task.Type, &task.Status, &task.Priority, &task.CreatedBy, &task.DelegationDepth, &createdAt, &updatedAt)
+	var requiredCapabilitiesJSON string
+	err = w.service.db.QueryRowContext(ctx, "SELECT id,workspace_id,title,description,task_type,status,priority,created_by,delegation_depth,required_capabilities_json,created_at,updated_at FROM collaboration_tasks WHERE id=?", assignment.TaskID).
+		Scan(&task.ID, &task.WorkspaceID, &title, &description, &task.Type, &task.Status, &task.Priority, &task.CreatedBy, &task.DelegationDepth, &requiredCapabilitiesJSON, &createdAt, &updatedAt)
 	if err != nil {
 		return err
 	}
 	task.Title = title
 	task.Description = description
+	if err = json.Unmarshal([]byte(requiredCapabilitiesJSON), &task.RequiredCapabilities); err != nil {
+		return err
+	}
 	task.CreatedAt = time.UnixMilli(createdAt).UTC()
+	agentIdentity, identityErr := w.service.GetAgent(ctx, assignment.AgentID)
+	if identityErr != nil {
+		return identityErr
+	}
+	if !hasRequiredCapabilities(agentIdentity.Capabilities, task.RequiredCapabilities) {
+		return w.service.FailAssignment(ctx, assignment.ID, w.owner, assignment.ClaimVersion, ErrCapabilityMismatch.Error())
+	}
 	task.UpdatedAt = time.UnixMilli(updatedAt).UTC()
 	binding, err := w.service.GetRuntimeBinding(ctx, assignment.AgentID)
 	if err != nil {

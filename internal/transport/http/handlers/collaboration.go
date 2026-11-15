@@ -92,7 +92,7 @@ func (h *CollaborationHandler) fail(c *gin.Context, e error) {
 	code := 400
 	if errors.Is(e, collaboration.ErrNotFound) {
 		code = 404
-	} else if errors.Is(e, collaboration.ErrConflict) || errors.Is(e, collaboration.ErrLeaseLost) || errors.Is(e, collaboration.ErrInboxLeaseLost) || errors.Is(e, collaboration.ErrWorkspaceConcurrencyLimit) || errors.Is(e, collaboration.ErrAgentBusy) {
+	} else if errors.Is(e, collaboration.ErrConflict) || errors.Is(e, collaboration.ErrLeaseLost) || errors.Is(e, collaboration.ErrInboxLeaseLost) || errors.Is(e, collaboration.ErrWorkspaceConcurrencyLimit) || errors.Is(e, collaboration.ErrAgentBusy) || errors.Is(e, collaboration.ErrCapabilityMismatch) {
 		code = 409
 	}
 	c.JSON(code, gin.H{"error": e.Error()})

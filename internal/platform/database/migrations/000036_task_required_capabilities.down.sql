@@ -1,0 +1,1 @@
+ALTER TABLE collaboration_tasks DROP COLUMN required_capabilities_json;

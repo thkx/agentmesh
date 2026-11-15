@@ -21,6 +21,7 @@ var (
 	ErrLeaseLost                 = errors.New("assignment lease lost")
 	ErrWorkspaceConcurrencyLimit = errors.New("workspace agent concurrency limit reached")
 	ErrAgentBusy                 = errors.New("agent already has an active assignment")
+	ErrCapabilityMismatch        = errors.New("agent does not satisfy task capability requirements")
 	ErrApprovalRequired          = errors.New("human approval required")
 )
 
@@ -76,7 +77,8 @@ type Task struct {
 	Priority        int       `json:"priority,omitempty"`
 	CreatedBy       string    `json:"created_by,omitempty"`
 	IdempotencyKey  string    `json:"idempotency_key,omitempty"`
-	DelegationDepth int       `json:"delegation_depth,omitempty"`
+	DelegationDepth     int       `json:"delegation_depth,omitempty"`
+	RequiredCapabilities []string  `json:"required_capabilities,omitempty"`
 	CreatedAt       time.Time `json:"created_at,omitempty"`
 	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
@@ -101,6 +103,7 @@ type Handoff struct {
 	Artifacts          []string `json:"artifacts"`
 	Constraints        []string `json:"constraints"`
 	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
 	Reason             string   `json:"reason"`
 	Recipient          string   `json:"recipient"`
 	IdempotencyKey     string   `json:"idempotency_key"`
@@ -261,6 +264,10 @@ func (s *Service) CreateAgent(ctx context.Context, v AgentIdentity) (AgentIdenti
 	v.Name = strings.TrimSpace(v.Name)
 	if v.WorkspaceID == "" || v.Name == "" || len(v.Name) > 160 || len(v.Capabilities) > 128 {
 		return v, ErrInvalid
+	}
+	v.Capabilities, err = normalizeCapabilityList(v.Capabilities, 128)
+	if err != nil {
+		return v, err
 	}
 	if _, err := s.GetWorkspace(ctx, v.WorkspaceID); err != nil {
 		return v, err
@@ -542,6 +549,10 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 	if v.WorkspaceID == "" || v.Title == "" || len(v.Title) > 240 || v.Priority < 1 || v.Priority > 5 {
 		return v, ErrInvalid
 	}
+	v.RequiredCapabilities, err = normalizeCapabilityList(v.RequiredCapabilities, 32)
+	if err != nil {
+		return v, err
+	}
 	w, err := s.GetWorkspace(ctx, v.WorkspaceID)
 	if err != nil {
 		return v, err
@@ -556,6 +567,10 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 		}
 		v.DelegationDepth = p.DelegationDepth + 1
 	}
+	capabilitiesJSON, err := json.Marshal(v.RequiredCapabilities)
+	if err != nil {
+		return v, err
+	}
 	now := s.clock().UTC()
 	v.CreatedAt = now
 	v.UpdatedAt = now
@@ -564,7 +579,7 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 		return v, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, "INSERT INTO collaboration_tasks(id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", v.ID, v.WorkspaceID, null(v.ParentTaskID), v.Title, v.Description, v.Type, v.Status, v.Priority, v.CreatedBy, null(v.IdempotencyKey), v.DelegationDepth, now.UnixMilli(), now.UnixMilli())
+	_, err = tx.ExecContext(ctx, "INSERT INTO collaboration_tasks(id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,required_capabilities_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", v.ID, v.WorkspaceID, null(v.ParentTaskID), v.Title, v.Description, v.Type, v.Status, v.Priority, v.CreatedBy, null(v.IdempotencyKey), v.DelegationDepth, string(capabilitiesJSON), now.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		return v, err
 	}
@@ -576,8 +591,9 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 func (s *Service) findTaskByIdempotency(ctx context.Context, workspaceID, key string) (Task, error) {
 	var v Task
 	var parent, k sql.NullString
+	var capabilitiesJSON string
 	var c, u int64
-	err := s.db.QueryRowContext(ctx, "SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at FROM collaboration_tasks WHERE workspace_id=? AND idempotency_key=?", workspaceID, key).Scan(&v.ID, &v.WorkspaceID, &parent, &v.Title, &v.Description, &v.Type, &v.Status, &v.Priority, &v.CreatedBy, &k, &v.DelegationDepth, &c, &u)
+	err := s.db.QueryRowContext(ctx, "SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,required_capabilities_json,created_at,updated_at FROM collaboration_tasks WHERE workspace_id=? AND idempotency_key=?", workspaceID, key).Scan(&v.ID, &v.WorkspaceID, &parent, &v.Title, &v.Description, &v.Type, &v.Status, &v.Priority, &v.CreatedBy, &k, &v.DelegationDepth, &capabilitiesJSON, &c, &u)
 	if err != nil {
 		return v, err
 	}
@@ -587,6 +603,9 @@ func (s *Service) findTaskByIdempotency(ctx context.Context, workspaceID, key st
 	if k.Valid {
 		v.IdempotencyKey = k.String
 	}
+	if err = json.Unmarshal([]byte(capabilitiesJSON), &v.RequiredCapabilities); err != nil {
+		return v, err
+	}
 	v.CreatedAt = time.UnixMilli(c).UTC()
 	v.UpdatedAt = time.UnixMilli(u).UTC()
 	return v, nil
@@ -594,8 +613,9 @@ func (s *Service) findTaskByIdempotency(ctx context.Context, workspaceID, key st
 func (s *Service) GetTask(ctx context.Context, id string) (Task, error) {
 	var v Task
 	var p, k sql.NullString
+	var capabilitiesJSON string
 	var c, u int64
-	e := s.db.QueryRowContext(ctx, "SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at FROM collaboration_tasks WHERE id=?", id).Scan(&v.ID, &v.WorkspaceID, &p, &v.Title, &v.Description, &v.Type, &v.Status, &v.Priority, &v.CreatedBy, &k, &v.DelegationDepth, &c, &u)
+	e := s.db.QueryRowContext(ctx, "SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,required_capabilities_json,created_at,updated_at FROM collaboration_tasks WHERE id=?", id).Scan(&v.ID, &v.WorkspaceID, &p, &v.Title, &v.Description, &v.Type, &v.Status, &v.Priority, &v.CreatedBy, &k, &v.DelegationDepth, &capabilitiesJSON, &c, &u)
 	if errors.Is(e, sql.ErrNoRows) {
 		return v, ErrNotFound
 	}
@@ -607,6 +627,9 @@ func (s *Service) GetTask(ctx context.Context, id string) (Task, error) {
 	}
 	if k.Valid {
 		v.IdempotencyKey = k.String
+	}
+	if e = json.Unmarshal([]byte(capabilitiesJSON), &v.RequiredCapabilities); e != nil {
+		return v, e
 	}
 	v.CreatedAt = time.UnixMilli(c).UTC()
 	v.UpdatedAt = time.UnixMilli(u).UTC()
@@ -650,6 +673,12 @@ func (s *Service) AssignTask(ctx context.Context, tid, aid, by string) (Assignme
 	}
 	if t.WorkspaceID != a.WorkspaceID {
 		return Assignment{}, ErrInvalid
+	}
+	if a.Status == "disabled" {
+		return Assignment{}, ErrConflict
+	}
+	if !hasRequiredCapabilities(a.Capabilities, t.RequiredCapabilities) {
+		return Assignment{}, ErrCapabilityMismatch
 	}
 	existing, e := s.findAssignment(ctx, tid, aid)
 	if e == nil {
@@ -1042,6 +1071,16 @@ func (s *Service) HandoffTask(ctx context.Context, parentID string, h Handoff, c
 	if requester.WorkspaceID != parent.WorkspaceID || recipient.WorkspaceID != parent.WorkspaceID {
 		return Task{}, Assignment{}, ErrInvalid
 	}
+	if recipient.Status == "disabled" {
+		return Task{}, Assignment{}, ErrConflict
+	}
+	h.RequiredCapabilities, err = normalizeCapabilityList(h.RequiredCapabilities, 32)
+	if err != nil {
+		return Task{}, Assignment{}, err
+	}
+	if !hasRequiredCapabilities(recipient.Capabilities, h.RequiredCapabilities) {
+		return Task{}, Assignment{}, ErrCapabilityMismatch
+	}
 	workspace, err := s.GetWorkspace(ctx, parent.WorkspaceID)
 	if err != nil {
 		return Task{}, Assignment{}, err
@@ -1070,16 +1109,23 @@ func (s *Service) HandoffTask(ctx context.Context, parentID string, h Handoff, c
 
 	var child Task
 	var existingParent, existingKey sql.NullString
+	var requiredCapabilitiesJSON string
 	var createdAt, updatedAt int64
-	err = tx.QueryRowContext(ctx, `SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at
+	err = tx.QueryRowContext(ctx, `SELECT id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,required_capabilities_json,created_at,updated_at
   FROM collaboration_tasks WHERE workspace_id=? AND idempotency_key=?`, parent.WorkspaceID, key).
-		Scan(&child.ID, &child.WorkspaceID, &existingParent, &child.Title, &child.Description, &child.Type, &child.Status, &child.Priority, &child.CreatedBy, &existingKey, &child.DelegationDepth, &createdAt, &updatedAt)
+		Scan(&child.ID, &child.WorkspaceID, &existingParent, &child.Title, &child.Description, &child.Type, &child.Status, &child.Priority, &child.CreatedBy, &existingKey, &child.DelegationDepth, &requiredCapabilitiesJSON, &createdAt, &updatedAt)
 	if err == nil {
 		if !existingParent.Valid || existingParent.String != parent.ID || child.Title != h.Goal || child.Description != string(payload) || !existingKey.Valid || existingKey.String != key {
 			return Task{}, Assignment{}, ErrConflict
 		}
 		child.ParentTaskID = existingParent.String
 		child.IdempotencyKey = existingKey.String
+		if err = json.Unmarshal([]byte(requiredCapabilitiesJSON), &child.RequiredCapabilities); err != nil {
+			return Task{}, Assignment{}, err
+		}
+		if !sameCapabilities(child.RequiredCapabilities, h.RequiredCapabilities) {
+			return Task{}, Assignment{}, ErrConflict
+		}
 		child.CreatedAt = time.UnixMilli(createdAt).UTC()
 		child.UpdatedAt = time.UnixMilli(updatedAt).UTC()
 	} else if errors.Is(err, sql.ErrNoRows) {
@@ -1087,9 +1133,13 @@ func (s *Service) HandoffTask(ctx context.Context, parentID string, h Handoff, c
 		if idErr != nil {
 			return Task{}, Assignment{}, idErr
 		}
-		child = Task{ID: childID, WorkspaceID: parent.WorkspaceID, ParentTaskID: parent.ID, Title: h.Goal, Description: string(payload), Type: parent.Type, Status: "open", Priority: parent.Priority, CreatedBy: createdBy, IdempotencyKey: key, DelegationDepth: parent.DelegationDepth + 1, CreatedAt: now, UpdatedAt: now}
-		_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_tasks(id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,created_at,updated_at)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, child.ID, child.WorkspaceID, child.ParentTaskID, child.Title, child.Description, child.Type, child.Status, child.Priority, child.CreatedBy, child.IdempotencyKey, child.DelegationDepth, now.UnixMilli(), now.UnixMilli())
+		child = Task{ID: childID, WorkspaceID: parent.WorkspaceID, ParentTaskID: parent.ID, Title: h.Goal, Description: string(payload), Type: parent.Type, Status: "open", Priority: parent.Priority, CreatedBy: createdBy, IdempotencyKey: key, DelegationDepth: parent.DelegationDepth + 1, RequiredCapabilities: h.RequiredCapabilities, CreatedAt: now, UpdatedAt: now}
+		capabilitiesJSON, marshalErr := json.Marshal(child.RequiredCapabilities)
+		if marshalErr != nil {
+			return Task{}, Assignment{}, marshalErr
+		}
+		_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_tasks(id,workspace_id,parent_task_id,title,description,task_type,status,priority,created_by,idempotency_key,delegation_depth,required_capabilities_json,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, child.ID, child.WorkspaceID, child.ParentTaskID, child.Title, child.Description, child.Type, child.Status, child.Priority, child.CreatedBy, child.IdempotencyKey, child.DelegationDepth, string(capabilitiesJSON), now.UnixMilli(), now.UnixMilli())
 		if err != nil {
 			return Task{}, Assignment{}, err
 		}
