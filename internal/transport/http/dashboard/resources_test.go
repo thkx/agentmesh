@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
