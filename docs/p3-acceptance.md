@@ -58,3 +58,8 @@ Inbox failed events can be inspected with `GET /api/v1/collaboration/inbox/:agen
 
 
 The Decision Gate currently exposes executable privileged actions only for Assignment claim and exact-request Handoff delegation. `execute_workflow` and free-form `direct_execute` are rejected until their own durable execution/approval adapters exist; this prevents creating approvals that no worker can safely consume.
+
+
+### Cross-session collaboration context
+
+Assigned Agent wakeups assemble a bounded snapshot of recent messages from channels where that Agent is an explicit member. The snapshot is limited to five channels, twelve recent messages per channel, and 12,000 characters by default. Only user and assistant messages are included; system/developer instructions and tool payloads are excluded. Conversation content is injected as untrusted task reference context. Channel membership and Workspace identity are checked in the query; messages from unrelated Workspace channels are never included. The wakeup integration test verifies that an Agent's channel history reaches the Runtime task prompt.

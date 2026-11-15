@@ -91,6 +91,17 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	channel, err := service.CreateChannel(ctx, collaboration.Channel{
+		WorkspaceID: collabWorkspace.ID, Name: "Engineering Decisions", Kind: "team",
+		MemberIDs: []string{identity.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.PostMessage(ctx, channel.ID, "user", "Project Lead", "Keep the database migration backward compatible and document rollback steps."); err != nil {
+		t.Fatal(err)
+	}
 	filesystemWorkspaces, err := workspace.NewManager(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +195,10 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		if !strings.Contains(submittedTask.SystemPrompt, "migration-safe schema changes") {
 			cancel()
 			t.Fatalf("long-term memory was not injected into runtime context: %q", submittedTask.SystemPrompt)
+		}
+		if !strings.Contains(submittedTask.Prompt, "Keep the database migration backward compatible") {
+			cancel()
+			t.Fatalf("recent Agent channel conversation was not injected into runtime prompt: %q", submittedTask.Prompt)
 		}
 	default:
 		cancel()

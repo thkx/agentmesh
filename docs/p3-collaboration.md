@@ -89,3 +89,8 @@ Operators can retry a repaired dead-letter record with `POST /api/v1/collaborati
 ## Long-term memory context
 
 Before submitting an assigned task to the P2 Execution Manager, Wakeup retrieves active global and Agent-scoped memories using the task title and description as the retrieval query. Retrieved content is appended to the bound Agent Definition's system prompt under an explicit untrusted-reference boundary. Memory retrieval failures fail the Inbox item through the existing bounded retry/dead-letter path; they are not silently ignored. Memory candidates remain inactive until explicitly promoted. Conversation Channel/Thread history is not yet automatically merged into the persistent Session context.
+
+
+## Cross-session context assembly
+
+When an assigned Agent wakes, the collaboration service loads recent messages only from channels in which the Agent is an explicit member and whose Workspace matches the Agent identity. The bounded context is appended to the task prompt as untrusted reference material. It excludes system/developer messages and tool payloads, and is capped by channel count, messages per channel, and total characters. This provides continuity across separate execution Sessions without treating conversation history as executable instructions.
