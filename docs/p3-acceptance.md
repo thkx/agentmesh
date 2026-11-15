@@ -77,7 +77,7 @@ A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker 
 
 ### Result decision boundary (P3-2)
 
-Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. The built-in conservative evaluator records `human_review`; it does not infer acceptance from a successful Runtime exit or unstructured output. Deployments may inject a policy/model-backed evaluator, whose output is constrained to `accepted`, `rejected`, or `human_review` and retained with its reason, confidence and evidence references. This is an assessment record, not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.
+Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. A directly constructed Wakeup Worker defaults to conservative `human_review`; the application bootstrap wires an LLM-backed evaluator that uses the receiving Agent's pinned Runtime model. The model output is constrained to `accepted`, `rejected`, or `human_review`, requires confidence of at least 0.85 for an automatic assessment, and must cite exact evidence/verification IDs from the supplied context. Acceptance additionally requires at least one passed deterministic Artifact verification. Directed Workspaces always require human review; Hybrid and Autonomous may use evidence-grounded model assessment. This is not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.
 
 
 ### P3-2 governance and recovery

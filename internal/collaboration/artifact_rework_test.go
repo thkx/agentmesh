@@ -85,4 +85,14 @@ func TestRejectedArtifactBlocksSourceTaskAndAllowsReassignment(t *testing.T) {
 	if reopened.Status != "assigned" {
 		t.Fatalf("task should be assigned after rework handoff, got %q", reopened.Status)
 	}
+	if _, err = service.ReviewArtifact(ctx, artifact.ID, parentAgent.ID, "rejected", "The report is missing the rollback procedure."); err != nil {
+		t.Fatalf("identical review replay should be idempotent: %v", err)
+	}
+	afterReplay, err := service.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterReplay.Status != "assigned" {
+		t.Fatalf("review replay must not re-block reassigned task, got %q", afterReplay.Status)
+	}
 }
