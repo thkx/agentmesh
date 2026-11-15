@@ -187,14 +187,18 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 					case <-ctx.Done():
 						return
 					case event, open := <-source:
-						if !open { return }
+						if !open {
+							return
+						}
 						normalizeStreamEvent(&event, model)
 						select {
 						case output <- event:
 						case <-ctx.Done():
 							return
 						}
-						if event.Type == StreamEventError || event.Type == StreamEventCompleted { return }
+						if event.Type == StreamEventError || event.Type == StreamEventCompleted {
+							return
+						}
 					}
 				}
 			}()
@@ -276,7 +280,9 @@ func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string)
 			capability, ok := g.dynamicRouter.(interface {
 				SupportsNativeToolCalling(context.Context, string) (bool, error)
 			})
-			if !ok { return false }
+			if !ok {
+				return false
+			}
 			enabled, capabilityErr := capability.SupportsNativeToolCalling(ctx, resolvedReq.ProviderModel)
 			return capabilityErr == nil && enabled
 		}

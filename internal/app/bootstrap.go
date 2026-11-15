@@ -513,7 +513,9 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	profileValidator := planworkflow.ProfileValidatorFuncs{
 		ModelExists: func(id string) bool {
-			if _, ok := models.Get(id); ok { return true }
+			if _, ok := models.Get(id); ok {
+				return true
+			}
 			_, lookupErr := aiResources.GetModelByID(context.Background(), id)
 			return lookupErr == nil
 		},

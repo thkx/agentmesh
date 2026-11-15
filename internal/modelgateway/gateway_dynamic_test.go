@@ -49,7 +49,7 @@ func TestGatewayResolvesDynamicModelWithoutLegacyProvider(t *testing.T) {
 	gateway.SetDynamicRouter(router)
 
 	resp, err := gateway.Generate(context.Background(), GenerateRequest{
-		ModelID: "model-glm-53-flash",
+		ModelID:  "model-glm-53-flash",
 		Messages: []Message{{Role: RoleUser, Content: "hello"}},
 	})
 	if err != nil {

@@ -14,10 +14,10 @@ func TestGeneratePreservesNativeToolCalling(t *testing.T) {
 			t.Errorf("unexpected authorization header")
 		}
 		var payload struct {
-			Model    string          `json:"model"`
+			Model    string           `json:"model"`
 			Messages []map[string]any `json:"messages"`
-			Tools    []Tool          `json:"tools"`
-			Choice   string          `json:"tool_choice"`
+			Tools    []Tool           `json:"tools"`
+			Choice   string           `json:"tool_choice"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode request: %v", err)
@@ -32,10 +32,10 @@ func TestGeneratePreservesNativeToolCalling(t *testing.T) {
 	defer server.Close()
 
 	candidate := Candidate{
-		Provider: Provider{Protocol: ProtocolOpenAI},
-		Endpoint: Endpoint{BaseURL: server.URL + "/v1", TimeoutMS: 2000},
-		UpstreamModel: "glm-5.3-flash",
-		Secret: "test-secret",
+		Provider:      Provider{Protocol: ProtocolOpenAI},
+		Endpoint:      Endpoint{BaseURL: server.URL + "/v1", TimeoutMS: 2000},
+		UpstreamModel:    "glm-5.3-flash",
+		Secret:        "test-secret",
 	}
 	req := GenerateRequest{
 		Model: "glm-5.3-flash",

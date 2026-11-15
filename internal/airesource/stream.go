@@ -167,7 +167,7 @@ func (r *Router) Stream(ctx context.Context, req GenerateRequest) (<-chan Stream
 		result := GenerateResponse{
 			ID: responseID, Object: "chat.completion", Created: time.Now().Unix(), Model: modelName,
 			Choices: []Choice{{Index: 0, Message: Message{Role: "assistant", Content: accumulated.String()}, FinishReason: finishReason}},
-			Usage: usage,
+			Usage:   usage,
 		}
 		recordCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		recordErr := r.service.RecordResult(recordCtx, selected, newID("req"), 200, latency, streamErr, usage, policy)
@@ -197,9 +197,9 @@ func (r *Router) Stream(ctx context.Context, req GenerateRequest) (<-chan Stream
 func openStream(ctx context.Context, candidate Candidate, req GenerateRequest) (io.ReadCloser, int, error) {
 	messages, _ := normalizeMessages(req.Messages)
 	payload := map[string]any{
-		"model": candidate.UpstreamModel,
-		"messages": messages,
-		"stream": true,
+		"model":          candidate.UpstreamModel,
+		"messages":       messages,
+		"stream":         true,
 		"stream_options": map[string]any{"include_usage": true},
 	}
 	if req.Temperature != nil {

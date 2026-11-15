@@ -115,7 +115,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
 	}
 	h := handlers.NewCatalogHandler(deps.Providers, deps.Models, deps.Adapters, deps.ProviderRuntime, deps.Repository, deps.Gateway)
-	if deps.AIResources != nil { h.SetDynamicModelCatalog(deps.AIResources) }
+	if deps.AIResources != nil {
+		h.SetDynamicModelCatalog(deps.AIResources)
+	}
 	h.RegisterRoutes(api)
 	if deps.CredentialManager != nil {
 		handlers.NewCredentialHandler(deps.CredentialManager).RegisterRoutes(api)

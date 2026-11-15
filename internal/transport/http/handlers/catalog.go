@@ -11,29 +11,31 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/airesource"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
-	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type CatalogHandler struct {
 	// writeMu serializes catalog mutations so snapshot persistence and in-memory
 	// registry publication cannot overwrite concurrent updates.
-	writeMu   sync.Mutex
-	providers *provider.ProviderRegistry
-	models    *provider.ModelRegistry
-	adapters  *modelgateway.Registry
-	runtime   *modelgateway.ProviderRuntime
-	repo      provider.CatalogRepository
-	gateway   *modelgateway.Gateway
-	dynamicModels interface { ListModels(context.Context) ([]airesource.Model, error); GetModelByID(context.Context, string) (airesource.Model, error) }
+	writeMu       sync.Mutex
+	providers     *provider.ProviderRegistry
+	models        *provider.ModelRegistry
+	adapters      *modelgateway.Registry
+	runtime       *modelgateway.ProviderRuntime
+	repo          provider.CatalogRepository
+	gateway       *modelgateway.Gateway
+	dynamicModels interface {
+		ListModels(context.Context) ([]airesource.Model, error)
+		GetModelByID(context.Context, string) (airesource.Model, error)
+	}
 }
 
 func NewCatalogHandler(pr *provider.ProviderRegistry, mr *provider.ModelRegistry, ar *modelgateway.Registry, runtime *modelgateway.ProviderRuntime, repo provider.CatalogRepository, gateway *modelgateway.Gateway) *CatalogHandler {
 	return &CatalogHandler{providers: pr, models: mr, adapters: ar, runtime: runtime, repo: repo, gateway: gateway}
 }
-
 
 // SetDynamicModelCatalog merges AI Resource models into the public model catalog.
 // Configure it during bootstrap before serving requests.
@@ -374,7 +376,9 @@ func (h *CatalogHandler) listModels(c *gin.Context) {
 				continue
 			}
 			status := "disabled"
-			if m.Enabled { status = "enabled" }
+			if m.Enabled {
+				status = "enabled"
+			}
 			out = append(out, modelAPIResponse{
 				ID: m.ID, ProviderID: "ai-resource", Name: m.ModelKey,
 				DisplayName: m.DisplayName, SupportsStreaming: m.SupportsStreaming,
@@ -397,7 +401,9 @@ func (h *CatalogHandler) getModel(c *gin.Context) {
 		dynamic, err := h.dynamicModels.GetModelByID(c.Request.Context(), c.Param("id"))
 		if err == nil {
 			status := "disabled"
-			if dynamic.Enabled { status = "enabled" }
+			if dynamic.Enabled {
+				status = "enabled"
+			}
 			c.JSON(200, modelAPIResponse{ID: dynamic.ID, ProviderID: "ai-resource", Name: dynamic.ModelKey, DisplayName: dynamic.DisplayName, SupportsStreaming: dynamic.SupportsStreaming, Enabled: dynamic.Enabled, Status: status, CreatedAt: dynamic.CreatedAt, UpdatedAt: dynamic.UpdatedAt, Source: "ai_resource", ModelKey: dynamic.ModelKey})
 			return
 		}

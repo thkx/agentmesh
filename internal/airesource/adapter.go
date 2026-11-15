@@ -87,9 +87,15 @@ func normalizeMessages(messages []Message) ([]map[string]any, string) {
 			role = "user"
 		}
 		item := map[string]any{"role": role, "content": m.Content}
-		if m.Name != "" { item["name"] = m.Name }
-		if m.ToolCallID != "" { item["tool_call_id"] = m.ToolCallID }
-		if len(m.ToolCalls) > 0 { item["tool_calls"] = m.ToolCalls }
+		if m.Name != "" {
+			item["name"] = m.Name
+		}
+		if m.ToolCallID != "" {
+			item["tool_call_id"] = m.ToolCallID
+		}
+		if len(m.ToolCalls) > 0 {
+			item["tool_calls"] = m.ToolCalls
+		}
 		out = append(out, item)
 	}
 	return out, strings.Join(system, "\n\n")

@@ -123,9 +123,9 @@ type ToolFunction struct {
 }
 
 type ToolCall struct {
-	ID       string            `json:"id"`
+	ID       string           `json:"id"`
 	Type     string            `json:"type,omitempty"`
-	Function ToolCallFunction  `json:"function"`
+	Function ToolCallFunction `json:"function"`
 }
 
 type ToolCallFunction struct {
@@ -140,7 +140,7 @@ type GenerateRequest struct {
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
 	Tools       []Tool    `json:"tools,omitempty"`
-	ToolChoice string     `json:"tool_choice,omitempty"`
+	ToolChoice  string    `json:"tool_choice,omitempty"`
 }
 type GenerateResponse struct {
 	ID      string      `json:"id"`
@@ -171,11 +171,11 @@ type Candidate struct {
 }
 
 var (
-	ErrInvalid              = errors.New("invalid AI resource")
-	ErrNotFound             = errors.New("AI resource not found")
-	ErrNoCandidate          = errors.New("no healthy credential is available for model")
-	ErrUnsupportedProtocol  = errors.New("unsupported provider protocol")
-	ErrStreamingUnsupported = errors.New("streaming is not supported by this gateway adapter")
+	ErrInvalid                      = errors.New("invalid AI resource")
+	ErrNotFound                     = errors.New("AI resource not found")
+	ErrNoCandidate                  = errors.New("no healthy credential is available for model")
+	ErrUnsupportedProtocol          = errors.New("unsupported provider protocol")
+	ErrStreamingUnsupported         = errors.New("streaming is not supported by this gateway adapter")
 	ErrNativeToolCallingUnsupported = errors.New("native tool calling is not supported by this provider protocol")
 )
 

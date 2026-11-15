@@ -320,6 +320,7 @@ func (s *Service) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	return out, rows.Err()
 }
+
 // GetModelByID resolves a configured AI Resource model by its stable internal ID.
 func (s *Service) GetModelByID(ctx context.Context, id string) (Model, error) {
 	var m Model
@@ -687,7 +688,6 @@ func (s *Service) TestCredential(ctx context.Context, id string) error {
 	}
 	return probeEndpoint(ctx, protocol, baseURL, string(secret), time.Duration(timeout)*time.Millisecond)
 }
-
 
 // HasModelKey reports whether a dynamic resource model is configured. A
 // configured-but-disabled model remains owned by the dynamic router: requests
