@@ -19,14 +19,14 @@ var (
 )
 
 type Observation struct {
-	Status              dom.LifecycleStatus
-	Attempt             int
-	CompletedAttempt    int
-	AttemptOutcome      dom.AttemptStatus
-	AttemptError        string
-	AttemptNotStarted   bool
-	Result              json.RawMessage
-	Error               string
+	Status            dom.LifecycleStatus
+	Attempt           int
+	CompletedAttempt  int
+	AttemptOutcome    dom.AttemptStatus
+	AttemptError      string
+	AttemptNotStarted bool
+	Result            json.RawMessage
+	Error             string
 }
 
 // Adapter implementations must make Submit idempotent for the same durable
