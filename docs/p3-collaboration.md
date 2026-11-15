@@ -130,3 +130,10 @@ Artifact review and verification are separate: a deterministic verification pass
 - `POST /api/v1/collaboration/artifacts/:id/review`
 
 For the complete acceptance matrix, verification procedure and intentionally deferred P3 boundaries, see [P3 Acceptance Record](p3-acceptance.md).
+
+
+## Durable Agent Session transcript
+
+Managed collaboration executions append immutable `execution_input`, `execution_result`, and `execution_failure` records to the Agent's active Session. A uniqueness key over Session, Execution and entry type makes retries idempotent; conflicting replays are rejected. Entry content is bounded to 256 KiB, SHA-256 fingerprinted, and marked when truncated. Append-only database triggers protect the history.
+
+Before a later assignment is submitted, the Wakeup worker injects a bounded chronological snapshot of prior Session entries as untrusted historical context. The complete record is available at `GET /api/v1/collaboration/agents/:id/session/transcript`. Channel messages remain separately persisted in Conversation storage and are injected through the explicit channel-membership snapshot; the Session transcript is an execution continuity record, not a replacement for the full Conversation archive.

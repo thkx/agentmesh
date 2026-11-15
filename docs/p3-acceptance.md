@@ -149,3 +149,10 @@ Immutable Artifact review history is available through `GET /api/v1/collaboratio
 ### P3 capability-constrained assignment
 
 Task requirements are persisted as normalized capability identifiers. Both direct assignment and Handoff validate that the target Agent Identity advertises every required capability; the Wakeup worker repeats the check at the execution boundary and fails the Assignment safely if the persisted Agent/Task contract no longer matches. Capability mismatches never trigger an LLM fallback or an implicit broadening of permissions.
+
+
+### Durable Agent Session transcript
+
+Each managed Agent execution appends an immutable input and terminal result/failure entry to its persistent Agent Session. Entries are idempotent by session, execution and entry type; content is SHA-256 fingerprinted and capped at 256 KiB per entry, with truncation explicitly marked. SQLite triggers prevent updates and deletes. Subsequent assignments receive a bounded chronological snapshot as untrusted historical context. The transcript can be inspected through `GET /api/v1/collaboration/agents/:id/session/transcript`.
+
+This execution transcript complements, but does not replace, the source Channel/Thread message history. The current prompt still receives a separate bounded snapshot from channels where the Agent is an explicit member; complete thread-aware transcript replay remains outside this phase.

@@ -98,7 +98,7 @@ func (s *Service) ListAgentSessionTranscript(ctx context.Context, agentID string
 		limit = 50
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,session_id,agent_id,execution_id,task_id,entry_type,content,content_sha256,content_truncated,created_at
-		FROM agent_session_transcript WHERE session_id=? ORDER BY created_at DESC,id DESC LIMIT ?`, session.ID, limit)
+		FROM agent_session_transcript WHERE session_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?`, session.ID, limit)
 	if err != nil {
 		return nil, err
 	}
