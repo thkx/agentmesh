@@ -213,10 +213,10 @@ func (h *UnifiedExecutionHandler) detail(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"execution": e,
-		"attempts": attempts,
+		"execution":         e,
+		"attempts":          attempts,
 		"artifact_versions": versions,
-		"evidence": evidence,
+		"evidence":          evidence,
 	})
 }
 
@@ -309,7 +309,7 @@ func (h *UnifiedExecutionHandler) timeline(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"items": events, "limit": limit, "has_more": hasMore,
 		"next_cursor": gin.H{"after_time_ns": nextTime, "after_stream": nextStream, "after_sequence": nextSequence},
-		"ordering": "occurred_at_utc_then_stream_then_stream_sequence",
+		"ordering":    "occurred_at_utc_then_stream_then_stream_sequence",
 	})
 }
 
