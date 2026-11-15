@@ -179,3 +179,17 @@ bash scripts/e2e-p3.sh
 Optional settings: `API_BASE_URL` and `API_TOKEN`. The script creates uniquely named Workspace, Agent, Channel, Task, Approval and Artifact records and retains them for inspection; it does not delete existing or generated data. It exercises Agent enable/disable/delete/recover, channel message persistence, idempotent Task creation, directed approval rejection through Dispatcher/Wakeup, Task reassignment, decision audit, and Artifact Evidence/Verification/Submission/Review.
 
 The suite deliberately uses the Directed approval rejection path rather than invoking an external LLM. The deterministic Wakeup-to-Execution integration test remains covered by `go test -race ./...`; a real provider-backed model execution requires deployment credentials and a separately configured Agent Runtime binding.
+
+## AI Resource pool and Gateway acceptance
+
+The P3 AI Resource layer provides encrypted multi-credential provider pools, endpoint/model bindings, configurable routing strategies, per-credential concurrency limits, retry/failover, circuit-breaker health, request logs and token usage accounting. The dynamic model catalog is exposed through the shared model gateway.
+
+- Credentials are encrypted at rest with AES-GCM; list APIs return masked keys only.
+- Routing supports priority, round-robin, weighted round-robin and least-connections strategies.
+- Retryable upstream failures can fail over to another eligible credential; health and usage are recorded for each attempt.
+- OpenAI-compatible SSE streaming uses the same credential selection, health and accounting pipeline.
+- Native function calling is supported for OpenAI-compatible candidates; non-compatible protocols are filtered out. Native tool streaming remains explicitly unsupported.
+- `scripts/test-p3.sh` checks provider/model catalog endpoints and the dynamic AI Resource model count.
+- `internal/airesource/router_test.go` verifies failover, health/request/usage persistence and SSE streaming; `adapter_tool_test.go` verifies native tool-call request/response mapping.
+
+These tests use local HTTP test servers and do not consume real provider tokens. Real provider credentials and network reachability remain deployment-level checks.
