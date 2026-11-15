@@ -34,11 +34,11 @@ func TestGeneratePreservesNativeToolCalling(t *testing.T) {
 	candidate := Candidate{
 		Provider:      Provider{Protocol: ProtocolOpenAI},
 		Endpoint:      Endpoint{BaseURL: server.URL + "/v1", TimeoutMS: 2000},
-		UpstreamModel:    "glm-5.3-flash",
+		UpstreamModel: "glm-5.3-flash",
 		Secret:        "test-secret",
 	}
 	req := GenerateRequest{
-		Model: "glm-5.3-flash",
+		Model:    "glm-5.3-flash",
 		Messages: []Message{{Role: "user", Content: "hello"}},
 		Tools: []Tool{{Type: "function", Function: ToolFunction{
 			Name: "lookup", Parameters: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`),
