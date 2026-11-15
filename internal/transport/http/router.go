@@ -31,6 +31,7 @@ import (
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
+	"github.com/thkx/agentmesh/internal/transport/http/dashboard"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
 )
@@ -75,6 +76,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.Use(gin.Recovery())
 	if deps.APIToken != "" {
 		router.Use(func(c *gin.Context) {
+			// The Dashboard has its own short-lived browser session; API routes
+			// continue to require the Bearer token.
+			if strings.HasPrefix(c.Request.URL.Path, "/dashboard") {
+				c.Next()
+				return
+			}
 			if c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/workflow-editor" || c.Request.URL.Path == "/workflow-editor/app.js") {
 				c.Next()
 				return
@@ -191,5 +198,6 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, APIToken: deps.APIToken, ExecutionManager: deps.ExecutionManager}).RegisterRoutes(router)
 	return router
 }
