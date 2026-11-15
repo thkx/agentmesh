@@ -514,7 +514,7 @@ func (h *Handler) deleteModel(c *gin.Context) {
 func (h *Handler) providers(c *gin.Context) {
 	data := pageData{Title: "Providers", Active: "providers", ProviderRows: []providerView{}}
 	if h.providers != nil {
-		for _, p := range h.providers.List() {
+		for _, p := range h.providerRegistry.List() {
 			row := providerView{ID: string(p.ID), Name: p.Name, Type: string(p.Type), Kind: string(p.Kind), BaseURL: p.BaseURL, Status: "disabled"}
 			if p.Enabled {
 				row.Status = "enabled"
@@ -602,7 +602,7 @@ func (h *Handler) models(c *gin.Context) {
 			}
 		}
 	} else if h.models != nil {
-		for _, m := range h.models.List() {
+		for _, m := range h.modelRegistry.List() {
 			status := "disabled"
 			if m.Enabled {
 				status = "enabled"
@@ -636,7 +636,7 @@ func (h *Handler) createAgent(c *gin.Context) {
 		return
 	}
 	d := domainagent.Definition{ID: c.PostForm("id"), Name: c.PostForm("name"), Description: c.PostForm("description"), SystemPrompt: c.PostForm("system_prompt"), ModelID: c.PostForm("model_id"), Temperature: temperature, MaxSteps: maxSteps, MaxToolCalls: maxCalls, MaxOutputTokens: maxTokens, TimeoutSeconds: timeout, Enabled: true}
-	if err = h.agents.Create(c.Request.Context(), d); err != nil {
+	if err = h.agentCatalog.Create(c.Request.Context(), d); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
@@ -656,7 +656,7 @@ func (h *Handler) runAgent(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
 	}
-	result, err := h.agents.Run(c.Request.Context(), c.Param("id"), workspaceID, prompt)
+	result, err := h.agentCatalog.Run(c.Request.Context(), c.Param("id"), workspaceID, prompt)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
@@ -700,7 +700,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	d, err := h.agents.Get(c.Request.Context(), c.Param("id"))
+	d, err := h.agentCatalog.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
@@ -734,7 +734,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 			*target = parsed
 		}
 	}
-	if err = h.agents.Update(c.Request.Context(), d); err != nil {
+	if err = h.agentCatalog.Update(c.Request.Context(), d); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
@@ -750,13 +750,13 @@ func (h *Handler) setAgentEnabled(c *gin.Context) {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	d, err := h.agents.Get(c.Request.Context(), c.Param("id"))
+	d, err := h.agentCatalog.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
 	d.Enabled = c.PostForm("enabled") == "true"
-	if err = h.agents.Update(c.Request.Context(), d); err != nil {
+	if err = h.agentCatalog.Update(c.Request.Context(), d); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
@@ -771,7 +771,7 @@ func (h *Handler) deleteAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.agents.Delete(c.Request.Context(), c.Param("id")); err != nil {
+	if err := h.agentCatalog.Delete(c.Request.Context(), c.Param("id")); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
@@ -854,7 +854,7 @@ func (h *Handler) deleteWorkflowTemplate(c *gin.Context) {
 func (h *Handler) agents(c *gin.Context) {
 	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
 	if h.agents != nil {
-		items, err := h.agents.List(c.Request.Context())
+		items, err := h.agentCatalog.List(c.Request.Context())
 		if err != nil {
 			data.Error = "Could not load agent definitions"
 		} else {
