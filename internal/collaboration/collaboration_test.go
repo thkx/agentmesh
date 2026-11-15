@@ -912,7 +912,6 @@ func TestParentTaskProgressRequiresParentAgentAcceptance(t *testing.T) {
 	}
 }
 
-
 func TestTaskResultReviewAuditIsAppendOnly(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)
