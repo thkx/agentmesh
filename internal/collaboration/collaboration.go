@@ -178,7 +178,7 @@ func(s *Service) ClaimAssignment(ctx context.Context,id,owner string,lease time.
  ) < (
    SELECT max_agent_concurrency FROM collaboration_workspaces
    WHERE id=(SELECT workspace_id FROM collaboration_tasks WHERE id=(SELECT task_id FROM task_assignments WHERE id=?))
- )`,owner,now.Add(lease).UnixMilli(),now.UnixMilli(),id,id,now.UnixMilli(),id,now.UnixMilli(),id);if e!=nil{return Assignment{},e};n,_:=res.RowsAffected();if n!=1 {
+ )`,owner,now.Add(lease).UnixMilli(),now.UnixMilli(),id,now.UnixMilli(),id,id,now.UnixMilli(),id,now.UnixMilli(),id);if e!=nil{return Assignment{},e};n,_:=res.RowsAffected();if n!=1 {
  var limit,active,agentActive int
  checkErr:=tx.QueryRowContext(ctx,`SELECT w.max_agent_concurrency,
   (SELECT COUNT(*) FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id
