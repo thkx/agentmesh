@@ -147,3 +147,8 @@ For the complete acceptance matrix, verification procedure and intentionally def
 Managed collaboration executions append immutable `execution_input`, `execution_result`, and `execution_failure` records to the Agent's active Session. A uniqueness key over Session, Execution and entry type makes retries idempotent; conflicting replays are rejected. Entry content is bounded to 256 KiB, SHA-256 fingerprinted, and marked when truncated. Append-only database triggers protect the history.
 
 Before a later assignment is submitted, the Wakeup worker injects a bounded chronological snapshot of prior Session entries as untrusted historical context. The complete record is available at `GET /api/v1/collaboration/agents/:id/session/transcript`. Channel messages remain separately persisted in Conversation storage and are injected through the explicit channel-membership snapshot; the Session transcript is an execution continuity record, not a replacement for the full Conversation archive.
+## AI Resource pool and Gateway
+
+The P3 AI Resource pool supports encrypted credentials, multiple endpoints, model bindings, configurable priority/round-robin/weighted/least-connections routing, bounded retries, credential concurrency limits, health/circuit-breaker state, request logs and token usage. The shared Gateway exposes dynamic AI Resource models alongside legacy provider models.
+
+OpenAI-compatible streaming and native function calling are supported. Native function calling filters the candidate pool to compatible protocols; native tool streaming is intentionally rejected. Failover and SSE usage accounting are covered by local HTTP integration tests in `internal/airesource/router_test.go`.
