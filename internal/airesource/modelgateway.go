@@ -64,11 +64,11 @@ func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, mode
 		return false, nil
 	}
 	for _, candidate := range candidates {
-		if candidate.Provider.Protocol != ProtocolOpenAI {
-			return false, nil
+		if candidate.Provider.Protocol == ProtocolOpenAI {
+			return true, nil
 		}
 	}
-	return true, nil
+	return false, nil
 }
 
 func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
