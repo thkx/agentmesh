@@ -68,9 +68,38 @@ func (a *AgentAdapter) Observe(ctx context.Context, e dom.Entity) (Observation, 
 	}
 	switch job.Status {
 	case scheduler.Queued:
-		return Observation{Status: dom.LifecycleQueued, Attempt: job.Attempts, Error: job.LastError}, nil
+		// A queued job with execution_started=true is waiting for a safe retry
+		// after a completed model-only failure. Keep the common Execution active
+		// and close the corresponding Attempt instead of regressing to Queued.
+		if job.Attempts > 0 && job.ExecutionStarted && job.LastError != "" {
+			return Observation{
+				Status: dom.LifecycleRunning, CompletedAttempt: job.Attempts,
+				AttemptOutcome: dom.AttemptFailed, AttemptError: job.LastError,
+				AttemptNotStarted: true, Error: job.LastError,
+			}, nil
+		}
+		return Observation{Status: dom.LifecycleQueued, AttemptNotStarted: true, Error: job.LastError}, nil
 	case scheduler.Running:
-		return Observation{Status: dom.LifecycleRunning, Attempt: job.Attempts}, nil
+		if !job.ExecutionStarted {
+			// Claim/lease acquisition is not yet an execution attempt. If a prior
+			// safe attempt failed, preserve the Execution as Running while the
+			// next worker crosses its execution boundary.
+			if e.Status == dom.LifecycleRunning && job.Attempts > 1 && job.LastError != "" {
+				return Observation{
+					Status: dom.LifecycleRunning, CompletedAttempt: job.Attempts - 1,
+					AttemptOutcome: dom.AttemptFailed, AttemptError: job.LastError,
+					AttemptNotStarted: true, Error: job.LastError,
+				}, nil
+			}
+			return Observation{Status: dom.LifecycleQueued, AttemptNotStarted: true}, nil
+		}
+		observation := Observation{Status: dom.LifecycleRunning, Attempt: job.Attempts}
+		if job.Attempts > 1 && job.LastError != "" {
+			observation.CompletedAttempt = job.Attempts - 1
+			observation.AttemptOutcome = dom.AttemptFailed
+			observation.AttemptError = job.LastError
+		}
+		return observation, nil
 	case scheduler.Succeeded:
 		snapshot, loadErr := a.runtime.GetSnapshot(ctx, job.Task.ID)
 		if loadErr != nil {
@@ -80,16 +109,16 @@ func (a *AgentAdapter) Observe(ctx context.Context, e dom.Entity) (Observation, 
 		if marshalErr != nil {
 			return Observation{}, marshalErr
 		}
-		return Observation{Status: dom.LifecycleSucceeded, Attempt: job.Attempts, Result: result}, nil
+		return Observation{Status: dom.LifecycleSucceeded, Attempt: job.Attempts, AttemptNotStarted: !job.ExecutionStarted, Result: result}, nil
 	case scheduler.Failed:
 		if snapshot, loadErr := a.runtime.GetSnapshot(ctx, job.Task.ID); loadErr == nil && snapshot.Result.Status == agentdom.StatusTimedOut {
-			return Observation{Status: dom.LifecycleTimedOut, Attempt: job.Attempts, Result: mustJSON(snapshot.Result), Error: job.LastError}, nil
+			return Observation{Status: dom.LifecycleTimedOut, Attempt: job.Attempts, AttemptNotStarted: !job.ExecutionStarted, Result: mustJSON(snapshot.Result), Error: job.LastError}, nil
 		}
-		return Observation{Status: dom.LifecycleFailed, Attempt: job.Attempts, Error: job.LastError}, nil
+		return Observation{Status: dom.LifecycleFailed, Attempt: job.Attempts, AttemptNotStarted: !job.ExecutionStarted, Error: job.LastError}, nil
 	case scheduler.Canceled:
-		return Observation{Status: dom.LifecycleCanceled, Attempt: job.Attempts, Error: job.LastError}, nil
+		return Observation{Status: dom.LifecycleCanceled, Attempt: job.Attempts, AttemptNotStarted: !job.ExecutionStarted, Error: job.LastError}, nil
 	case scheduler.Interrupted:
-		return Observation{Status: dom.LifecycleInterrupted, Attempt: job.Attempts, Error: job.LastError}, nil
+		return Observation{Status: dom.LifecycleInterrupted, Attempt: job.Attempts, AttemptNotStarted: !job.ExecutionStarted, Error: job.LastError}, nil
 	default:
 		return Observation{}, fmt.Errorf("unknown agent scheduler status %q", job.Status)
 	}
