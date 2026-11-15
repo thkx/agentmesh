@@ -14,17 +14,17 @@ import (
 // ExecutionEvent is an immutable fact emitted by the SQLite execution ledger.
 // Sequence, not occurred_at, is the authoritative ordering key.
 type ExecutionEvent struct {
-	Sequence    int64          `json:"sequence"`
-	EventID     string         `json:"event_id"`
-	EventKey    string         `json:"event_key"`
-	ExecutionID string         `json:"execution_id"`
-	AttemptID   string         `json:"attempt_id,omitempty"`
-	Type        string         `json:"type"`
-	ActorType   string         `json:"actor_type"`
-	ActorID     string         `json:"actor_id,omitempty"`
-	Source      string         `json:"source"`
+	Sequence    int64           `json:"sequence"`
+	EventID     string          `json:"event_id"`
+	EventKey    string          `json:"event_key"`
+	ExecutionID string          `json:"execution_id"`
+	AttemptID   string          `json:"attempt_id,omitempty"`
+	Type        string          `json:"type"`
+	ActorType   string          `json:"actor_type"`
+	ActorID     string          `json:"actor_id,omitempty"`
+	Source      string          `json:"source"`
 	Payload     json.RawMessage `json:"payload"`
-	OccurredAt  time.Time      `json:"occurred_at"`
+	OccurredAt  time.Time       `json:"occurred_at"`
 }
 
 type ExecutionEventsHandler struct{ db *sql.DB }
