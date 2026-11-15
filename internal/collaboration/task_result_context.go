@@ -2,17 +2,15 @@ package collaboration
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"time"
 )
 
 const (
-	maxEvaluationArtifacts      = 8
-	maxEvaluationArtifactBytes  = 4 << 20
-	maxEvaluationEvidence       = 50
-	maxEvaluationVerifications  = 5
+	maxEvaluationArtifacts     = 8
+	maxEvaluationArtifactBytes = 4 << 20
+	maxEvaluationEvidence      = 50
+	maxEvaluationVerifications = 5
 )
 
 // TaskArtifactContext is a bounded, immutable snapshot of one deliverable version.
@@ -29,11 +27,11 @@ type TaskArtifactContext struct {
 // TaskResultEvaluationContext joins a completed result with the deliverables
 // explicitly attached to its Task. It is a snapshot, not a mutable live view.
 type TaskResultEvaluationContext struct {
-	Task                  Task                  `json:"task"`
-	Result                TaskResult            `json:"result"`
-	Artifacts             []TaskArtifactContext `json:"artifacts"`
-	ArtifactContentBytes  int                   `json:"artifact_content_bytes"`
-	ArtifactsTruncated    bool                  `json:"artifacts_truncated"`
+	Task                 Task                  `json:"task"`
+	Result               TaskResult            `json:"result"`
+	Artifacts            []TaskArtifactContext `json:"artifacts"`
+	ArtifactContentBytes int                   `json:"artifact_content_bytes"`
+	ArtifactsTruncated   bool                  `json:"artifacts_truncated"`
 }
 
 // ContextualTaskResultEvaluator can inspect task-linked artifacts, exact
@@ -57,7 +55,10 @@ func (s *Service) BuildTaskResultEvaluationContext(ctx context.Context, recipien
 	if task.WorkspaceID != result.WorkspaceID {
 		return TaskResultEvaluationContext{}, ErrConflict
 	}
-	out := TaskResultEvaluationContext{Task: task, Result: result, Artifacts: make([]TaskArtifactContext, 0)}
+
+	out := TaskResultEvaluationContext{
+		Task: task, Result: result, Artifacts: make([]TaskArtifactContext, 0),
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM collaboration_artifacts
 		WHERE workspace_id=? AND source_task_id=? ORDER BY updated_at DESC,id LIMIT ?`,
 		task.WorkspaceID, task.ID, maxEvaluationArtifacts+1)
@@ -84,6 +85,7 @@ func (s *Service) BuildTaskResultEvaluationContext(ctx context.Context, recipien
 		out.ArtifactsTruncated = true
 		artifactIDs = artifactIDs[:maxEvaluationArtifacts]
 	}
+
 	for _, artifactID := range artifactIDs {
 		artifact, readErr := s.GetArtifact(ctx, artifactID)
 		if readErr != nil {
@@ -123,6 +125,7 @@ func (s *Service) listArtifactEvidenceForVersion(ctx context.Context, artifactID
 		return nil, err
 	}
 	defer rows.Close()
+
 	items := make([]ArtifactEvidence, 0)
 	for rows.Next() {
 		var item ArtifactEvidence
@@ -145,6 +148,7 @@ func (s *Service) listArtifactVerificationsForVersion(ctx context.Context, artif
 		return nil, err
 	}
 	defer rows.Close()
+
 	items := make([]ArtifactVerification, 0)
 	for rows.Next() {
 		var item ArtifactVerification
@@ -160,7 +164,3 @@ func (s *Service) listArtifactVerificationsForVersion(ctx context.Context, artif
 	}
 	return items, rows.Err()
 }
-
-// Keep the compiler honest if a future schema change removes nullable result links.
-var _ = sql.ErrNoRows
-var _ = errors.Is
