@@ -53,7 +53,7 @@ type executionDetail struct {
 }
 
 func New(d Dependencies) *Handler {
-	t := template.Must(template.New("dashboard").Parse(layoutTemplate))
+	t := template.Must(template.New("dashboard").Parse(layoutTemplate + pageTemplate + loginTemplate))
 	return &Handler{db:d.DB, token:d.APIToken, manager:d.ExecutionManager, tmpl:t}
 }
 
