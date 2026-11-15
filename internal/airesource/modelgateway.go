@@ -50,6 +50,77 @@ func (r *ModelGatewayRouter) Supports(ctx context.Context, modelKey string) (boo
 	return r.service.HasModelKey(ctx, modelKey)
 }
 
+// Stream adapts AI Resource SSE events to the shared AgentMesh stream contract.
+func (r *ModelGatewayRouter) Stream(ctx context.Context, req modelgateway.GenerateRequest) (<-chan modelgateway.StreamEvent, error) {
+	if r == nil || r.router == nil {
+		return nil, errors.New("dynamic model gateway router is not initialized")
+	}
+	if len(req.Tools) > 0 {
+		return nil, modelgateway.ErrNativeToolStreamingUnsupported
+	}
+	messages := make([]Message, 0, len(req.Messages))
+	for _, message := range req.Messages {
+		messages = append(messages, Message{Role: string(message.Role), Content: message.Content})
+	}
+	source, err := r.router.Stream(ctx, GenerateRequest{
+		Model: req.ProviderModel, Messages: messages,
+		Temperature: req.Temperature, TopP: req.TopP,
+		MaxTokens: req.MaxOutputTokens, Stream: true,
+	})
+	if err != nil {
+		if errors.Is(err, ErrStreamingUnsupported) {
+			return nil, modelgateway.ErrDynamicStreamingUnsupported
+		}
+		return nil, fmt.Errorf("dynamic credential stream: %w", err)
+	}
+	out := make(chan modelgateway.StreamEvent, 8)
+	go func() {
+		defer close(out)
+		for event := range source {
+			var mapped modelgateway.StreamEvent
+			switch event.Type {
+			case "text_delta":
+				mapped = modelgateway.NewTextDeltaEvent(provider.ID("ai-resource"), req.ProviderModel, event.Delta)
+			case "usage":
+				mapped = modelgateway.NewUsageEvent(provider.ID("ai-resource"), req.ProviderModel, modelgateway.Usage{
+					InputTokens: int64(event.Usage.PromptTokens), OutputTokens: int64(event.Usage.CompletionTokens),
+					TotalTokens: int64(event.Usage.TotalTokens),
+				})
+			case "completed":
+				if event.Response == nil {
+					mapped = modelgateway.NewErrorEvent(modelgateway.ErrNilResponse)
+				} else {
+					resp := &modelgateway.GenerateResponse{
+						ID: event.Response.ID, Model: event.Response.Model, CreatedAt: time.Unix(event.Response.Created, 0).UTC(),
+						Content: "", FinishReason: modelgateway.FinishReason(event.Response.Choices[0].FinishReason),
+						Usage: modelgateway.Usage{
+							InputTokens: int64(event.Response.Usage.PromptTokens), OutputTokens: int64(event.Response.Usage.CompletionTokens),
+							TotalTokens: int64(event.Response.Usage.TotalTokens),
+						},
+					}
+					if len(event.Response.Choices) > 0 {
+						resp.Content = event.Response.Choices[0].Message.Content
+					}
+					mapped = modelgateway.NewCompletedEvent(resp)
+				}
+			case "error":
+				mapped = modelgateway.NewErrorEvent(event.Err)
+			default:
+				mapped = modelgateway.NewErrorEvent(fmt.Errorf("unknown dynamic stream event %q", event.Type))
+			}
+			select {
+			case out <- mapped:
+			case <-ctx.Done():
+				return
+			}
+			if mapped.Type == modelgateway.StreamEventError || mapped.Type == modelgateway.StreamEventCompleted {
+				return
+			}
+		}
+	}()
+	return out, nil
+}
+
 // SupportsNativeToolCalling reports whether every currently eligible credential
 // for this model uses the OpenAI-compatible protocol supported by the tool bridge.
 func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, modelKey string) (bool, error) {
