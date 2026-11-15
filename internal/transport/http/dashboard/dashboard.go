@@ -2,7 +2,6 @@ package dashboard
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -653,9 +652,7 @@ func (h *Handler) runAgent(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Minute)
-	defer cancel()
-	result, err := h.agents.Run(ctx, c.Param("id"), workspaceID, prompt)
+	result, err := h.agents.Run(c.Request.Context(), c.Param("id"), workspaceID, prompt)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
