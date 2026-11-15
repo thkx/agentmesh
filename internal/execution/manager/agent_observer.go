@@ -51,7 +51,10 @@ func (o *AgentObserver) Started(ctx context.Context, job scheduler.Job) error {
 	if _, err = o.store.CreateAttempt(ctx, attempt); err != nil {
 		return err
 	}
-	_, err = o.store.Transition(ctx, e.ID, []dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleRunning, "", nil)
+	if e.Status == dom.LifecycleRunning {
+		return nil
+	}
+	_, err = o.store.Transition(ctx, e.ID, []dom.LifecycleStatus{dom.LifecycleQueued}, dom.LifecycleRunning, "", nil)
 	return err
 }
 
@@ -93,7 +96,9 @@ func (o *AgentObserver) Finished(ctx context.Context, job scheduler.Job, result 
 	case scheduler.Succeeded:
 		target = dom.LifecycleSucceeded
 	case scheduler.Queued:
-		target = dom.LifecycleQueued
+		// A safe retry keeps the parent Execution active. The Attempt just
+		// finished above; the next Started callback will append the next Attempt.
+		target = dom.LifecycleRunning
 	case scheduler.Canceled:
 		target = dom.LifecycleCanceled
 	case scheduler.Interrupted:
