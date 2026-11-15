@@ -21,7 +21,7 @@ const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
 	DB               *sql.DB
-	APIToken          string
+	APIToken         string
 	ExecutionManager *manager.Manager
 }
 
@@ -44,7 +44,7 @@ type pageData struct {
 
 type executionRow struct {
 	ID, Kind, Runtime, Status, TaskID string
-	CreatedAt, UpdatedAt             string
+	CreatedAt, UpdatedAt              string
 }
 
 type executionDetail struct {
