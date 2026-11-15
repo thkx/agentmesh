@@ -50,6 +50,27 @@ func (r *ModelGatewayRouter) Supports(ctx context.Context, modelKey string) (boo
 	return r.service.HasModelKey(ctx, modelKey)
 }
 
+// SupportsNativeToolCalling reports whether every currently eligible credential
+// for this model uses the OpenAI-compatible protocol supported by the tool bridge.
+func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, modelKey string) (bool, error) {
+	if r == nil || r.service == nil || r.router == nil {
+		return false, errors.New("dynamic model gateway router is not initialized")
+	}
+	candidates, _, err := r.service.Candidates(ctx, modelKey)
+	if err != nil {
+		return false, err
+	}
+	if len(candidates) == 0 {
+		return false, nil
+	}
+	for _, candidate := range candidates {
+		if candidate.Provider.Protocol != ProtocolOpenAI {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
 	if r == nil || r.router == nil {
 		return nil, errors.New("dynamic model gateway router is not initialized")
