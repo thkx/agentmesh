@@ -13,6 +13,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P4 Unified Execution Core](p4-unified-execution-core.md) | Cross-runtime Task, Execution, Attempt, Event, Evidence, Artifact, lifecycle and recovery contract |
 | [P4 M42 Audit](p4-m42-audit.md) | Source-level mapping of existing P2/P3 contracts and M43/M44 implementation gaps |
 | [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |\n| [P4 Part 3 Implementation](p4-part3-implementation.md) | M47/M48 unified execution detail, merged history timeline and release acceptance |
+| [P5 Product Control Plane](p5-product-control-plane.md) | M49–M52 Dashboard architecture, security boundary and acceptance contract |
 
 ## Architecture and implementation history
 
