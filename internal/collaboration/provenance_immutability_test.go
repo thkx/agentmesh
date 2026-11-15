@@ -47,7 +47,7 @@ func TestArtifactProvenanceBindingPreservesVersionContentImmutability(t *testing
 	if err = service.BindArtifactVersionAttempt(ctx, artifact.ID, version.Version,
 		collaboration.BindArtifactVersionAttemptRequest{
 			ExecutionID: "immutable-exec",
-			AttemptID: "immutable-attempt",
+			AttemptID:   "immutable-attempt",
 		}); err != nil {
 		t.Fatalf("one-time provenance binding must be allowed: %v", err)
 	}
