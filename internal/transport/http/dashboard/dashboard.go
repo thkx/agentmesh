@@ -6,8 +6,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
-	"encoding/json"
 	"encoding/base64"
+	"encoding/json"
 	"html/template"
 	"net"
 	"net/http"
@@ -18,12 +18,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
 	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
+	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
+	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
+	"github.com/thkx/agentmesh/internal/execution/manager"
+	"github.com/thkx/agentmesh/internal/transport/http/handlers"
+	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
-	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
 	"github.com/thkx/agentmesh/internal/execution/manager"
@@ -40,22 +44,22 @@ type Dependencies struct {
 	Models           *domainprovider.ModelRegistry
 	Credentials      appcredential.Manager
 	AgentDefinitions *agentcatalog.Service
-	WorkflowEngine *workflowruntime.Engine
-	Catalog *handlers.CatalogHandler
+	WorkflowEngine   *workflowruntime.Engine
+	Catalog          *handlers.CatalogHandler
 }
 
 type Handler struct {
-	db           *sql.DB
-	token        string
-	manager      *manager.Manager
-	providers    *domainprovider.ProviderRegistry
-	models       *domainprovider.ModelRegistry
-	credentials  appcredential.Manager
-	agents       *agentcatalog.Service
+	db             *sql.DB
+	token          string
+	manager        *manager.Manager
+	providers      *domainprovider.ProviderRegistry
+	models         *domainprovider.ModelRegistry
+	credentials    appcredential.Manager
+	agents         *agentcatalog.Service
 	workflowEngine *workflowruntime.Engine
-	workflowRepo *authoring.Repository
-	catalogAPI http.Handler
-	tmpl         *template.Template
+	workflowRepo   *authoring.Repository
+	catalogAPI     http.Handler
+	tmpl           *template.Template
 }
 
 type pageData struct {
@@ -83,39 +87,39 @@ type pageData struct {
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
 type modelView struct {
 	ID, ProviderID, Name, DisplayName, Status, Source string
-	ContextWindow, MaxOutputTokens int
-	Streaming bool
+	ContextWindow, MaxOutputTokens                    int
+	Streaming                                         bool
 }
 type agentView struct {
 	ID, Name, ModelID, Description string
-	Enabled bool
-	Version int
+	Enabled                        bool
+	Version                        int
 }
 type workflowView struct {
 	ID, Name, Description string
-	Version int
-	UpdatedAt string
+	Version               int
+	UpdatedAt             string
 }
 type credentialView struct {
 	Source, Status string
-	UpdatedAt string
+	UpdatedAt      string
 }
 type attemptView struct {
 	ID, Runtime, Status string
-	Number int
-	StartedAt string
-	FinishedAt string
+	Number              int
+	StartedAt           string
+	FinishedAt          string
 }
 type artifactView struct {
-	ID, ArtifactID string
-	Version int
+	ID, ArtifactID  string
+	Version         int
 	MediaType, Hash string
-	Size int64
+	Size            int64
 }
 type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement string }
 type eventView struct {
 	Stream, Type, Actor, Source, Payload, OccurredAt string
-	Sequence int64
+	Sequence                                         int64
 }
 
 type executionRow struct {
