@@ -1,6 +1,6 @@
 # P4 — Unified Execution Core
 
-> Status: P3 accepted; Part 1 (M42–M44) passed the user's Go 1.27.3 verification; Part 2 (M45–M46) implementation is committed and awaiting verification. This phase is additive to the accepted P3 baseline.
+> Status: P3 accepted; Part 1 (M42–M44) and Part 2 (M45–M46) passed the user's Go 1.27.3 verification. Part 3 (M47–M48) implementation is committed and awaiting local verification. This phase is additive to the accepted P3 baseline.
 
 P4 turns the existing Execution/Attempt management layer into the durable semantic core shared by Agent, Coding, Workflow and CLI execution. It does not create another scheduler or generic job queue.
 
@@ -127,3 +127,15 @@ The implementation details and recovery matrix are recorded in [P4 Part 2 Implem
 - SQLite integration tests exercise the migration, idempotent cancellation intent, terminal-state protection and immutable accepted input.
 
 **Verification status:** implementation is committed. Run `bash scripts/verify-p4-part2.sh` on Go 1.27.3; no Part 2 build, vet or race result has yet been observed.
+
+
+## 9. Part 3 implementation record (M47–M48)
+
+The implementation details are recorded in [P4 Part 3 Implementation](p4-part3-implementation.md).
+
+- `GET /api/v1/managed-executions/:id/detail` exposes one runtime-neutral read model containing the Execution, ordered Attempts, linked Artifact Versions and linked Evidence.
+- `GET /api/v1/managed-executions/:id/timeline` merges the append-only lifecycle and cancellation-control event streams. Because the streams retain independent sequence spaces, the API uses UTC occurrence time plus stream name and stream-local sequence as a deterministic order and tuple cursor; it does not claim a shared global sequence.
+- The detail and timeline handlers read existing canonical tables and P3 provenance stores. No duplicate queue, execution manager, Artifact or Evidence model is introduced.
+- Tests cover merged-stream ordering and pagination, provenance aggregation, raw JSON response values, unknown IDs, and all four runtime kinds (Agent, Coding, Workflow and CLI).
+
+**Verification status:** implementation is committed. Run `bash scripts/verify-p4-part3.sh` on Go 1.27.3. Part 3 remains pending until that exact branch commit passes the complete formatting, build, vet and race suite.
