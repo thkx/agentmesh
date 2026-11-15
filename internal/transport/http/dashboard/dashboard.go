@@ -57,14 +57,15 @@ type Handler struct {
 	db                  *sql.DB
 	token               string
 	manager             *manager.Manager
-	providers           *domainprovider.ProviderRegistry
-	models              *domainprovider.ModelRegistry
+	providerRegistry    *domainprovider.ProviderRegistry
+	modelRegistry       *domainprovider.ModelRegistry
 	credentials         appcredential.Manager
-	agents              *agentcatalog.Service
+	agentCatalog        *agentcatalog.Service
 	workflowEngine      *workflowruntime.Engine
 	workflowMaxAttempts int
 	workflowRepo        *authoring.Repository
 	catalogAPI          http.Handler
+	executionAPI        http.Handler
 	tmpl                *template.Template
 	loginMu             sync.Mutex
 	loginAttempts       map[string][]time.Time
@@ -166,10 +167,10 @@ func New(d Dependencies) *Handler {
 		db:                  d.DB,
 		token:               d.APIToken,
 		manager:             d.ExecutionManager,
-		providers:           d.Providers,
-		models:              d.Models,
+		providerRegistry:    d.Providers,
+		modelRegistry:       d.Models,
 		credentials:         d.Credentials,
-		agents:              d.AgentDefinitions,
+		agentCatalog:        d.AgentDefinitions,
 		workflowEngine:      d.WorkflowEngine,
 		workflowMaxAttempts: d.WorkflowMaxAttempts,
 		tmpl:                t,
@@ -528,7 +529,7 @@ func (h *Handler) deleteModel(c *gin.Context) {
 
 func (h *Handler) providers(c *gin.Context) {
 	data := pageData{Title: "Providers", Active: "providers", ProviderRows: []providerView{}}
-	if h.providers != nil {
+	if h.providerRegistry != nil {
 		for _, p := range h.providerRegistry.List() {
 			row := providerView{ID: string(p.ID), Name: p.Name, Type: string(p.Type), Kind: string(p.Kind), BaseURL: p.BaseURL, Status: "disabled"}
 			if p.Enabled {
@@ -616,7 +617,7 @@ func (h *Handler) models(c *gin.Context) {
 				}
 			}
 		}
-	} else if h.models != nil {
+	} else if h.modelRegistry != nil {
 		for _, m := range h.modelRegistry.List() {
 			status := "disabled"
 			if m.Enabled {
@@ -633,7 +634,7 @@ func (h *Handler) createAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agents == nil {
+	if h.agentCatalog == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
@@ -868,7 +869,7 @@ func (h *Handler) deleteWorkflowTemplate(c *gin.Context) {
 
 func (h *Handler) agents(c *gin.Context) {
 	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
-	if h.agents != nil {
+	if h.agentCatalog != nil {
 		items, err := h.agentCatalog.List(c.Request.Context())
 		if err != nil {
 			data.Error = "Could not load agent definitions"
