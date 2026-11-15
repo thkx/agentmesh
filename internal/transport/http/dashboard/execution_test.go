@@ -49,6 +49,14 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	if strings.Contains(rec.Body.String(), "Request cancellation") {
+		t.Fatal("terminal execution exposed a cancellation action")
+	}
+	queuedDetail := httptest.NewRecorder()
+	r.ServeHTTP(queuedDetail, httptest.NewRequest(http.MethodGet, "/dashboard/executions/exec-workflow", nil))
+	if queuedDetail.Code != http.StatusOK || !strings.Contains(queuedDetail.Body.String(), "Request cancellation") {
+		t.Fatalf("queued execution did not expose a cancellation request: %s", queuedDetail.Body.String())
+	}
 	for _, want := range []string{"attempt-1", "artifact-1", "evidence-1", "attempt.succeeded", "cancel.requested"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("detail response missing %q: %s", want, rec.Body.String())
