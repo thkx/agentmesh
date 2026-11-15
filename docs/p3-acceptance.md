@@ -18,7 +18,7 @@ P3 is the collaboration and governed execution foundation layered on top of the 
 | Inbox | Durable receipt, lease owner/token fencing, renewal, ACK, exponential retry and terminal failure |
 | Runtime binding | Agent Identity pinned to an enabled Definition version/model snapshot and managed filesystem Workspace |
 | Session | Persistent active Session and execution history pointer |
-| Wakeup | Assigned Task and approved/rejected Assignment events feed the P2 Execution Manager through an idempotency key derived from Assignment ID |
+| Wakeup | Assigned Task and approved/rejected Assignment events feed the P2 Execution Manager through an idempotency key derived from Assignment ID; promoted global and Agent-scoped memories are injected as untrusted reference context |
 | Recovery | Expired Inbox leases are reclaimable; duplicate wakeups reuse the same Execution; expired Assignment claims can be reclaimed using fencing |
 | Verification | Build, Vet, full Race suite, migration-backed service tests and a Wakeup-to-Execution integration test |
 

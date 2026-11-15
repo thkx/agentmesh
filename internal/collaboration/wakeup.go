@@ -291,7 +291,7 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	taskID := "collab-" + assignment.ID
 	temperature := binding.Definition.Temperature
 	prompt := task.Title
- 	if strings.TrimSpace(task.Description) != "" {
+	if strings.TrimSpace(task.Description) != "" {
 		prompt += "\n\n" + task.Description
 	}
 	systemPrompt := binding.Definition.SystemPrompt
