@@ -74,41 +74,41 @@ type Handler struct {
 	loginAttempts       map[string][]time.Time
 }
 
-type workspaceOption struct { ID, Name string }
+type workspaceOption struct{ ID, Name string }
 
 type pageData struct {
-	Title           string
-	Active          string
-	Error           string
-	Message         string
-	Readiness       string
-	Counts          map[string]int64
-	Executions      []executionRow
-	Execution       *executionDetail
-	ProviderRows    []providerView
-	ModelRows       []modelView
-	AgentRows       []agentView
-	TaskRows        []taskView
+	Title            string
+	Active           string
+	Error            string
+	Message          string
+	Readiness        string
+	Counts           map[string]int64
+	Executions       []executionRow
+	Execution        *executionDetail
+	ProviderRows     []providerView
+	ModelRows        []modelView
+	AgentRows        []agentView
+	TaskRows         []taskView
 	WorkspaceOptions []workspaceOption
-	WorkflowRows    []workflowView
-	Credential      *credentialView
-	FilterStatus    string
-	FilterKind      string
-	FilterRuntime   string
-	FilterTask      string
-	Offset          int
-	Limit           int
-	PrevOffset      int
-	NextOffset      int
-	HasPrevious     bool
-	HasNext         bool
-	Attempts        []attemptView
-	Artifacts       []artifactView
-	Evidence        []evidenceView
-	Events          []eventView
-	TimelineHasMore bool
-	TimelineNextURL string
-	RunResult       string
+	WorkflowRows     []workflowView
+	Credential       *credentialView
+	FilterStatus     string
+	FilterKind       string
+	FilterRuntime    string
+	FilterTask       string
+	Offset           int
+	Limit            int
+	PrevOffset       int
+	NextOffset       int
+	HasPrevious      bool
+	HasNext          bool
+	Attempts         []attemptView
+	Artifacts        []artifactView
+	Evidence         []evidenceView
+	Events           []eventView
+	TimelineHasMore  bool
+	TimelineNextURL  string
+	RunResult        string
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -118,11 +118,11 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
-type agentOption struct { ID, Name, Role, Status, Capabilities string }
+type agentOption struct{ ID, Name, Role, Status, Capabilities string }
 type taskView struct {
 	TaskID, WorkspaceID, ParentTaskID, Title, Type, Status, CreatedAt, ExecutionID string
-	Priority int
-	AgentOptions []agentOption
+	Priority                                                                       int
+	AgentOptions                                                                   []agentOption
 }
 type workflowRunView struct {
 	ID, Status, CreatedAt, ExecutionID string
@@ -951,7 +951,9 @@ func (h *Handler) tasks(c *gin.Context) {
 		if err != nil {
 			data.Error = "Could not load workspaces"
 		} else {
-			for _, workspace := range workspaces { data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID:workspace.ID, Name:workspace.Name}) }
+			for _, workspace := range workspaces {
+				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: workspace.ID, Name: workspace.Name})
+			}
 			for _, workspace := range workspaces {
 				tasks, listErr := h.collaboration.ListTasks(c.Request.Context(), workspace.ID)
 				if listErr != nil {
