@@ -2,6 +2,7 @@
 package airesource
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
