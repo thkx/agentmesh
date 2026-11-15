@@ -677,7 +677,7 @@ func (s *Service) AssignTask(ctx context.Context, tid, aid, by string) (Assignme
 		}
 		return Assignment{}, e
 	}
-	res, e := tx.ExecContext(ctx, "UPDATE collaboration_tasks SET status='assigned',updated_at=? WHERE id=? AND status IN ('open','assigned')", now.UnixMilli(), tid)
+	res, e := tx.ExecContext(ctx, "UPDATE collaboration_tasks SET status='assigned',updated_at=? WHERE id=? AND status IN ('open','assigned','blocked')", now.UnixMilli(), tid)
 	if e != nil {
 		return Assignment{}, e
 	}

@@ -83,3 +83,6 @@ Every durable task result is passed through a pluggable `TaskResultEvaluator` an
 ### P3-2 governance and recovery
 
 Human result review persists reviewer identity, decision note and review time, plus an append-only audit record. Parent progress is computed from child Task status and the parent Agent's own result assessment; other recipients' notifications cannot satisfy acceptance. A parent is ready for its own review only when every child has a durable result accepted by that parent Agent. Aggregation never auto-completes the parent. Assignment failures are fenced by lease owner and claim version, transition the Task to blocked, and emit an Outbox event. Retry is explicit, reuses the Assignment identity, increments a bounded retry counter, and emits its own event.
+
+
+A failed Assignment with no durable result may be retried in place within its retry budget. Once a result exists (including a human-rejected result), the same Assignment cannot be reused because its result receipt is immutable; recovery must create a new Assignment for another eligible Agent. Blocked Tasks can therefore be reassigned, and parent progress evaluates the latest result delivered to the parent Agent for each child rather than treating historical rejected attempts as the current outcome.

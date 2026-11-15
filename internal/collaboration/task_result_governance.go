@@ -108,9 +108,9 @@ func (s *Service) GetTaskChildProgress(ctx context.Context, parentTaskID string)
 	err = s.db.QueryRowContext(ctx, `SELECT COUNT(*),
 	COALESCE(SUM(CASE WHEN child.status='completed' THEN 1 ELSE 0 END),0),
 	COALESCE(SUM(CASE WHEN child.status='blocked' THEN 1 ELSE 0 END),0),
-	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r WHERE r.task_id=child.id AND r.recipient_agent_id=?) THEN 1 ELSE 0 END),0),
-	COALESCE(SUM(CASE WHEN child.status='completed' AND EXISTS(SELECT 1 FROM agent_task_results r JOIN agent_task_result_assessments a ON a.result_id=r.id WHERE r.task_id=child.id AND r.recipient_agent_id=? AND a.outcome='accepted') THEN 1 ELSE 0 END),0),
-	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r LEFT JOIN agent_task_result_assessments a ON a.result_id=r.id AND a.recipient_agent_id=r.recipient_agent_id WHERE r.task_id=child.id AND r.recipient_agent_id=? AND (a.id IS NULL OR a.outcome IN ('human_review','rejected'))) THEN 1 ELSE 0 END),0)
+	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r WHERE r.id=(SELECT latest.id FROM agent_task_results latest WHERE latest.task_id=child.id AND latest.recipient_agent_id=? ORDER BY latest.received_at DESC,latest.id DESC LIMIT 1)) THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN child.status='completed' AND EXISTS(SELECT 1 FROM agent_task_results r JOIN agent_task_result_assessments a ON a.result_id=r.id WHERE r.id=(SELECT latest.id FROM agent_task_results latest WHERE latest.task_id=child.id AND latest.recipient_agent_id=? ORDER BY latest.received_at DESC,latest.id DESC LIMIT 1) AND a.outcome='accepted') THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r LEFT JOIN agent_task_result_assessments a ON a.result_id=r.id AND a.recipient_agent_id=r.recipient_agent_id WHERE r.id=(SELECT latest.id FROM agent_task_results latest WHERE latest.task_id=child.id AND latest.recipient_agent_id=? ORDER BY latest.received_at DESC,latest.id DESC LIMIT 1) AND (a.id IS NULL OR a.outcome IN ('human_review','rejected'))) THEN 1 ELSE 0 END),0)
 	FROM collaboration_tasks child WHERE child.parent_task_id=?`, p.ParentAgentID, p.ParentAgentID, p.ParentAgentID, parentTaskID).Scan(&p.TotalChildren, &p.CompletedChildren, &p.BlockedChildren, &p.ChildrenWithResults, &p.ChildrenFullyAccepted, &p.NeedsReviewChildren)
 	if err != nil {
 		return TaskChildProgress{}, err
@@ -183,6 +183,13 @@ func (s *Service) RetryAssignment(ctx context.Context, id, requestedBy string) (
 		return Assignment{}, err
 	}
 	if (status != "expired" && status != "rejected") || retries >= maxRetries {
+		return Assignment{}, ErrConflict
+	}
+	var existingResults int
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_task_results WHERE assignment_id=?", id).Scan(&existingResults); err != nil {
+		return Assignment{}, err
+	}
+	if existingResults > 0 {
 		return Assignment{}, ErrConflict
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE task_assignments SET status='pending',retry_count=retry_count+1,assigned_by=?,updated_at=? WHERE id=? AND status IN ('expired','rejected') AND retry_count=?`, requestedBy, now.UnixMilli(), id, retries)
