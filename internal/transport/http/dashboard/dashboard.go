@@ -905,29 +905,65 @@ func (h *Handler) deleteWorkflowTemplate(c *gin.Context) {
 }
 
 func (h *Handler) createAgentIdentity(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
-	identity := collaboration.AgentIdentity{WorkspaceID:c.PostForm("workspace_id"), DefinitionID:c.PostForm("definition_id"), Name:c.PostForm("name"), Description:c.PostForm("description"), Role:c.PostForm("role"), Capabilities:parseToolList(c.PostForm("capabilities"))}
-	if _,err:=h.collaboration.CreateAgent(c.Request.Context(),identity);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=identity");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=identity-saved")
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	identity := collaboration.AgentIdentity{WorkspaceID: c.PostForm("workspace_id"), DefinitionID: c.PostForm("definition_id"), Name: c.PostForm("name"), Description: c.PostForm("description"), Role: c.PostForm("role"), Capabilities: parseToolList(c.PostForm("capabilities"))}
+	if _, err := h.collaboration.CreateAgent(c.Request.Context(), identity); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=identity")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=identity-saved")
 }
 func (h *Handler) enableAgentIdentity(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration==nil{c.AbortWithStatus(http.StatusServiceUnavailable);return}
-	if _,err:=h.collaboration.EnableAgent(c.Request.Context(),c.Param("id"));err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=identity");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=identity-saved")
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := h.collaboration.EnableAgent(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=identity")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=identity-saved")
 }
 func (h *Handler) disableAgentIdentity(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration==nil{c.AbortWithStatus(http.StatusServiceUnavailable);return}
-	if _,err:=h.collaboration.DisableAgent(c.Request.Context(),c.Param("id"));err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=identity");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=identity-saved")
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := h.collaboration.DisableAgent(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=identity")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=identity-saved")
 }
 func (h *Handler) deleteAgentIdentity(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration==nil{c.AbortWithStatus(http.StatusServiceUnavailable);return}
-	if _,err:=h.collaboration.DeleteAgent(c.Request.Context(),c.Param("id"));err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=identity");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=identity-deleted")
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if _, err := h.collaboration.DeleteAgent(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=identity")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=identity-deleted")
 }
 
 func (h *Handler) agents(c *gin.Context) {
@@ -938,9 +974,11 @@ func (h *Handler) agents(c *gin.Context) {
 			for _, workspace := range workspaces {
 				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: workspace.ID, Name: workspace.Name})
 				identities, listErr := h.collaboration.ListAgents(c.Request.Context(), workspace.ID)
-				if listErr != nil { continue }
+				if listErr != nil {
+					continue
+				}
 				for _, identity := range identities {
-					data.IdentityRows = append(data.IdentityRows, identityView{ID:identity.ID, WorkspaceID:identity.WorkspaceID, DefinitionID:identity.DefinitionID, Name:identity.Name, Description:identity.Description, Role:identity.Role, Status:identity.Status, Capabilities:strings.Join(identity.Capabilities, ", ")})
+					data.IdentityRows = append(data.IdentityRows, identityView{ID: identity.ID, WorkspaceID: identity.WorkspaceID, DefinitionID: identity.DefinitionID, Name: identity.Name, Description: identity.Description, Role: identity.Role, Status: identity.Status, Capabilities: strings.Join(identity.Capabilities, ", ")})
 				}
 			}
 		}
