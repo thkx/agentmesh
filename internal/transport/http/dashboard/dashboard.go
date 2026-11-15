@@ -113,7 +113,7 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
-type taskView struct { TaskID, AgentID, RunID, Status, CreatedAt, ExecutionID string }
+type taskView struct{ TaskID, AgentID, RunID, Status, CreatedAt, ExecutionID string }
 type workflowRunView struct {
 	ID, Status, CreatedAt, ExecutionID string
 	Version                            int
@@ -921,10 +921,14 @@ func (h *Handler) tasks(c *gin.Context) {
 	data := pageData{Title: "Tasks", Active: "tasks", TaskRows: []taskView{}}
 	if h.agentCatalog != nil {
 		definitions, err := h.agentCatalog.List(c.Request.Context())
-		if err != nil { data.Error = "Could not load Agent tasks" } else {
+		if err != nil {
+			data.Error = "Could not load Agent tasks"
+		} else {
 			for _, definition := range definitions {
 				runs, err := h.agentCatalog.ListRuns(c.Request.Context(), definition.ID, 20)
-				if err != nil { continue }
+				if err != nil {
+					continue
+				}
 				for _, run := range runs {
 					row := taskView{TaskID: run.TaskID, AgentID: definition.ID, RunID: run.ID, Status: run.Status, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
 					row.ExecutionID = h.executionForTask(c.Request.Context(), run.TaskID)
@@ -932,7 +936,9 @@ func (h *Handler) tasks(c *gin.Context) {
 				}
 			}
 			sort.Slice(data.TaskRows, func(i, j int) bool { return data.TaskRows[i].CreatedAt > data.TaskRows[j].CreatedAt })
-			if len(data.TaskRows) > 100 { data.TaskRows = data.TaskRows[:100] }
+			if len(data.TaskRows) > 100 {
+				data.TaskRows = data.TaskRows[:100]
+			}
 		}
 	}
 	h.render(c, data, http.StatusOK)
