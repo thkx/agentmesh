@@ -38,10 +38,14 @@ request() {
   path="$2"
   body="${3:-}"
   expected="$4"
-  if [ -n "$API_TOKEN" ]; then
+  if [ -n "$API_TOKEN" ] && [ -n "$body" ]; then
     status="$(curl --silent --show-error --connect-timeout 3 --max-time 30 \
       -X "$method" -H "Authorization: Bearer $API_TOKEN" -H 'Content-Type: application/json' \
       --data-binary "$body" -o "$RESP" -w '%{http_code}' "$API_BASE_URL$path")"
+  elif [ -n "$API_TOKEN" ]; then
+    status="$(curl --silent --show-error --connect-timeout 3 --max-time 30 \
+      -X "$method" -H "Authorization: Bearer $API_TOKEN" \
+      -o "$RESP" -w '%{http_code}' "$API_BASE_URL$path")"
   elif [ -n "$body" ]; then
     status="$(curl --silent --show-error --connect-timeout 3 --max-time 30 \
       -X "$method" -H 'Content-Type: application/json' \
@@ -64,8 +68,8 @@ request() {
 
 assert_jq() {
   name="$1"
-  expression="$2"
-  if jq -e "$expression" "$RESP" >/dev/null; then
+  shift
+  if jq -e "$@" "$RESP" >/dev/null; then
     pass "$name"
   else
     fail "$name"
