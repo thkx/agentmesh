@@ -1197,3 +1197,39 @@ func TestArtifactSubmissionRequiresVerificationAndReviewIsImmutable(t *testing.T
 		t.Fatal("artifact verifications must be append-only")
 	}
 }
+
+func TestArtifactAndVerificationHistoryCanBeListed(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+
+	workspace, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Artifact Index", Slug: "artifact-index"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, _, err := s.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		WorkspaceID: workspace.ID, Kind: "report", Title: "Research output", Content: []byte("report"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = s.VerifyArtifact(ctx, artifact.ID, 1, collaboration.ArtifactVerificationPolicy{RequireContentDigest: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	artifacts, err := s.ListArtifacts(ctx, workspace.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(artifacts) != 1 || artifacts[0].ID != artifact.ID {
+		t.Fatalf("unexpected artifact listing: %+v", artifacts)
+	}
+	history, err := s.ListArtifactVerifications(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 2 || history[0].Outcome != "passed" {
+		t.Fatalf("unexpected verification history: %+v", history)
+	}
+}

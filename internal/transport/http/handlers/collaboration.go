@@ -36,12 +36,14 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/agents/:id/runtime-binding", h.getRuntimeBinding)
 	g.GET("/agents/:id/session", h.session)
 	g.POST("/artifacts", h.createArtifact)
+	g.GET("/workspaces/:id/artifacts", h.listArtifacts)
 	g.GET("/artifacts/:id", h.getArtifact)
 	g.GET("/artifacts/:id/versions/:version", h.getArtifactVersion)
 	g.POST("/artifacts/:id/versions", h.addArtifactVersion)
 	g.GET("/artifacts/:id/evidence", h.listArtifactEvidence)
 	g.POST("/artifacts/:id/evidence", h.addArtifactEvidence)
 	g.POST("/artifacts/:id/verify", h.verifyArtifact)
+	g.GET("/artifacts/:id/verifications", h.listArtifactVerifications)
 	g.POST("/artifacts/:id/submit", h.submitArtifact)
 	g.POST("/artifacts/:id/review", h.reviewArtifact)
 	g.GET("/agents/:id/task-results", h.agentTaskResults)
@@ -783,4 +785,23 @@ func (h *CollaborationHandler) reviewArtifact(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, review)
+}
+
+func (h *CollaborationHandler) listArtifacts(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	items, err := h.service.ListArtifacts(c, c.Param("id"), limit)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *CollaborationHandler) listArtifactVerifications(c *gin.Context) {
+	items, err := h.service.ListArtifactVerifications(c, c.Param("id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }

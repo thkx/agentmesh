@@ -646,3 +646,61 @@ func (s *Service) ReviewArtifact(ctx context.Context, artifactID, reviewerID, ou
 	}
 	return review, nil
 }
+
+func (s *Service) ListArtifacts(ctx context.Context, workspaceID string, limit int) ([]Artifact, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, ErrInvalid
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,workspace_id,COALESCE(source_task_id,''),COALESCE(creator_agent_id,''),
+		kind,title,status,current_version,COALESCE(submitted_version_id,''),created_at,updated_at
+		FROM collaboration_artifacts WHERE workspace_id=? ORDER BY updated_at DESC,id LIMIT ?`, workspaceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Artifact, 0)
+	for rows.Next() {
+		var item Artifact
+		var created, updated int64
+		if err = rows.Scan(&item.ID, &item.WorkspaceID, &item.SourceTaskID, &item.CreatorAgentID,
+			&item.Kind, &item.Title, &item.Status, &item.CurrentVersion, &item.SubmittedVersionID,
+			&created, &updated); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = time.UnixMilli(created).UTC()
+		item.UpdatedAt = time.UnixMilli(updated).UTC()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Service) ListArtifactVerifications(ctx context.Context, artifactID string) ([]ArtifactVerification, error) {
+	if _, err := s.GetArtifact(ctx, artifactID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,outcome,policy_json,evidence_summary_json,reason,created_at
+		FROM collaboration_artifact_verifications WHERE artifact_id=? ORDER BY created_at DESC,id DESC`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ArtifactVerification, 0)
+	for rows.Next() {
+		var item ArtifactVerification
+		var policy, summary string
+		var created int64
+		if err = rows.Scan(&item.ID, &item.ArtifactID, &item.VersionID, &item.Outcome,
+			&policy, &summary, &item.Reason, &created); err != nil {
+			return nil, err
+		}
+		item.Policy = json.RawMessage(policy)
+		item.EvidenceSummary = json.RawMessage(summary)
+		item.CreatedAt = time.UnixMilli(created).UTC()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

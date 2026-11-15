@@ -114,3 +114,5 @@ Artifact review records and verification records are append-only at the SQLite t
 Additional endpoints:
 - `POST /api/v1/collaboration/artifacts/:id/submit`
 - `POST /api/v1/collaboration/artifacts/:id/review`
+
+Artifact discovery and audit history are also available through `GET /api/v1/collaboration/workspaces/:id/artifacts` and `GET /api/v1/collaboration/artifacts/:id/verifications`. Listing endpoints return bounded metadata/history; version content is fetched separately by exact version number.
