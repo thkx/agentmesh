@@ -1,0 +1,2 @@
+DROP TRIGGER IF EXISTS agent_task_result_review_audit_no_delete;
+DROP TRIGGER IF EXISTS agent_task_result_review_audit_no_update;

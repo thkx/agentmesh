@@ -911,3 +911,52 @@ func TestParentTaskProgressRequiresParentAgentAcceptance(t *testing.T) {
 		t.Fatalf("progress not ready: %+v", p)
 	}
 }
+
+
+func TestTaskResultReviewAuditIsAppendOnly(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+
+	workspace, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Immutable Audit", Slug: "immutable-audit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: workspace.ID, Name: "Reviewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: workspace.ID, Title: "Audited task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := s.AssignTask(ctx, task.ID, agent.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE task_assignments SET status='completed' WHERE id=?", assignment.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResult(ctx, agent.ID, task.ID, assignment.ID, "audit-execution", []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := s.GetTaskResult(ctx, agent.ID, assignment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.StoreTaskResultAssessment(ctx, collaboration.TaskResultAssessment{
+		ResultID: result.ID, RecipientAgentID: agent.ID, Outcome: "human_review",
+		Reason: "review required", Evidence: []byte("[]"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ResolveTaskResultAssessment(ctx, agent.ID, assignment.ID, "human", "accepted", "verified"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE agent_task_result_review_audit SET note='tampered' WHERE assignment_id=?", assignment.ID); err == nil {
+		t.Fatal("review audit update must be rejected")
+	}
+	if _, err = db.DB.ExecContext(ctx, "DELETE FROM agent_task_result_review_audit WHERE assignment_id=?", assignment.ID); err == nil {
+		t.Fatal("review audit deletion must be rejected")
+	}
+}
