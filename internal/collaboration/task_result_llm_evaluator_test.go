@@ -31,7 +31,7 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	assessment, err := evaluator.EvaluateTaskResultWithContext(ctx, collaboration.TaskResultEvaluationContext{
-		Task: collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
+		Task:   collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
 		Result: collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
 		Artifacts: []collaboration.TaskArtifactContext{{
 			Artifact:        collaboration.Artifact{ID: "artifact-1"},
