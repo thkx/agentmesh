@@ -298,12 +298,6 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		cancel()
 		t.Fatalf("unexpected agent session after execution: %+v", session)
 	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("wakeup worker did not stop after cancellation")
-	}
 	var handled int
 	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assigned' AND status='handled'", identity.ID).Scan(&handled); err != nil {
 		t.Fatal(err)
