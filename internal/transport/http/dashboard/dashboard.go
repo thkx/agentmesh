@@ -140,11 +140,11 @@ type attemptView struct {
 }
 type artifactView struct {
 	ID, ArtifactID, SourceExecutionID, SourceAttemptID string
-	Version int
-	MediaType, Hash string
-	Size int64
+	Version                                            int
+	MediaType, Hash                                    string
+	Size                                               int64
 }
-type evidenceView struct { ID, ArtifactID, VersionID, Kind, Statement, ExecutionID, AttemptID string }
+type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement, ExecutionID, AttemptID string }
 type eventView struct {
 	Stream, Type, Actor, Source, Payload, OccurredAt string
 	Sequence                                         int64
