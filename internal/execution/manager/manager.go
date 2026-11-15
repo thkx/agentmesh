@@ -21,6 +21,7 @@ var (
 type Observation struct {
 	Status              dom.LifecycleStatus
 	Attempt             int
+	CompletedAttempt    int
 	AttemptOutcome      dom.AttemptStatus
 	AttemptError        string
 	AttemptNotStarted   bool
@@ -165,9 +166,9 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 	// A runtime may report a completed retry while the overall Execution
 	// remains active. Close that exact Attempt before considering the current
 	// Execution status; this also repairs a missed observer callback.
-	if observed.AttemptOutcome != "" && observed.Attempt > 0 {
+	if observed.AttemptOutcome != "" && observed.CompletedAttempt > 0 {
 		for _, attempt := range attempts {
-			if attempt.Number != observed.Attempt || attempt.Status != dom.AttemptRunning {
+			if attempt.Number != observed.CompletedAttempt || attempt.Status != dom.AttemptRunning {
 				continue
 			}
 			message := observed.AttemptError
