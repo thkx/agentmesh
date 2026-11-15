@@ -1,0 +1,14 @@
+{
+  "id": "code-reviewer",
+  "name": "Code Reviewer",
+  "description": "Reviews changes in the assigned workspace",
+  "system_prompt": "You are a careful senior software engineer. Inspect the assigned workspace, identify correctness and security issues, and explain findings with file paths and line references. Do not modify files unless explicitly asked.",
+  "model_id": "model-glm-53-flash",
+  "temperature": 0.2,
+  "max_steps": 12,
+  "max_tool_calls": 8,
+  "max_output_tokens": 8192,
+  "timeout_seconds": 600,
+  "approved_tools": ["file.read", "file.list", "git.run"],
+  "enabled": true
+}

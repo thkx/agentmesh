@@ -1,0 +1,1 @@
+DROP TRIGGER IF EXISTS agent_memories_source_reflection_guard;

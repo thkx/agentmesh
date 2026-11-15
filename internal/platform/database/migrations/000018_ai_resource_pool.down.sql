@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS ai_usage_records;
+DROP TABLE IF EXISTS ai_request_logs;
+DROP TABLE IF EXISTS ai_credential_health;
+DROP TABLE IF EXISTS ai_routing_policies;
+DROP TABLE IF EXISTS ai_credential_models;
+DROP TABLE IF EXISTS ai_models;
+DROP TABLE IF EXISTS ai_credentials;
+DROP TABLE IF EXISTS ai_endpoints;
+DROP TABLE IF EXISTS ai_providers;

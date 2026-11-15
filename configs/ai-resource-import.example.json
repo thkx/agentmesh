@@ -1,0 +1,61 @@
+{
+  "provider": {
+    "id": "ctaigw",
+    "name": "CTAIGW",
+    "protocol": "openai-compatible",
+    "enabled": true
+  },
+  "endpoint": {
+    "id": "ctaigw-primary",
+    "provider_id": "ctaigw",
+    "name": "CTAIGW Primary",
+    "base_url": "https://ai.ctaigw.cn/v1",
+    "priority": 1,
+    "timeout_ms": 60000,
+    "enabled": true
+  },
+  "credentials_bulk_request": {
+    "items": [
+      {
+        "id": "ctaigw-key-01",
+        "provider_id": "ctaigw",
+        "endpoint_id": "ctaigw-primary",
+        "name": "CTAIGW account 01",
+        "api_key": "REPLACE_WITH_ROTATED_KEY",
+        "priority": 1,
+        "weight": 1,
+        "max_concurrency": 4
+      }
+    ]
+  },
+  "models": [
+    {
+      "id": "model-glm-53-flash",
+      "model_key": "glm-5.3-flash",
+      "display_name": "GLM 5.3 Flash",
+      "enabled": true,
+      "supports_streaming": false
+    },
+    {
+      "id": "model-deepseek-v41-flash",
+      "model_key": "deepseek-v4.1-flash",
+      "display_name": "DeepSeek V4.1 Flash",
+      "enabled": true,
+      "supports_streaming": false
+    }
+  ],
+  "bindings": [
+    {
+      "credential_id": "ctaigw-key-01",
+      "model_id": "model-glm-53-flash",
+      "upstream_model": "REPLACE_WITH_EXACT_PROVIDER_MODEL_ID",
+      "enabled": true
+    },
+    {
+      "credential_id": "ctaigw-key-01",
+      "model_id": "model-deepseek-v41-flash",
+      "upstream_model": "REPLACE_WITH_EXACT_PROVIDER_MODEL_ID",
+      "enabled": true
+    }
+  ]
+}
