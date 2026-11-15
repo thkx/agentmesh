@@ -325,6 +325,20 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		cancel()
 		t.Fatalf("unexpected agent session after execution: %+v", session)
 	}
+	transcript, err := service.ListAgentSessionTranscript(ctx, identity.ID, 10)
+	if err != nil {
+		cancel()
+		t.Fatalf("list persisted Agent Session transcript: %v", err)
+	}
+	if len(transcript) != 2 || transcript[0].EntryType != "execution_input" || transcript[1].EntryType != "execution_result" {
+		cancel()
+		t.Fatalf("expected durable execution input and result transcript, got %+v", transcript)
+	}
+	if !strings.Contains(transcript[0].Content, "Verify durable collaboration wakeup") ||
+		!strings.Contains(transcript[1].Content, "completed by test runtime") {
+		cancel()
+		t.Fatalf("Agent Session transcript lost execution input or result: %+v", transcript)
+	}
 	var handled int
 	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assigned' AND status='handled'", identity.ID).Scan(&handled); err != nil {
 		t.Fatal(err)
