@@ -29,6 +29,13 @@ func TestBuildTaskResultEvaluationContextIncludesBoundedArtifactEvidence(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	claimed, err := service.ClaimAssignment(ctx, assignment.ID, "context-test-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.CompleteAssignment(ctx, assignment.ID, "context-test-worker", claimed.ClaimVersion); err != nil {
+		t.Fatal(err)
+	}
 
 	content := []byte("verified deliverable")
 	artifact, version, err := service.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
@@ -105,6 +112,13 @@ func TestBuildTaskResultEvaluationContextDoesNotCrossWorkspace(t *testing.T) {
 	}
 	assignment, err := service.AssignTask(ctx, task.ID, agent.ID, "human")
 	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := service.ClaimAssignment(ctx, assignment.ID, "isolation-test-worker", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.CompleteAssignment(ctx, assignment.ID, "isolation-test-worker", claimed.ClaimVersion); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = service.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
