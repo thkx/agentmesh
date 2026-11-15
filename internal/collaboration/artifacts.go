@@ -722,7 +722,6 @@ func (s *Service) ListArtifactVerifications(ctx context.Context, artifactID stri
 	return items, rows.Err()
 }
 
-
 // ListArtifactReviews returns immutable human review decisions for every version.
 func (s *Service) ListArtifactReviews(ctx context.Context, artifactID string) ([]ArtifactReview, error) {
 	if _, err := s.GetArtifact(ctx, artifactID); err != nil {
