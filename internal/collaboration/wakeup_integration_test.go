@@ -207,6 +207,12 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		cancel()
 		t.Fatalf("execution result missing from durable completion event: %+v", completion)
 	}
+	// Stop the polling worker before dispatching the completion event.
+	// This keeps the SQLite integration test deterministic under -race.
+	cancel()
+	if err = <-done; err != nil {
+		t.Fatalf("stop wakeup worker: %v", err)
+	}
 	// The completion event must be routed to the task's Agent creator, not
 	// broadcast to every Agent in the workspace.
 	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
