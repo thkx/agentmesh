@@ -70,6 +70,11 @@ func TestLifecycleEnforcementAndDurableCancellationIntent(t *testing.T) {
 		dom.LifecycleRunning, "", nil); err != nil {
 		t.Fatal(err)
 	}
+	// A started Execution cannot regress to Queued, even through raw SQL.
+	if _, err = db.DB.ExecContext(ctx,
+		"UPDATE executions SET status='queued' WHERE id=?", execution.ID); err == nil {
+		t.Fatal("database allowed a running execution to regress to queued")
+	}
 	attempt, err := store.CreateAttempt(ctx, dom.Attempt{
 		ID: "lifecycle-attempt-1", ExecutionID: execution.ID, Number: 1,
 		Runtime: dom.RuntimeAgent, Status: dom.AttemptRunning, Input: input, StartedAt: now,
