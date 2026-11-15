@@ -22,7 +22,7 @@ var (
 	ErrInvalidStreamEvent             = errors.New("provider returned an invalid stream event")
 	ErrNativeToolCallingUnsupported   = errors.New("provider adapter does not support native tool calling")
 	ErrNativeToolStreamingUnsupported = errors.New("provider adapter does not support native tool calling in streaming mode")
-	ErrDynamicStreamingUnsupported   = errors.New("dynamic credential routing does not support streaming yet")
+	ErrDynamicStreamingUnsupported    = errors.New("dynamic credential routing does not support streaming yet")
 )
 
 // DynamicRouter routes configured model keys through the persisted AI resource pool.
