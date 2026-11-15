@@ -16,9 +16,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
-	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/execution/manager"
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 )
@@ -29,55 +29,83 @@ type Dependencies struct {
 	DB               *sql.DB
 	APIToken         string
 	ExecutionManager *manager.Manager
-	Providers *domainprovider.ProviderRegistry
-	Models *domainprovider.ModelRegistry
-	Credentials appcredential.Manager
+	Providers        *domainprovider.ProviderRegistry
+	Models           *domainprovider.ModelRegistry
+	Credentials      appcredential.Manager
 	AgentDefinitions *agentcatalog.Service
 }
 
 type Handler struct {
-	db      *sql.DB
-	token   string
-	manager *manager.Manager
-	providers *domainprovider.ProviderRegistry
-	models *domainprovider.ModelRegistry
-	credentials appcredential.Manager
-	agents *agentcatalog.Service
+	db           *sql.DB
+	token        string
+	manager      *manager.Manager
+	providers    *domainprovider.ProviderRegistry
+	models       *domainprovider.ModelRegistry
+	credentials  appcredential.Manager
+	agents       *agentcatalog.Service
 	workflowRepo *authoring.Repository
-	tmpl    *template.Template
+	tmpl         *template.Template
 }
 
 type pageData struct {
-	Title      string
-	Active     string
-	Error      string
-	Message    string
-	Counts     map[string]int64
-	Executions []executionRow
-	Execution  *executionDetail
-	ProviderRows []providerView
-	ModelRows []modelView
-	AgentRows []agentView
-	WorkflowRows []workflowView
-	Credential *credentialView
-	FilterStatus string
-	FilterKind string
+	Title         string
+	Active        string
+	Error         string
+	Message       string
+	Counts        map[string]int64
+	Executions    []executionRow
+	Execution     *executionDetail
+	ProviderRows  []providerView
+	ModelRows     []modelView
+	AgentRows     []agentView
+	WorkflowRows  []workflowView
+	Credential    *credentialView
+	FilterStatus  string
+	FilterKind    string
 	FilterRuntime string
-	Attempts []attemptView
-	Artifacts []artifactView
-	Evidence []evidenceView
-	Events []eventView
+	Attempts      []attemptView
+	Artifacts     []artifactView
+	Evidence      []evidenceView
+	Events        []eventView
 }
 
-type providerView struct { ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
-type modelView struct { ID, ProviderID, Name, DisplayName, Status, Source string; ContextWindow, MaxOutputTokens int; Streaming bool }
-type agentView struct { ID, Name, ModelID, Description string; Enabled bool; Version int }
-type workflowView struct { ID, Name, Description string; Version int; UpdatedAt string }
-type credentialView struct { Source, Status string; UpdatedAt string }
-type attemptView struct { ID, Runtime, Status string; Number int; StartedAt string; FinishedAt string }
-type artifactView struct { ID, ArtifactID string; Version int; MediaType, Hash string; Size int64 }
-type evidenceView struct { ID, ArtifactID, VersionID, Kind, Statement string }
-type eventView struct { Stream, Type, Actor, Source, Payload, OccurredAt string; Sequence int64 }
+type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
+type modelView struct {
+	ID, ProviderID, Name, DisplayName, Status, Source string
+	ContextWindow, MaxOutputTokens int
+	Streaming bool
+}
+type agentView struct {
+	ID, Name, ModelID, Description string
+	Enabled bool
+	Version int
+}
+type workflowView struct {
+	ID, Name, Description string
+	Version int
+	UpdatedAt string
+}
+type credentialView struct {
+	Source, Status string
+	UpdatedAt string
+}
+type attemptView struct {
+	ID, Runtime, Status string
+	Number int
+	StartedAt string
+	FinishedAt string
+}
+type artifactView struct {
+	ID, ArtifactID string
+	Version int
+	MediaType, Hash string
+	Size int64
+}
+type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement string }
+type eventView struct {
+	Stream, Type, Actor, Source, Payload, OccurredAt string
+	Sequence int64
+}
 
 type executionRow struct {
 	ID, Kind, Runtime, Status, TaskID string
@@ -92,14 +120,14 @@ type executionDetail struct {
 func New(d Dependencies) *Handler {
 	t := template.Must(template.New("dashboard").Parse(layoutTemplate + pageTemplate + loginTemplate))
 	h := &Handler{
-		db:      d.DB,
-		token:   d.APIToken,
-		manager: d.ExecutionManager,
-		providers: d.Providers,
-		models: d.Models,
+		db:          d.DB,
+		token:       d.APIToken,
+		manager:     d.ExecutionManager,
+		providers:   d.Providers,
+		models:      d.Models,
 		credentials: d.Credentials,
-		agents: d.AgentDefinitions,
-		tmpl: t,
+		agents:      d.AgentDefinitions,
+		tmpl:        t,
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -248,11 +276,19 @@ func (h *Handler) providers(c *gin.Context) {
 	if h.providers != nil {
 		for _, p := range h.providers.List() {
 			row := providerView{ID: string(p.ID), Name: p.Name, Type: string(p.Type), Kind: string(p.Kind), BaseURL: p.BaseURL, Status: "disabled"}
-			if p.Enabled { row.Status = "enabled" }
+			if p.Enabled {
+				row.Status = "enabled"
+			}
 			if h.credentials != nil {
 				record, err := h.credentials.Status(c.Request.Context(), p.ID)
-				if err == nil { row.CredentialStatus = string(record.Status) } else { row.CredentialStatus = "unavailable" }
-			} else { row.CredentialStatus = "unavailable" }
+				if err == nil {
+					row.CredentialStatus = string(record.Status)
+				} else {
+					row.CredentialStatus = "unavailable"
+				}
+			} else {
+				row.CredentialStatus = "unavailable"
+			}
 			data.ProviderRows = append(data.ProviderRows, row)
 		}
 	}
@@ -260,10 +296,19 @@ func (h *Handler) providers(c *gin.Context) {
 }
 
 func (h *Handler) setCredential(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.credentials == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.credentials == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	secret, err := domaincredential.NewSecret(c.PostForm("api_key"))
-	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential"); return }
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential")
+		return
+	}
 	if err = h.credentials.Set(c.Request.Context(), domainprovider.ID(c.Param("id")), secret); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential")
 		return
@@ -285,30 +330,41 @@ func (h *Handler) models(c *gin.Context) {
 	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
 	if h.models != nil {
 		for _, m := range h.models.List() {
-			status := "disabled"; if m.Enabled { status = "enabled" }
-			data.ModelRows = append(data.ModelRows, modelView{ID:m.ID, ProviderID:string(m.ProviderID), Name:m.Name, DisplayName:m.DisplayName, Status:status, Source:"provider", ContextWindow:m.ContextWindow, MaxOutputTokens:m.MaxOutputTokens, Streaming:m.SupportsStreaming})
+			status := "disabled"
+			if m.Enabled {
+				status = "enabled"
+			}
+			data.ModelRows = append(data.ModelRows, modelView{ID: m.ID, ProviderID: string(m.ProviderID), Name: m.Name, DisplayName: m.DisplayName, Status: status, Source: "provider", ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens, Streaming: m.SupportsStreaming})
 		}
 	}
 	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) agents(c *gin.Context) {
-	data := pageData{Title:"Agents", Active:"agents", AgentRows:[]agentView{}}
+	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
 	if h.agents != nil {
 		items, err := h.agents.List(c.Request.Context())
-		if err != nil { data.Error = "Could not load agent definitions" } else {
-			for _, item := range items { data.AgentRows = append(data.AgentRows, agentView{ID:item.ID, Name:item.Name, ModelID:item.ModelID, Description:item.Description, Enabled:item.Enabled, Version:item.Version}) }
+		if err != nil {
+			data.Error = "Could not load agent definitions"
+		} else {
+			for _, item := range items {
+				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, Enabled: item.Enabled, Version: item.Version})
+			}
 		}
 	}
 	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) workflows(c *gin.Context) {
-	data := pageData{Title:"Workflows", Active:"workflows", WorkflowRows:[]workflowView{}}
+	data := pageData{Title: "Workflows", Active: "workflows", WorkflowRows: []workflowView{}}
 	if h.workflowRepo != nil {
 		items, err := h.workflowRepo.ListTemplates(c.Request.Context())
-		if err != nil { data.Error = "Could not load workflow templates" } else {
-			for _, item := range items { data.WorkflowRows = append(data.WorkflowRows, workflowView{ID:item.ID, Name:item.Name, Description:item.Description, Version:item.Definition.Version, UpdatedAt:item.UpdatedAt.Format(time.RFC3339)}) }
+		if err != nil {
+			data.Error = "Could not load workflow templates"
+		} else {
+			for _, item := range items {
+				data.WorkflowRows = append(data.WorkflowRows, workflowView{ID: item.ID, Name: item.Name, Description: item.Description, Version: item.Definition.Version, UpdatedAt: item.UpdatedAt.Format(time.RFC3339)})
+			}
 		}
 	}
 	h.render(c, data, http.StatusOK)
