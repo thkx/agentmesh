@@ -59,7 +59,7 @@ bash scripts/verify-p5-part1.sh
 
 The script checks gofmt without modifying files, shell syntax, build, vet and race tests.
 
-**Current gate:** GitHub Actions formatting/build/vet/race verification for the final Part 1 commit is still pending. Do not treat earlier failed intermediate commits or a formatting-only run as acceptance evidence. The final report must identify the exact commit SHA and the completed CI result; the user should also run the script on the local Go 1.27.3 darwin/arm64 environment.
+**Current gate:** Go formatting has been applied by CI in commit `0414cfb6c2ec1d19a5014c70306a1f6b98691435`. Build, vet and race verification for the final Part 1 commit remain pending. Do not treat earlier failed intermediate commits or a formatting-only run as acceptance evidence. The final report must identify the exact commit SHA and the completed CI result; the user should also run the script on the local Go 1.27.3 darwin/arm64 environment.
 
 ## Remaining acceptance work
 
