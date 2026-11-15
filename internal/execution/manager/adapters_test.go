@@ -255,7 +255,6 @@ func TestAgentAdapterCancellationUsesRuntimeForRunningAndQueueForQueued(t *testi
 	}
 }
 
-
 func TestAgentAdapterKeepsExecutionRunningBetweenSafeRetries(t *testing.T) {
 	queue := &fakeAgentScheduler{job: scheduler.Job{
 		ID: "agent-retry-job", Task: agentdom.Task{ID: "agent-retry-task"},
