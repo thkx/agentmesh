@@ -206,7 +206,7 @@ func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
 
 func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
 	r := testRouter("")
-	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/workflows", "/dashboard/executions"} {
+	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/tasks", "/dashboard/workflows", "/dashboard/executions"} {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
