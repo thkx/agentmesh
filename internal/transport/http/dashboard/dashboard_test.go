@@ -53,6 +53,7 @@ func TestDashboardLoginIssuesOpaqueSignedCookie(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/dashboard/login", form)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Origin", "http://127.0.0.1")
+	req.Host = "127.0.0.1"
 	req.RemoteAddr = "127.0.0.1:12345"
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
