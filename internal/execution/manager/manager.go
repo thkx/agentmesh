@@ -25,6 +25,9 @@ type Observation struct {
 	Error   string
 }
 
+// Adapter implementations must make Submit idempotent for the same durable
+// Execution/Task identity. Reconciliation may repeat a queued Submit after a
+// process crash between persisting the Execution and binding its runtime ref.
 type Adapter interface {
 	Submit(context.Context, dom.Entity) (string, error)
 	Observe(context.Context, dom.Entity) (Observation, error)
