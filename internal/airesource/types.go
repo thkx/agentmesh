@@ -176,6 +176,7 @@ var (
 	ErrNoCandidate          = errors.New("no healthy credential is available for model")
 	ErrUnsupportedProtocol  = errors.New("unsupported provider protocol")
 	ErrStreamingUnsupported = errors.New("streaming is not supported by this gateway adapter")
+	ErrNativeToolCallingUnsupported = errors.New("native tool calling is not supported by this provider protocol")
 )
 
 func validateID(v string) error {
