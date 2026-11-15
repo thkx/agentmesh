@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -78,6 +79,7 @@ type pageData struct {
 	Artifacts     []artifactView
 	Evidence      []evidenceView
 	Events        []eventView
+	RunResult     string
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -172,11 +174,13 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/models/:id/delete", h.requireSession(), h.deleteModel)
 	g.GET("/agents", h.requireSession(), h.agents)
 	g.POST("/agents", h.requireSession(), h.createAgent)
+	g.POST("/agents/:id/run", h.requireSession(), h.runAgent)
 	g.POST("/agents/:id/enabled", h.requireSession(), h.setAgentEnabled)
 	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
+	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
 	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
@@ -440,6 +444,29 @@ func (h *Handler) createAgent(c *gin.Context) {
 	if err = h.agents.Create(c.Request.Context(),d); err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent"); return }
 	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=agent-saved")
 }
+func (h *Handler) runAgent(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	workspaceID, prompt := c.PostForm("workspace_id"), c.PostForm("prompt")
+	if workspaceID == "" || prompt == "" { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent-run"); return }
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Minute)
+	defer cancel()
+	result, err := h.agents.Run(ctx,c.Param("id"),workspaceID,prompt)
+	if err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent-run"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=agent-run-"+string(result.Status))
+}
+func (h *Handler) runWorkflow(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.workflowEngine == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	input := map[string]any{}
+	if raw := c.PostForm("input_json"); raw != "" {
+		if err := json.Unmarshal([]byte(raw),&input); err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow-run"); return }
+	}
+	run, err := h.workflowEngine.StartQueued(c.Request.Context(),c.Param("id"),"",input,3)
+	if err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow-run"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/workflows?message=workflow-run-"+string(run.Status))
+}
+
 func (h *Handler) setAgentEnabled(c *gin.Context) {
 	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
 	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
