@@ -667,3 +667,18 @@ func (s *Service) TestCredential(ctx context.Context, id string) error {
 	}
 	return probeEndpoint(ctx, protocol, baseURL, string(secret), time.Duration(timeout)*time.Millisecond)
 }
+
+
+// HasModelKey reports whether a dynamic resource model is configured. A
+// configured-but-disabled model remains owned by the dynamic router: requests
+// fail closed rather than silently falling back to a static credential.
+func (s *Service) HasModelKey(ctx context.Context, modelKey string) (bool, error) {
+	if strings.TrimSpace(modelKey) == "" {
+		return false, nil
+	}
+	var exists int
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM ai_models WHERE model_key = ?)`, modelKey).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists == 1, nil
+}
