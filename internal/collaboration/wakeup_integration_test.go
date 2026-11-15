@@ -13,7 +13,6 @@ import (
 	"github.com/thkx/agentmesh/internal/collaboration"
 	executionmanager "github.com/thkx/agentmesh/internal/execution/manager"
 	executionrepository "github.com/thkx/agentmesh/internal/execution/repository"
-	"github.com/thkx/agentmesh/internal/platform/workspace"
 	"github.com/thkx/agentmesh/internal/workspace"
 )
 
