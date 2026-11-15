@@ -243,31 +243,74 @@ func (h *Handler) overview(c *gin.Context) {
 }
 
 func (h *Handler) providers(c *gin.Context) {
-	h.render(c, pageData{
-		Title: "Providers", Active: "providers",
-		Message: "Provider configuration is available through the existing API. Credential values are write-only and are never rendered here.",
-	}, http.StatusOK)
+	data := pageData{Title: "Providers", Active: "providers", ProviderRows: []providerView{}}
+	if h.providers != nil {
+		for _, p := range h.providers.List() {
+			row := providerView{ID: string(p.ID), Name: p.Name, Type: string(p.Type), Kind: string(p.Kind), BaseURL: p.BaseURL, Status: "disabled"}
+			if p.Enabled { row.Status = "enabled" }
+			if h.credentials != nil {
+				record, err := h.credentials.Status(c.Request.Context(), p.ID)
+				if err == nil { row.CredentialStatus = string(record.Status) } else { row.CredentialStatus = "unavailable" }
+			} else { row.CredentialStatus = "unavailable" }
+			data.ProviderRows = append(data.ProviderRows, row)
+		}
+	}
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) setCredential(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.credentials == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	secret, err := domaincredential.NewSecret(c.PostForm("api_key"))
+	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential"); return }
+	if err = h.credentials.Set(c.Request.Context(), domainprovider.ID(c.Param("id")), secret); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=credential-saved")
+}
+
+func (h *Handler) deleteCredential(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.credentials == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err := h.credentials.Delete(c.Request.Context(), domainprovider.ID(c.Param("id"))); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=credential")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=credential-deleted")
 }
 
 func (h *Handler) models(c *gin.Context) {
-	h.render(c, pageData{
-		Title: "Models", Active: "models",
-		Message: "Model catalog is available through the existing API and dynamic AI Resource catalog.",
-	}, http.StatusOK)
+	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
+	if h.models != nil {
+		for _, m := range h.models.List() {
+			status := "disabled"; if m.Enabled { status = "enabled" }
+			data.ModelRows = append(data.ModelRows, modelView{ID:m.ID, ProviderID:string(m.ProviderID), Name:m.Name, DisplayName:m.DisplayName, Status:status, Source:"provider", ContextWindow:m.ContextWindow, MaxOutputTokens:m.MaxOutputTokens, Streaming:m.SupportsStreaming})
+		}
+	}
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) agents(c *gin.Context) {
-	h.render(c, pageData{
-		Title: "Agents", Active: "agents",
-		Message: "Agent definitions and lifecycle operations remain owned by the Agent Definition service.",
-	}, http.StatusOK)
+	data := pageData{Title:"Agents", Active:"agents", AgentRows:[]agentView{}}
+	if h.agents != nil {
+		items, err := h.agents.List(c.Request.Context())
+		if err != nil { data.Error = "Could not load agent definitions" } else {
+			for _, item := range items { data.AgentRows = append(data.AgentRows, agentView{ID:item.ID, Name:item.Name, ModelID:item.ModelID, Description:item.Description, Enabled:item.Enabled, Version:item.Version}) }
+		}
+	}
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) workflows(c *gin.Context) {
-	h.render(c, pageData{
-		Title: "Workflows", Active: "workflows",
-		Message: "Workflow definitions and authoring remain owned by the Workflow Engine and Authoring repository.",
-	}, http.StatusOK)
+	data := pageData{Title:"Workflows", Active:"workflows", WorkflowRows:[]workflowView{}}
+	if h.workflowRepo != nil {
+		items, err := h.workflowRepo.ListTemplates(c.Request.Context())
+		if err != nil { data.Error = "Could not load workflow templates" } else {
+			for _, item := range items { data.WorkflowRows = append(data.WorkflowRows, workflowView{ID:item.ID, Name:item.Name, Description:item.Description, Version:item.Definition.Version, UpdatedAt:item.UpdatedAt.Format(time.RFC3339)}) }
+		}
+	}
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) executions(c *gin.Context) {
