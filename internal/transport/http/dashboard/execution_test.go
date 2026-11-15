@@ -29,8 +29,8 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 		`INSERT INTO execution_attempts VALUES ('attempt-1','exec-1',1,'agent-runtime','succeeded',100,200)`,
 		`INSERT INTO collaboration_artifact_versions VALUES ('version-1','artifact-1',1,'text/plain','abc123',12,'exec-1','attempt-1')`,
 		`INSERT INTO collaboration_artifact_evidence VALUES ('evidence-1','artifact-1','version-1','test','verified output','exec-1','attempt-1',200)`,
-		`INSERT INTO execution_events VALUES (1,'attempt.succeeded','runtime','agent','{}',300,'exec-1')`,
-		`INSERT INTO execution_control_events VALUES (1,'cancel.requested','operator','dashboard','{}',250,'exec-1')`,
+		`INSERT INTO execution_events VALUES (1,'event-1','key-1','attempt.succeeded','runtime','agent','agent','{}',300,'exec-1','attempt-1')`,
+		`INSERT INTO execution_control_events VALUES (1,'control-1','key-control','cancel.requested','operator','operator-1','dashboard','{}',250,'exec-1')`,
 	}
 	for _, statement := range statements {
 		if _, err = db.Exec(statement); err != nil {
