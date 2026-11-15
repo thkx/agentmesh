@@ -155,7 +155,7 @@ func New(d Dependencies) *Handler {
 		agents:         d.AgentDefinitions,
 		workflowEngine: d.WorkflowEngine,
 		tmpl:           t,
-		loginAttempts: make(map[string][]time.Time),
+		loginAttempts:  make(map[string][]time.Time),
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -1129,7 +1129,9 @@ func sameOrigin(r *http.Request) bool {
 
 func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil { return r.RemoteAddr }
+	if err != nil {
+		return r.RemoteAddr
+	}
 	return host
 }
 
