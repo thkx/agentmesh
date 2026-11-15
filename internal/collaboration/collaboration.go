@@ -317,7 +317,8 @@ func (s *Service) GetAgent(ctx context.Context, id string) (AgentIdentity, error
 	v.CreatedAt = time.UnixMilli(c).UTC()
 	v.UpdatedAt = time.UnixMilli(u).UTC()
 	if deleted.Valid {
-		value := time.UnixMilli(deleted.Int64).UTC(); v.DeletedAt = &value
+		value := time.UnixMilli(deleted.Int64).UTC()
+		v.DeletedAt = &value
 	}
 	return v, nil
 }
