@@ -959,3 +959,46 @@ func TestTaskResultReviewAuditIsAppendOnly(t *testing.T) {
 		t.Fatal("review audit deletion must be rejected")
 	}
 }
+
+func TestArtifactVersionEvidenceAndDeterministicVerification(t *testing.T) {
+	ctx:=context.Background()
+	s,db:=testService(t);defer db.Close()
+	w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Artifacts",Slug:"artifacts"});if err!=nil{t.Fatal(err)}
+	agent,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Builder"});if err!=nil{t.Fatal(err)}
+	task,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Build deliverable"});if err!=nil{t.Fatal(err)}
+	artifact,version,err:=s.CreateArtifact(ctx,collaboration.CreateArtifactRequest{WorkspaceID:w.ID,SourceTaskID:task.ID,CreatorAgentID:agent.ID,Kind:"document",Title:"Architecture report",Content:[]byte("# Architecture"),MediaType:"text/markdown"})
+	if err!=nil{t.Fatal(err)}
+	if artifact.CurrentVersion!=1||version.Version!=1||len(version.ContentSHA256)!=64{t.Fatalf("unexpected artifact: %+v %+v",artifact,version)}
+	policy:=collaboration.ArtifactVerificationPolicy{RequiredEvidenceKinds:[]string{"test","source_reference"},RequireContentDigest:true}
+	check,err:=s.VerifyArtifact(ctx,artifact.ID,1,policy);if err!=nil{t.Fatal(err)}
+	if check.Outcome!="needs_evidence"{t.Fatalf("expected missing evidence, got %+v",check)}
+	if _,err=s.AddArtifactEvidence(ctx,artifact.ID,collaboration.AddArtifactEvidenceRequest{VersionID:version.ID,Kind:"test",ContentSHA256:"bad",Statement:"tests passed"});!errors.Is(err,collaboration.ErrConflict){t.Fatalf("expected mismatched digest rejection, got %v",err)}
+	for _,kind:=range []string{"test","source_reference"}{
+		if _,err=s.AddArtifactEvidence(ctx,artifact.ID,collaboration.AddArtifactEvidenceRequest{VersionID:version.ID,Kind:kind,ContentSHA256:version.ContentSHA256,Statement:"verified",CreatedBy:"operator"});err!=nil{t.Fatal(err)}
+	}
+	check,err=s.VerifyArtifact(ctx,artifact.ID,1,policy);if err!=nil{t.Fatal(err)}
+	if check.Outcome!="passed"{t.Fatalf("expected passed deterministic verification, got %+v",check)}
+	newVersion,err:=s.AddArtifactVersion(ctx,artifact.ID,collaboration.CreateArtifactRequest{Content:[]byte("# Architecture v2"),MediaType:"text/markdown"})
+	if err!=nil{t.Fatal(err)}
+	if newVersion.Version!=2{t.Fatalf("expected version 2, got %d",newVersion.Version)}
+	old,err:=s.GetArtifactVersion(ctx,artifact.ID,1);if err!=nil{t.Fatal(err)}
+	if string(old.Content)!="# Architecture"{t.Fatalf("old version changed: %q",old.Content)}
+	latest,err:=s.GetArtifact(ctx,artifact.ID);if err!=nil{t.Fatal(err)}
+	if latest.CurrentVersion!=2{t.Fatalf("current version=%d",latest.CurrentVersion)}
+	evidence,err:=s.ListArtifactEvidence(ctx,artifact.ID);if err!=nil{t.Fatal(err)}
+	if len(evidence)!=2{t.Fatalf("expected 2 evidence records, got %d",len(evidence))}
+	if _,err=db.DB.ExecContext(ctx,"UPDATE collaboration_artifact_versions SET media_type='text/plain' WHERE id=?",version.ID);err==nil{t.Fatal("artifact versions must be immutable")}
+	if _,err=db.DB.ExecContext(ctx,"DELETE FROM collaboration_artifact_evidence WHERE id=?",evidence[0].ID);err==nil{t.Fatal("artifact evidence must be append-only")}
+}
+
+func TestArtifactRejectsCrossWorkspaceAndOversizedContent(t *testing.T) {
+	ctx:=context.Background()
+	s,db:=testService(t);defer db.Close()
+	w1,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"One",Slug:"one"});if err!=nil{t.Fatal(err)}
+	w2,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Two",Slug:"two"});if err!=nil{t.Fatal(err)}
+	task,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w2.ID,Title:"Foreign task"});if err!=nil{t.Fatal(err)}
+	_,_,err=s.CreateArtifact(ctx,collaboration.CreateArtifactRequest{WorkspaceID:w1.ID,SourceTaskID:task.ID,Kind:"document",Title:"Invalid",Content:[]byte("x")})
+	if !errors.Is(err,collaboration.ErrConflict){t.Fatalf("expected workspace conflict, got %v",err)}
+	_,_,err=s.CreateArtifact(ctx,collaboration.CreateArtifactRequest{WorkspaceID:w1.ID,Kind:"document",Title:"Too large",Content:make([]byte,collaboration.MaxArtifactBytes+1)})
+	if !errors.Is(err,collaboration.ErrInvalid){t.Fatalf("expected size rejection, got %v",err)}
+}

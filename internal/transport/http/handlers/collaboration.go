@@ -35,6 +35,13 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/agents/:id/runtime-binding", h.bindRuntime)
 	g.GET("/agents/:id/runtime-binding", h.getRuntimeBinding)
 	g.GET("/agents/:id/session", h.session)
+	g.POST("/artifacts", h.createArtifact)
+	g.GET("/artifacts/:id", h.getArtifact)
+	g.GET("/artifacts/:id/versions/:version", h.getArtifactVersion)
+	g.POST("/artifacts/:id/versions", h.addArtifactVersion)
+	g.GET("/artifacts/:id/evidence", h.listArtifactEvidence)
+	g.POST("/artifacts/:id/evidence", h.addArtifactEvidence)
+	g.POST("/artifacts/:id/verify", h.verifyArtifact)
 	g.GET("/agents/:id/task-results", h.agentTaskResults)
 	g.GET("/agents/:id/task-results/:assignment_id", h.agentTaskResult)
 	g.POST("/agents/:id/task-results/:assignment_id/review", h.reviewAgentTaskResult)
@@ -656,4 +663,36 @@ func (h *CollaborationHandler) retryAssignment(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusAccepted, assignment)
+}
+
+func (h *CollaborationHandler) createArtifact(c *gin.Context) {
+	var in collaboration.CreateArtifactRequest
+	if c.ShouldBindJSON(&in) != nil { c.JSON(http.StatusBadRequest, gin.H{"error":"invalid_request"}); return }
+	a,v,err:=h.service.CreateArtifact(c,in);if err!=nil{h.fail(c,err);return}
+	c.JSON(http.StatusCreated,gin.H{"artifact":a,"version":v})
+}
+func (h *CollaborationHandler) getArtifact(c *gin.Context) {
+	a,err:=h.service.GetArtifact(c,c.Param("id"));if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,a)
+}
+func (h *CollaborationHandler) getArtifactVersion(c *gin.Context) {
+	n,err:=strconv.Atoi(c.Param("version"));if err!=nil||n<1{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_version"});return}
+	v,err:=h.service.GetArtifactVersion(c,c.Param("id"),n);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,v)
+}
+func (h *CollaborationHandler) addArtifactVersion(c *gin.Context) {
+	var in collaboration.CreateArtifactRequest
+	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
+	v,err:=h.service.AddArtifactVersion(c,c.Param("id"),in);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusCreated,v)
+}
+func (h *CollaborationHandler) listArtifactEvidence(c *gin.Context) {
+	items,err:=h.service.ListArtifactEvidence(c,c.Param("id"));if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,gin.H{"items":items})
+}
+func (h *CollaborationHandler) addArtifactEvidence(c *gin.Context) {
+	var in collaboration.AddArtifactEvidenceRequest
+	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
+	item,err:=h.service.AddArtifactEvidence(c,c.Param("id"),in);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusCreated,item)
+}
+func (h *CollaborationHandler) verifyArtifact(c *gin.Context) {
+	var in struct{Version int `json:"version"`;Policy collaboration.ArtifactVerificationPolicy `json:"policy"`}
+	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
+	result,err:=h.service.VerifyArtifact(c,c.Param("id"),in.Version,in.Policy);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,result)
 }

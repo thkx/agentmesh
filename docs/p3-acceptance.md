@@ -86,3 +86,21 @@ Human result review persists reviewer identity, decision note and review time, p
 
 
 A failed Assignment with no durable result may be retried in place within its retry budget. Once a result exists (including a human-rejected result), the same Assignment cannot be reused because its result receipt is immutable; recovery must create a new Assignment for another eligible Agent. Blocked Tasks can therefore be reassigned, and parent progress evaluates the latest result delivered to the parent Agent for each child rather than treating historical rejected attempts as the current outcome.
+
+### P3-3 Artifact, Evidence and Verification foundation
+
+Artifacts are Workspace-scoped deliverables linked optionally to a source Task and creator Agent. The initial local-first storage implementation keeps bounded content in SQLite (maximum 3 MiB per version, aligned with the HTTP request limit); each version stores a SHA-256 digest and immutable metadata. New versions never overwrite prior versions. A later storage adapter may move bytes to a content-addressed filesystem/blob backend without changing the Artifact domain contract.
+
+Evidence is attached to one exact Artifact Version and is append-only. Supported evidence kinds are `test`, `build`, `diff`, `source_reference`, `tool_log`, `metric`, and `manual`. A supplied content digest must match the referenced Artifact Version. Evidence statements and source references are claims/provenance, not proof by themselves.
+
+Verification is deterministic and policy-driven: required evidence kinds are checked against records attached to the exact version, and the stored content digest is recomputed. Outcomes are `passed`, `needs_evidence`, or `failed`. A `passed` result means only that the configured deterministic policy passed; it does not mean a human accepted the deliverable or that an arbitrary claim in a source reference is true. Model review is not counted as objective evidence.
+
+HTTP endpoints:
+- `POST /api/v1/collaboration/artifacts`
+- `GET /api/v1/collaboration/artifacts/:id`
+- `GET /api/v1/collaboration/artifacts/:id/versions/:version`
+- `POST /api/v1/collaboration/artifacts/:id/versions`
+- `GET|POST /api/v1/collaboration/artifacts/:id/evidence`
+- `POST /api/v1/collaboration/artifacts/:id/verify`
+
+Run `bash scripts/verify-p3.sh` to validate formatting, build, vet, migrations and race tests. The first implementation deliberately does not claim external blob storage, artifact review UI, signature verification, or semantic truth validation.
