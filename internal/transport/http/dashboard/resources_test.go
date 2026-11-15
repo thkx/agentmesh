@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -50,5 +51,30 @@ func TestDashboardResourcePagesUseExistingRegistries(t *testing.T) {
 		if strings.Contains(rec.Body.String(), "secret-value") {
 			t.Fatalf("%s leaked a credential", tc.path)
 		}
+	}
+}
+
+type failingCredentials struct{}
+func (failingCredentials) Set(context.Context, domainprovider.ID, domaincredential.Secret) error { return nil }
+func (failingCredentials) Delete(context.Context, domainprovider.ID) error { return nil }
+func (failingCredentials) Status(context.Context, domainprovider.ID) (domaincredential.Record, error) {
+	return domaincredential.Record{}, errors.New("secret-value must never be rendered")
+}
+
+func TestDashboardEscapesProviderNamesAndRedactsCredentialErrors(t *testing.T) {
+	providers := domainprovider.NewProviderRegistry()
+	name := "<script>alert(1)</script>"
+	if err := providers.Register(domainprovider.Provider{ID:"safe-provider", Name:name, Type:domainprovider.TypeOpenAI, Kind:domainprovider.KindCloud, Enabled:true}); err != nil { t.Fatal(err) }
+	r := gin.New()
+	New(Dependencies{Providers:providers, Credentials:failingCredentials{}}).RegisterRoutes(r)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/providers", nil))
+	body := rec.Body.String()
+	if rec.Code != http.StatusOK { t.Fatalf("status=%d body=%s", rec.Code, body) }
+	if strings.Contains(body, name) || !strings.Contains(body, "&lt;script&gt;") {
+		t.Fatalf("provider name was not HTML-escaped: %s", body)
+	}
+	if strings.Contains(body, "secret-value") {
+		t.Fatalf("credential error leaked into HTML: %s", body)
 	}
 }
