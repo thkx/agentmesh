@@ -663,7 +663,7 @@ func (h *Handler) runAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agents == nil {
+	if h.agentCatalog == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
@@ -712,7 +712,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agents == nil {
+	if h.agentCatalog == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
@@ -762,7 +762,7 @@ func (h *Handler) setAgentEnabled(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agents == nil {
+	if h.agentCatalog == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
@@ -783,7 +783,7 @@ func (h *Handler) deleteAgent(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agents == nil {
+	if h.agentCatalog == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
