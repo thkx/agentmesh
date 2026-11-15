@@ -56,9 +56,9 @@ func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.Gene
 		out.FinishReason = modelgateway.FinishReason(result.Choices[0].FinishReason)
 	}
 	out.Usage = modelgateway.Usage{
-		InputTokens: int64(result.Usage.PromptTokens),
+		InputTokens:  int64(result.Usage.PromptTokens),
 		OutputTokens: int64(result.Usage.CompletionTokens),
-		TotalTokens: int64(result.Usage.TotalTokens),
+		TotalTokens:  int64(result.Usage.TotalTokens),
 	}
 	return out, nil
 }
