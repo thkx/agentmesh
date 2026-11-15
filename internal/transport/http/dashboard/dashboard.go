@@ -20,6 +20,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
+	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
+	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
@@ -37,6 +40,7 @@ type Dependencies struct {
 	Models           *domainprovider.ModelRegistry
 	Credentials      appcredential.Manager
 	AgentDefinitions *agentcatalog.Service
+	WorkflowEngine *workflowruntime.Engine
 	Catalog *handlers.CatalogHandler
 }
 
@@ -48,6 +52,7 @@ type Handler struct {
 	models       *domainprovider.ModelRegistry
 	credentials  appcredential.Manager
 	agents       *agentcatalog.Service
+	workflowEngine *workflowruntime.Engine
 	workflowRepo *authoring.Repository
 	catalogAPI http.Handler
 	tmpl         *template.Template
@@ -133,6 +138,7 @@ func New(d Dependencies) *Handler {
 		models:      d.Models,
 		credentials: d.Credentials,
 		agents:      d.AgentDefinitions,
+		workflowEngine: d.WorkflowEngine,
 		tmpl:        t,
 	}
 	if d.DB != nil {
@@ -165,7 +171,13 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/models/:id/enabled", h.requireSession(), h.setModelEnabled)
 	g.POST("/models/:id/delete", h.requireSession(), h.deleteModel)
 	g.GET("/agents", h.requireSession(), h.agents)
+	g.POST("/agents", h.requireSession(), h.createAgent)
+	g.POST("/agents/:id/enabled", h.requireSession(), h.setAgentEnabled)
+	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
 	g.GET("/workflows", h.requireSession(), h.workflows)
+	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
+	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
+	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
 	g.POST("/executions/:id/cancel", h.requireSession(), h.cancelExecution)
@@ -412,6 +424,61 @@ func (h *Handler) models(c *gin.Context) {
 		}
 	}
 	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) createAgent(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	temperature, err := strconv.ParseFloat(c.PostForm("temperature"),64)
+	if err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent"); return }
+	maxSteps, err1 := strconv.Atoi(c.PostForm("max_steps"))
+	maxCalls, err2 := strconv.Atoi(c.PostForm("max_tool_calls"))
+	maxTokens, err3 := strconv.Atoi(c.PostForm("max_output_tokens"))
+	timeout, err4 := strconv.Atoi(c.PostForm("timeout_seconds"))
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent"); return }
+	d := domainagent.Definition{ID:c.PostForm("id"),Name:c.PostForm("name"),Description:c.PostForm("description"),SystemPrompt:c.PostForm("system_prompt"),ModelID:c.PostForm("model_id"),Temperature:temperature,MaxSteps:maxSteps,MaxToolCalls:maxCalls,MaxOutputTokens:maxTokens,TimeoutSeconds:timeout,Enabled:true}
+	if err = h.agents.Create(c.Request.Context(),d); err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=agent-saved")
+}
+func (h *Handler) setAgentEnabled(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	d,err:=h.agents.Get(c.Request.Context(),c.Param("id"));if err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent");return}
+	d.Enabled=c.PostForm("enabled")=="true"
+	if err=h.agents.Update(c.Request.Context(),d);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent");return}
+	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=agent-saved")
+}
+func (h *Handler) deleteAgent(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.agents==nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err:=h.agents.Delete(c.Request.Context(),c.Param("id"));err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/agents?error=agent");return}
+	c.Redirect(http.StatusSeeOther,"/dashboard/agents?message=agent-deleted")
+}
+func (h *Handler) createWorkflowTemplate(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.workflowRepo==nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	var definition domainworkflow.Definition
+	if err:=json.Unmarshal([]byte(c.PostForm("definition_json")),&definition);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow");return}
+	if name:=c.PostForm("name");name!=""{definition.Name=name}
+	t:=authoring.Template{ID:definition.ID,Name:definition.Name,Description:c.PostForm("description"),Definition:definition}
+	if err:=h.workflowRepo.SaveTemplate(c.Request.Context(),t);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow");return}
+	c.Redirect(http.StatusSeeOther,"/dashboard/workflows?message=workflow-saved")
+}
+func (h *Handler) applyWorkflowTemplate(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.workflowRepo==nil || h.workflowEngine==nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	t,err:=h.workflowRepo.GetTemplate(c.Request.Context(),c.Param("id"));if err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow");return}
+	workflowID:=c.PostForm("workflow_id");if workflowID==""{workflowID=t.ID}
+	version,err:=strconv.Atoi(c.PostForm("version"));if err!=nil || version<1{version=t.Definition.Version;if version<1{version=1}}
+	definition:=t.Definition;definition.ID=workflowID;definition.Version=version
+	if err=h.workflowEngine.PutDefinition(c.Request.Context(),definition);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow");return}
+	c.Redirect(http.StatusSeeOther,"/dashboard/workflows?message=workflow-applied")
+}
+func (h *Handler) deleteWorkflowTemplate(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.workflowRepo==nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err:=h.workflowRepo.DeleteTemplate(c.Request.Context(),c.Param("id"));err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/workflows?error=workflow");return}
+	c.Redirect(http.StatusSeeOther,"/dashboard/workflows?message=workflow-deleted")
 }
 
 func (h *Handler) agents(c *gin.Context) {
