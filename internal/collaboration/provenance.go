@@ -30,9 +30,9 @@ type ArtifactProvenanceEvidence struct {
 }
 
 type ArtifactProvenance struct {
-	ArtifactID string                        `json:"artifact_id"`
-	Versions   []ArtifactProvenanceVersion   `json:"versions"`
-	Evidence   []ArtifactProvenanceEvidence  `json:"evidence"`
+	ArtifactID string                       `json:"artifact_id"`
+	Versions   []ArtifactProvenanceVersion  `json:"versions"`
+	Evidence   []ArtifactProvenanceEvidence `json:"evidence"`
 }
 
 type BindArtifactVersionAttemptRequest struct {
