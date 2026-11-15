@@ -1,6 +1,6 @@
 # P4 — Unified Execution Core
 
-> Status: architecture baseline. Implementation starts only after the M42 contract audit. This phase is additive to the accepted P3 baseline.
+> Status: P3 accepted; Part 1 (M42–M44) passed the user's Go 1.27.3 verification; Part 2 (M45–M46) implementation is committed and awaiting verification. This phase is additive to the accepted P3 baseline.
 
 P4 turns the existing Execution/Attempt management layer into the durable semantic core shared by Agent, Coding, Workflow and CLI execution. It does not create another scheduler or generic job queue.
 
@@ -106,7 +106,7 @@ The P4 branch contains the following additive implementation:
 
 M43/M44 implementation tests are included for event ordering/pagination, append-only ledger behavior, provenance binding, mismatch rejection and provenance reads.
 
-**Verification status:** code and tests have been committed to the P4 branch. Run `bash scripts/verify-p4-part1.sh` from the repository root. No local Go command or CI result has yet been observed for these commits; do not treat this record as a passing build/race/acceptance result.
+**Verification status:** the user ran `bash scripts/verify-p4-part1.sh` on Go 1.27.3 and reported successful gofmt, build, vet and full `go test -race ./...`; the script ended with `P4 Part 1 verification passed.` This is a local verification result, not a CI result.
 
 ### Part 1 migration correction
 
@@ -114,3 +114,16 @@ M43/M44 implementation tests are included for event ordering/pagination, append-
 - A regression test proves that the provenance bind succeeds while content and metadata updates remain rejected.
 
 **Verification status remains pending:** this environment cannot execute the repository's Go toolchain or SQLite migration suite. Run `bash scripts/verify-p4-part1.sh` on the target Go 1.27.3 environment before treating Part 1 as accepted.
+
+## 8. Part 2 implementation record (M45–M46)
+
+The implementation details and recovery matrix are recorded in [P4 Part 2 Implementation](p4-part2-implementation.md).
+
+- Migration `000043_execution_lifecycle_enforcement` adds database-level Execution transition guards, terminal Attempt immutability, immutable accepted Execution identity/input, and an append-only `execution_control_events` stream.
+- Domain `CanTransition` now rejects no-op transitions and Running-to-Queued regression. A retry must be represented by a distinct Attempt, not by resetting the Execution lifecycle.
+- Cancellation intent is persisted before calling an adapter. Adapter acceptance is not treated as a Canceled outcome; the final status still comes from runtime observation.
+- Ambiguous Submit errors and failed reconciliation observations are moved to `needs_reconciliation` with a durable reason instead of being mislabeled Failed or blindly replayed.
+- Queued recovery may repeat Submit only under the Adapter contract that the stable Task/Execution identity is idempotent. Running executions are observed, never resubmitted.
+- SQLite integration tests exercise the migration, idempotent cancellation intent, terminal-state protection and immutable accepted input.
+
+**Verification status:** implementation is committed. Run `bash scripts/verify-p4-part2.sh` on Go 1.27.3; no Part 2 build, vet or race result has yet been observed.
