@@ -154,22 +154,30 @@ func (h *CollaborationHandler) createAgent(c *gin.Context) {
 }
 func (h *CollaborationHandler) enableAgent(c *gin.Context) {
 	agent, err := h.service.EnableAgent(c, c.Param("id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err); return
+	}
 	c.JSON(http.StatusOK, agent)
 }
 func (h *CollaborationHandler) disableAgent(c *gin.Context) {
 	agent, err := h.service.DisableAgent(c, c.Param("id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err); return
+	}
 	c.JSON(http.StatusOK, agent)
 }
 func (h *CollaborationHandler) deleteAgent(c *gin.Context) {
 	agent, err := h.service.DeleteAgent(c, c.Param("id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err); return
+	}
 	c.JSON(http.StatusOK, agent)
 }
 func (h *CollaborationHandler) recoverAgent(c *gin.Context) {
 	agent, err := h.service.RecoverAgent(c, c.Param("id"))
-	if err != nil { h.fail(c, err); return }
+	if err != nil {
+		h.fail(c, err); return
+	}
 	c.JSON(http.StatusOK, agent)
 }
 func (h *CollaborationHandler) getAgent(c *gin.Context) {
