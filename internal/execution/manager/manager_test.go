@@ -621,3 +621,33 @@ func TestGetClosesCompletedAttemptWhileExecutionWaitsForRetry(t *testing.T) {
 		t.Fatalf("retry attempt was not closed independently: %+v", updated)
 	}
 }
+
+
+func TestGetDoesNotInventAttemptForAlreadyTerminalExecution(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "terminal-without-attempt", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "terminal-task", Status: dom.LifecycleSucceeded,
+		Input: json.RawMessage(`{"id":"terminal-task"}`), CreatedAt: now, UpdatedAt: now,
+		Result: json.RawMessage(`{"ok":true}`),
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleSucceeded, Result: entity.Result}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attempts) != 0 || len(store.attempts) != 0 {
+		t.Fatalf("already-terminal execution gained a synthetic attempt: %+v", got.Attempts)
+	}
+}
