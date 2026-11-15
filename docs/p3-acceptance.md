@@ -134,3 +134,6 @@ A new, idempotently stored `rejected` Agent assessment moves its Task to `blocke
 
 
 Artifact rejection is also a rework boundary: rejecting a submitted Artifact linked to a source Task moves that Task to `blocked` and writes a `task.artifact_rejected` Outbox event in the same transaction as the immutable review record. The Task can then be assigned to another Agent without altering the rejected Artifact Version or its review history. An idempotent review replay does not block a later reassignment again.
+
+
+Decision policy history is queryable per Agent Identity through `GET /api/v1/collaboration/agents/:id/decision-audit`. The endpoint returns bounded, newest-first audit metadata and does not expose approval secrets or mutable state.

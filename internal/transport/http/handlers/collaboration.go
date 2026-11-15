@@ -67,6 +67,7 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/assignments/:id/fail", h.failAssignment)
 	g.POST("/assignments/:id/retry", h.retryAssignment)
 	g.POST("/decisions/evaluate", h.evaluateDecision)
+	g.GET("/agents/:id/decision-audit", h.decisionAudit)
 	g.GET("/workspaces/:id/approvals", h.approvals)
 	g.POST("/approvals/:id/resolve", h.resolveApproval)
 	g.GET("/outbox", h.outbox)
@@ -398,6 +399,16 @@ func (h *CollaborationHandler) renew(c *gin.Context) {
 		return
 	}
 	c.JSON(200, v)
+}
+
+func (h *CollaborationHandler) decisionAudit(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	items, err := h.service.ListDecisionAudit(c, c.Param("id"), limit)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
 func (h *CollaborationHandler) evaluateDecision(c *gin.Context) {
