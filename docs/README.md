@@ -12,6 +12,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |
 | [P4 Unified Execution Core](p4-unified-execution-core.md) | Cross-runtime Task, Execution, Attempt, Event, Evidence, Artifact, lifecycle and recovery contract |
 | [P4 M42 Audit](p4-m42-audit.md) | Source-level mapping of existing P2/P3 contracts and M43/M44 implementation gaps |
+| [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |
 
 ## Architecture and implementation history
 
@@ -57,3 +58,9 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 - P3 collaboration contract: [p3-collaboration.md](p3-collaboration.md)
 - Verification entry point: bash scripts/verify-p3.sh
 - Database migrations: 000024_collaboration_core and 000025_collaboration_governance
+
+## P4 Part 2
+
+- Implementation record: [p4-part2-implementation.md](p4-part2-implementation.md)
+- Verification entry point: `bash scripts/verify-p4-part2.sh`
+- Migration: `internal/platform/database/migrations/000043_execution_lifecycle_enforcement.*.sql`
