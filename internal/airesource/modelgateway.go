@@ -121,8 +121,8 @@ func (r *ModelGatewayRouter) Stream(ctx context.Context, req modelgateway.Genera
 	return out, nil
 }
 
-// SupportsNativeToolCalling reports whether every currently eligible credential
-// for this model uses the OpenAI-compatible protocol supported by the tool bridge.
+// SupportsNativeToolCalling reports whether the eligible pool contains at least one
+// OpenAI-compatible credential. Router.Generate filters to compatible candidates.
 func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, modelKey string) (bool, error) {
 	if r == nil || r.service == nil || r.router == nil {
 		return false, errors.New("dynamic model gateway router is not initialized")
