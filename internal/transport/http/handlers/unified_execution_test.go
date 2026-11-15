@@ -140,3 +140,28 @@ func TestUnifiedExecutionViewsReturnNotFound(t *testing.T) {
 		}
 	}
 }
+
+func TestUnifiedExecutionDetailIsRuntimeNeutral(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := unifiedExecutionDB(t)
+	for _, runtime := range []string{"coding", "workflow", "cli"} {
+		if _, err := db.Exec(`INSERT INTO executions
+			(id,kind,runtime,status,error_text,created_at,updated_at)
+			VALUES(?,?,?,'queued','',100,100)`, "exec-"+runtime, runtime, runtime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := gin.New()
+	NewUnifiedExecutionHandler(db).RegisterRoutes(router.Group(""))
+	for _, runtime := range []string{"agent", "coding", "workflow", "cli"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet,
+			"/managed-executions/exec-"+runtime+"/detail", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s detail status=%d body=%s", runtime, recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), `"runtime":"`+runtime+`"`) {
+			t.Fatalf("%s detail returned the wrong runtime: %s", runtime, recorder.Body.String())
+		}
+	}
+}
