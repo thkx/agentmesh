@@ -49,7 +49,7 @@ type executionRow struct {
 
 type executionDetail struct {
 	ID, Kind, Runtime, Status, TaskID string
-	CreatedAt, UpdatedAt                    string
+	CreatedAt, UpdatedAt              string
 }
 
 func New(d Dependencies) *Handler {
