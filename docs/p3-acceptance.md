@@ -68,3 +68,8 @@ Assigned Agent wakeups assemble a bounded snapshot of recent messages from chann
 ### Durable execution result handoff
 
 A successful Agent execution now completes its Assignment and writes a `task.completed` Outbox event in the same SQLite transaction. The event includes the Task ID, Assignment ID, Execution ID, and the Runtime result payload. The Outbox is the durable boundary for subsequent result delivery/materialization; the Wakeup worker does not rely on an in-memory callback after execution. The integration test verifies that the execution result is present in the persisted completion event.
+
+
+### Durable Agent result receipt
+
+A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker and materialized into agent_task_results. The ledger preserves the originating Workspace, Task, Assignment, Execution, recipient Agent and raw JSON result. A unique (assignment_id, recipient_agent_id) constraint makes delivery idempotent across worker crashes and retries. The recipient can retrieve its newest results through the collaboration service's ListTaskResults method. This is durable result receipt, not yet an LLM-driven follow-up decision or automatic parent-task completion.
