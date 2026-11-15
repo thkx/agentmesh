@@ -24,8 +24,7 @@ The Wakeup Worker consumes Inbox items with fenced leases. It does not invoke an
 - task.assigned -> evaluate the Workspace Decision Gate for claim; if allowed, claim the Assignment, construct a validated Agent Runtime task from the bound definition, and submit it through P2 Execution Manager.
 - In directed mode, a claim requiring approval is held. approval.approved rechecks the current Decision Gate and resumes the referenced assignment only when the persisted approval is still approved.
 - approval.rejected -> reject the assignment and block its task.
-- task.completed -> persist the result receipt and evaluate it with the receiving Agent's pinned model in Hybrid/Autonomous mode; Directed mode defaults to human review. The evaluator must cite supplied evidence IDs, and acceptance requires a passed deterministic Artifact verification.
-- approval.rejected -> reject the assignment and block its task.
+- task.completed -> persist the result receipt and evaluate it with the receiving Agent's pinned model in Hybrid/Autonomous mode; Directed mode requires human review without invoking the model. The evaluator must cite supplied evidence IDs, and acceptance requires a passed deterministic Artifact verification.
 - Other event types are safely acknowledged as non-executable notifications.
 
 Execution idempotency is keyed by Assignment ID. If a process crashes after submitting but before acknowledging Inbox, the replay reuses the same Execution instead of submitting duplicate work. The worker renews both Inbox and Assignment leases while observing the Execution. On success it completes the Assignment; on terminal failure it rejects the Assignment and records a task failure event.
