@@ -122,7 +122,7 @@ type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement string }
 type eventView struct {
 	Stream, Type, Actor, Source, Payload, OccurredAt string
 	Sequence                                         int64
-	OccurredNS                                      int64
+	OccurredNS                                       int64
 }
 
 type executionRow struct {
@@ -980,7 +980,9 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 	}
 	sort.Slice(data.Events, func(i, j int) bool {
 		if data.Events[i].OccurredNS == data.Events[j].OccurredNS {
-			if data.Events[i].Stream == data.Events[j].Stream { return data.Events[i].Sequence > data.Events[j].Sequence }
+			if data.Events[i].Stream == data.Events[j].Stream {
+				return data.Events[i].Sequence > data.Events[j].Sequence
+			}
 			return data.Events[i].Stream > data.Events[j].Stream
 		}
 		return data.Events[i].OccurredNS > data.Events[j].OccurredNS
