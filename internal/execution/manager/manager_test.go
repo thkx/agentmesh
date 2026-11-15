@@ -580,3 +580,44 @@ func TestGetTimeoutFinalizesAttemptWithTimedOutStatus(t *testing.T) {
 		t.Fatalf("timeout was not projected consistently: %+v", updated)
 	}
 }
+
+
+func TestGetClosesCompletedAttemptWhileExecutionWaitsForRetry(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "retry-projection-execution", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "retry-projection-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"retry-projection-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateAttempt(context.Background(), dom.Attempt{
+		ID: entity.ID + "-a-1", ExecutionID: entity.ID, Number: 1, Runtime: dom.RuntimeAgent,
+		Status: dom.AttemptRunning, Input: entity.Input, StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{
+		Status: dom.LifecycleRunning, CompletedAttempt: 1,
+		AttemptOutcome: dom.AttemptFailed, AttemptError: "safe retryable failure",
+		AttemptNotStarted: true,
+	}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := m.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != dom.LifecycleRunning || len(updated.Attempts) != 1 ||
+		updated.Attempts[0].Status != dom.AttemptFailed ||
+		updated.Attempts[0].Error != "safe retryable failure" {
+		t.Fatalf("retry attempt was not closed independently: %+v", updated)
+	}
+}
