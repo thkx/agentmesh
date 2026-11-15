@@ -39,33 +39,33 @@ var htmxJS []byte
 const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
-	DB               *sql.DB
-	APIToken         string
-	ExecutionManager *manager.Manager
-	Providers        *domainprovider.ProviderRegistry
-	Models           *domainprovider.ModelRegistry
-	Credentials      appcredential.Manager
-	AgentDefinitions *agentcatalog.Service
-	WorkflowEngine   *workflowruntime.Engine
+	DB                  *sql.DB
+	APIToken            string
+	ExecutionManager    *manager.Manager
+	Providers           *domainprovider.ProviderRegistry
+	Models              *domainprovider.ModelRegistry
+	Credentials         appcredential.Manager
+	AgentDefinitions    *agentcatalog.Service
+	WorkflowEngine      *workflowruntime.Engine
 	WorkflowMaxAttempts int
-	Catalog          *handlers.CatalogHandler
+	Catalog             *handlers.CatalogHandler
 }
 
 type Handler struct {
-	db             *sql.DB
-	token          string
-	manager        *manager.Manager
-	providers      *domainprovider.ProviderRegistry
-	models         *domainprovider.ModelRegistry
-	credentials    appcredential.Manager
-	agents         *agentcatalog.Service
-	workflowEngine *workflowruntime.Engine
+	db                  *sql.DB
+	token               string
+	manager             *manager.Manager
+	providers           *domainprovider.ProviderRegistry
+	models              *domainprovider.ModelRegistry
+	credentials         appcredential.Manager
+	agents              *agentcatalog.Service
+	workflowEngine      *workflowruntime.Engine
 	workflowMaxAttempts int
-	workflowRepo   *authoring.Repository
-	catalogAPI     http.Handler
-	tmpl           *template.Template
-	loginMu        sync.Mutex
-	loginAttempts  map[string][]time.Time
+	workflowRepo        *authoring.Repository
+	catalogAPI          http.Handler
+	tmpl                *template.Template
+	loginMu             sync.Mutex
+	loginAttempts       map[string][]time.Time
 }
 
 type pageData struct {
@@ -151,17 +151,17 @@ type executionDetail struct {
 func New(d Dependencies) *Handler {
 	t := template.Must(template.New("dashboard").Parse(layoutTemplate + pageTemplate + loginTemplate))
 	h := &Handler{
-		db:             d.DB,
-		token:          d.APIToken,
-		manager:        d.ExecutionManager,
-		providers:      d.Providers,
-		models:         d.Models,
-		credentials:    d.Credentials,
-		agents:         d.AgentDefinitions,
-		workflowEngine: d.WorkflowEngine,
+		db:                  d.DB,
+		token:               d.APIToken,
+		manager:             d.ExecutionManager,
+		providers:           d.Providers,
+		models:              d.Models,
+		credentials:         d.Credentials,
+		agents:              d.AgentDefinitions,
+		workflowEngine:      d.WorkflowEngine,
 		workflowMaxAttempts: d.WorkflowMaxAttempts,
-		tmpl:           t,
-		loginAttempts:  make(map[string][]time.Time),
+		tmpl:                t,
+		loginAttempts:       make(map[string][]time.Time),
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -350,7 +350,9 @@ func (h *Handler) overview(c *gin.Context) {
 		Counts: map[string]int64{}, Readiness: "Database unavailable",
 	}
 	if h.db != nil {
-		if err := h.db.PingContext(c.Request.Context()); err == nil { data.Readiness = "Database ready" }
+		if err := h.db.PingContext(c.Request.Context()); err == nil {
+			data.Readiness = "Database ready"
+		}
 		queries := map[string]string{
 			"executions": "SELECT COUNT(*) FROM executions",
 			"agents":     "SELECT COUNT(*) FROM agent_definitions",
@@ -678,7 +680,9 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 		}
 	}
 	maxAttempts := h.workflowMaxAttempts
-	if maxAttempts < 1 { maxAttempts = 3 }
+	if maxAttempts < 1 {
+		maxAttempts = 3
+	}
 	run, err := h.workflowEngine.StartQueued(c.Request.Context(), c.Param("id"), "", input, maxAttempts)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-run")
