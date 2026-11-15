@@ -124,7 +124,7 @@ type ToolFunction struct {
 
 type ToolCall struct {
 	ID       string           `json:"id"`
-	Type     string            `json:"type,omitempty"`
+	Type     string           `json:"type,omitempty"`
 	Function ToolCallFunction `json:"function"`
 }
 
