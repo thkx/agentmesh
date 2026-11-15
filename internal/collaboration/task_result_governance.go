@@ -119,7 +119,7 @@ func (s *Service) GetTaskChildProgress(ctx context.Context, parentTaskID string)
 	return p, nil
 }
 
-func (s *Service) FailAssignment(ctx context.Context, id, owner string, version int64, reason string, retryable bool) error {
+func (s *Service) FailAssignmentWithRetry(ctx context.Context, id, owner string, version int64, reason string, retryable bool) error {
 	id, owner, reason = strings.TrimSpace(id), strings.TrimSpace(owner), strings.TrimSpace(reason)
 	if id == "" || owner == "" || version < 1 || len(reason) > 4000 {
 		return ErrInvalid

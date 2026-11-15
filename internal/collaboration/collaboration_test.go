@@ -817,7 +817,7 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = s.FailAssignment(ctx, claimed.ID, "runner", claimed.ClaimVersion, "temporary", true); err != nil {
+	if err = s.FailAssignmentWithRetry(ctx, claimed.ID, "runner", claimed.ClaimVersion, "temporary", true); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.RetryAssignment(ctx, as.ID, "operator")
@@ -832,7 +832,7 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = s.FailAssignment(ctx, claimed.ID, "runner", claimed.ClaimVersion, "again", true); err != nil {
+		if err = s.FailAssignmentWithRetry(ctx, claimed.ID, "runner", claimed.ClaimVersion, "again", true); err != nil {
 			t.Fatal(err)
 		}
 		if i < 2 {

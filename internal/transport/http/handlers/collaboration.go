@@ -636,7 +636,7 @@ func (h *CollaborationHandler) failAssignment(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
 		return
 	}
-	if err := h.service.FailAssignment(c, c.Param("id"), in.Owner, in.Version, in.Reason, in.Retryable); err != nil {
+	if err := h.service.FailAssignmentWithRetry(c, c.Param("id"), in.Owner, in.Version, in.Reason, in.Retryable); err != nil {
 		h.fail(c, err)
 		return
 	}
