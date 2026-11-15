@@ -512,7 +512,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize plan execution repository: %w", err)
 	}
 	profileValidator := planworkflow.ProfileValidatorFuncs{
-		ModelExists:     func(id string) bool { _, ok := models.Get(id); return ok },
+		ModelExists: func(id string) bool {
+			if _, ok := models.Get(id); ok { return true }
+			_, lookupErr := aiResources.GetModelByID(context.Background(), id)
+			return lookupErr == nil
+		},
 		WorkspaceExists: func(id string) bool { _, resolveErr := workspaceManager.Resolve(id); return resolveErr == nil },
 	}
 	planExecutionService, err := planworkflow.NewService(goalService, planningService, planExecutionRepo, workflowEngine, profileValidator, cfg.Scheduler.MaxAttempts)
