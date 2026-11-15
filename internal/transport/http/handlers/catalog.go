@@ -678,9 +678,13 @@ func writeGatewayError(c *gin.Context, err error) {
 		status = 400
 		code = "invalid_request"
 	}
-	if errors.Is(err, modelgateway.ErrStreamingDisabled) {
+	if errors.Is(err, modelgateway.ErrStreamingDisabled) || errors.Is(err, modelgateway.ErrDynamicStreamingUnsupported) {
 		status = 409
 		code = "streaming_unsupported"
+	}
+	if errors.Is(err, modelgateway.ErrNativeToolCallingUnsupported) {
+		status = 409
+		code = "native_tool_calling_unsupported"
 	}
 	if errors.Is(err, provider.ErrModelDisabled) || errors.Is(err, provider.ErrProviderDisabled) {
 		status = 409
