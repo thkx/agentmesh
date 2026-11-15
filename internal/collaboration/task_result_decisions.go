@@ -150,7 +150,12 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = s.clock().UTC()
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO agent_task_result_assessments
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	inserted, err := tx.ExecContext(ctx, `INSERT INTO agent_task_result_assessments
 		(id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(result_id,recipient_agent_id) DO NOTHING`,
 		item.ID, item.ResultID, item.WorkspaceID, item.TaskID, item.AssignmentID, item.RecipientAgentID,
@@ -158,15 +163,37 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 	if err != nil {
 		return err
 	}
-	stored, err := s.GetTaskResultAssessment(ctx, item.RecipientAgentID, item.AssignmentID)
+	insertedCount, err := inserted.RowsAffected()
 	if err != nil {
 		return err
 	}
-	if stored.Outcome != item.Outcome || stored.Reason != item.Reason ||
-		stored.Confidence != item.Confidence || string(stored.Evidence) != string(item.Evidence) {
+	var storedOutcome, storedReason, storedEvidence string
+	var storedConfidence float64
+	err = tx.QueryRowContext(ctx, `SELECT outcome,reason,confidence,evidence_json
+		FROM agent_task_result_assessments WHERE result_id=? AND recipient_agent_id=?`,
+		item.ResultID, item.RecipientAgentID).Scan(&storedOutcome, &storedReason, &storedConfidence, &storedEvidence)
+	if err != nil {
+		return err
+	}
+	if storedOutcome != item.Outcome || storedReason != item.Reason ||
+		storedConfidence != item.Confidence || storedEvidence != string(item.Evidence) {
 		return ErrConflict
 	}
-	return nil
+	// A grounded rejection blocks the Task so it can be reassigned to another
+	// Agent. The immutable result and assessment remain attached to the old attempt.
+	if insertedCount == 1 && item.Outcome == "rejected" {
+		now := s.clock().UTC()
+		if _, err = tx.ExecContext(ctx, `UPDATE collaboration_tasks SET status='blocked',updated_at=?
+			WHERE id=? AND status NOT IN ('canceled','blocked')`, now.UnixMilli(), item.TaskID); err != nil {
+			return err
+		}
+		if err = s.writeEventTx(ctx, tx, item.WorkspaceID, "task", item.TaskID, "task.result_rejected",
+			map[string]any{"task_id": item.TaskID, "assignment_id": item.AssignmentID,
+				"recipient_agent_id": item.RecipientAgentID, "reason": item.Reason}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetTaskResultAssessment returns the persisted assessment for an Agent's result.
