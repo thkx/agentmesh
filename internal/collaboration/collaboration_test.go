@@ -157,6 +157,16 @@ func TestOutboxPoisonEventDoesNotBlockAndEventuallyDeadLetters(t *testing.T) {
  if !published.Valid||!strings.HasPrefix(lastError,"dead-letter:")||attempts!=maxOutboxTestRetries{t.Fatalf("poison event was not dead-lettered: published=%v error=%q attempts=%d",published,lastError,attempts)}
  deadLetters,err:=s.ListDeadLetters(ctx,20);if err!=nil{t.Fatal(err)}
  if len(deadLetters)!=1||deadLetters[0].ID!="poison-event"||deadLetters[0].Attempts!=maxOutboxTestRetries{t.Fatalf("dead-letter inspection did not expose poison event: %+v",deadLetters)}
+ if _,err=db.DB.ExecContext(ctx,"UPDATE collaboration_outbox SET payload_json=? WHERE id='poison-event'",`{"agent_id":""+a.ID+""}`);err!=nil{t.Fatal(err)}
+ if err=s.RequeueDeadLetter(ctx,"poison-event");err!=nil{t.Fatal(err)}
+ if err=dispatcher.DispatchOnce(ctx,100);err!=nil{t.Fatal(err)}
+ deadLetters,err=s.ListDeadLetters(ctx,20);if err!=nil{t.Fatal(err)}
+ if len(deadLetters)!=0{t.Fatalf("requeued event should leave dead-letter queue: %+v",deadLetters)}
+ var published sql.NullInt64
+ var lastError string
+ if err=db.DB.QueryRowContext(ctx,"SELECT published_at,last_error FROM collaboration_outbox WHERE id='poison-event'").Scan(&published,&lastError);err!=nil{t.Fatal(err)}
+ if !published.Valid||lastError!=""{t.Fatalf("requeued event was not successfully published: published=%v error=%q",published,lastError)}
+
 
 }
 

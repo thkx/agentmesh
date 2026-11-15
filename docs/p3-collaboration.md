@@ -78,3 +78,6 @@ Delegation approval is bound to the exact handoff idempotency key, parent Task a
 
 
 Dead-lettered Outbox records remain queryable through `GET /api/v1/collaboration/outbox/dead-letters`, including attempts and the terminal error. They are not mixed into the pending Outbox feed.
+
+
+Operators can retry a repaired dead-letter record with `POST /api/v1/collaboration/outbox/dead-letters/:id/requeue`. Requeue resets its retry counter and due time; delivery remains idempotent because Inbox receipts are unique by Agent and Event ID.

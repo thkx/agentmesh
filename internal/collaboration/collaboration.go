@@ -228,6 +228,17 @@ func(s *Service) listOutbox(ctx context.Context,query string,limit int)([]Event,
  }
  return out,rows.Err()
 }
+func(s *Service) RequeueDeadLetter(ctx context.Context,id string)error{
+ id=strings.TrimSpace(id);if id==""{return ErrInvalid}
+ res,err:=s.db.ExecContext(ctx,`UPDATE collaboration_outbox SET published_at=NULL,next_attempt_at=0,attempts=0,last_error=''
+  WHERE id=? AND published_at IS NOT NULL AND last_error LIKE 'dead-letter:%'`,id)
+ if err!=nil{return err}
+ affected,err:=res.RowsAffected();if err!=nil{return err};if affected==1{return nil}
+ var count int
+ if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_outbox WHERE id=?",id).Scan(&count);err!=nil{return err}
+ if count==0{return ErrNotFound}
+ return ErrConflict
+}
 func(s *Service) MarkPublished(ctx context.Context,id string)error{_,e:=s.db.ExecContext(ctx,"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error='' WHERE id=? AND published_at IS NULL",s.clock().UTC().UnixMilli(),id);return e}
 func(s *Service) ReceiveEvent(ctx context.Context,agentID string,e Event)(bool,error){if _,err:=s.GetAgent(ctx,agentID);err!=nil{return false,err};if e.ID==""||e.Type==""||!json.Valid(e.Payload){return false,ErrInvalid};res,err:=s.db.ExecContext(ctx,"INSERT OR IGNORE INTO collaboration_inbox(id,agent_id,event_id,event_type,payload_json,status,received_at) VALUES(?,?,?,?,?,'pending',?)",e.ID+":"+agentID,agentID,e.ID,e.Type,string(e.Payload),s.clock().UTC().UnixMilli());if err!=nil{return false,err};n,_:=res.RowsAffected();return n==1,nil}
 func null(v string)any{if v==""{return nil};return v}
