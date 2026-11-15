@@ -89,7 +89,7 @@ A failed Assignment with no durable result may be retried in place within its re
 
 ### P3-3 Artifact, Evidence and Verification foundation
 
-Artifacts are Workspace-scoped deliverables linked optionally to a source Task and creator Agent. The initial local-first storage implementation keeps bounded content in SQLite (maximum 3 MiB per version, aligned with the HTTP request limit); each version stores a SHA-256 digest and immutable metadata. New versions never overwrite prior versions. A later storage adapter may move bytes to a content-addressed filesystem/blob backend without changing the Artifact domain contract.
+Artifacts are Workspace-scoped deliverables linked optionally to a source Task and creator Agent. The initial local-first storage implementation keeps bounded content in SQLite (maximum 2 MiB per version, aligned with the HTTP request limit); each version stores a SHA-256 digest and immutable metadata. New versions never overwrite prior versions. A later storage adapter may move bytes to a content-addressed filesystem/blob backend without changing the Artifact domain contract.
 
 Evidence is attached to one exact Artifact Version and is append-only. Supported evidence kinds are `test`, `build`, `diff`, `source_reference`, `tool_log`, `metric`, and `manual`. A supplied content digest must match the referenced Artifact Version. Evidence statements and source references are claims/provenance, not proof by themselves.
 

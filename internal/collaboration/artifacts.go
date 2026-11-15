@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-const MaxArtifactBytes = 3 << 20
+const MaxArtifactBytes = 2 << 20
 
 type Artifact struct {
 	ID             string    `json:"id"`
