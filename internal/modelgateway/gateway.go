@@ -98,9 +98,6 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 			return nil, fmt.Errorf("resolve dynamic credential route: %w", supportErr)
 		}
 		if supported {
-			if len(req.Tools) > 0 {
-				return nil, ErrNativeToolCallingUnsupported
-			}
 			resp, dynamicErr := g.dynamicRouter.Generate(ctx, resolvedReq)
 			if dynamicErr != nil {
 				return nil, NormalizeError(model.ProviderID, dynamicErr)
@@ -234,8 +231,16 @@ func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string)
 	}
 	if g.dynamicRouter != nil {
 		supported, supportErr := g.dynamicRouter.Supports(ctx, resolvedReq.ProviderModel)
-		if supportErr != nil || supported {
+		if supportErr != nil {
 			return false
+		}
+		if supported {
+			capability, ok := g.dynamicRouter.(interface {
+				SupportsNativeToolCalling(context.Context, string) (bool, error)
+			})
+			if !ok { return false }
+			enabled, capabilityErr := capability.SupportsNativeToolCalling(ctx, resolvedReq.ProviderModel)
+			return capabilityErr == nil && enabled
 		}
 	}
 	if adapter == nil {
