@@ -1009,10 +1009,45 @@ func (h *Handler) cancelExecution(c *gin.Context) {
 
 func (h *Handler) render(c *gin.Context, data pageData, status int) {
 	if c.Query("error") != "" {
-		data.Error = "The requested operation could not be completed."
+		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
 	}
-	if c.Query("message") == "cancel-requested" {
+	switch c.Query("message") {
+	case "cancel-requested":
 		data.Message = "Cancellation request recorded; the runtime outcome is not yet confirmed."
+	case "credential-saved":
+		data.Message = "Credential saved. The secret is write-only and will not be displayed."
+	case "credential-deleted":
+		data.Message = "Stored credential deleted."
+	case "provider-saved":
+		data.Message = "Provider configuration saved."
+	case "provider-deleted":
+		data.Message = "Provider deleted."
+	case "provider-tested":
+		data.Message = "Provider connectivity test completed successfully."
+	case "model-saved":
+		data.Message = "Model configuration saved."
+	case "model-deleted":
+		data.Message = "Model deleted."
+	case "agent-saved":
+		data.Message = "Agent definition saved."
+	case "agent-deleted":
+		data.Message = "Agent definition deleted."
+	case "agent-run-succeeded":
+		data.Message = "Agent run completed successfully."
+	case "agent-run-failed":
+		data.Message = "Agent run failed. Review the Agent run history for details."
+	case "agent-run-canceled":
+		data.Message = "Agent run was canceled."
+	case "agent-run-timed_out":
+		data.Message = "Agent run timed out."
+	case "workflow-saved":
+		data.Message = "Workflow template saved."
+	case "workflow-applied":
+		data.Message = "Workflow template applied to the workflow engine."
+	case "workflow-deleted":
+		data.Message = "Workflow template deleted."
+	case "workflow-run-queued":
+		data.Message = "Workflow run queued."
 	}
 	c.Status(status)
 	if err := h.tmpl.ExecuteTemplate(c.Writer, "layout", data); err != nil {
