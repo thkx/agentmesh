@@ -6,6 +6,7 @@ set -Eeuo pipefail
 #   bash scripts/test-p3.sh
 #   API_BASE_URL=http://127.0.0.1:8080 API_TOKEN=... bash scripts/test-p3.sh
 #   P3_WORKSPACE_ID=... P3_AGENT_ID=... bash scripts/test-p3.sh
+#   P3_SESSION_AGENT_ID=... bash scripts/test-p3.sh  # agent must already have an active session
 #   SKIP_CODE_CHECKS=1 bash scripts/test-p3.sh
 #   SKIP_API_CHECKS=1 bash scripts/test-p3.sh
 #
@@ -168,11 +169,15 @@ if [ "$SKIP_API_CHECKS" != "1" ]; then
         fi
         if [ -n "${P3_AGENT_ID:-}" ]; then
             check_http "Agent detail" "/api/v1/collaboration/agents/$P3_AGENT_ID" "200"
-            check_http "Agent session" "/api/v1/collaboration/agents/$P3_AGENT_ID/session" "200"
-            check_http "Agent transcript" "/api/v1/collaboration/agents/$P3_AGENT_ID/session/transcript" "200"
             check_array "Agent decision audit" "/api/v1/collaboration/agents/$P3_AGENT_ID/decision-audit" '.items'
         else
             warn "P3_AGENT_ID not set; agent-specific checks skipped"
+        fi
+        if [ -n "${P3_SESSION_AGENT_ID:-}" ]; then
+            check_http "Agent active session" "/api/v1/collaboration/agents/$P3_SESSION_AGENT_ID/session" "200"
+            check_array "Agent session transcript" "/api/v1/collaboration/agents/$P3_SESSION_AGENT_ID/session/transcript" '.items'
+        else
+            warn "P3_SESSION_AGENT_ID not set; session/transcript checks skipped (an Agent Identity does not necessarily have an active Session)"
         fi
     fi
 else
