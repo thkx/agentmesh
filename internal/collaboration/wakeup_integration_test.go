@@ -270,6 +270,13 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if !strings.Contains(storedResult, "completed by test runtime") {
 		t.Fatalf("durable recipient result lost runtime output: %s", storedResult)
 	}
+	assessment, err := service.GetTaskResultAssessment(ctx, observer.ID, assignment.ID)
+	if err != nil {
+		t.Fatalf("get durable task result assessment: %v", err)
+	}
+	if assessment.Outcome != "human_review" || assessment.ResultID == "" {
+		t.Fatalf("default result evaluator must preserve conservative human review: %+v", assessment)
+	}
 	select {
 	case submittedExecution := <-submitted:
 		var submittedTask agentdom.Task

@@ -73,3 +73,8 @@ A successful Agent execution now completes its Assignment and writes a `task.com
 ### Durable Agent result receipt
 
 A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker and materialized into agent_task_results. The ledger preserves the originating Workspace, Task, Assignment, Execution, recipient Agent and raw JSON result. A unique (assignment_id, recipient_agent_id) constraint makes delivery idempotent across worker crashes and retries. The recipient can retrieve its newest results through the collaboration service's ListTaskResults method. This is durable result receipt, not yet an LLM-driven follow-up decision or automatic parent-task completion.
+
+
+### Result decision boundary (P3-2)
+
+Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. The built-in conservative evaluator records `human_review`; it does not infer acceptance from a successful Runtime exit or unstructured output. Deployments may inject a policy/model-backed evaluator, whose output is constrained to `accepted`, `rejected`, or `human_review` and retained with its reason, confidence and evidence references. This is an assessment record, not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.

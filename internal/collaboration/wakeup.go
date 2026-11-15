@@ -43,6 +43,7 @@ type WakeupWorker struct {
 	owner       string
 	logger      *slog.Logger
 	memories    MemoryRetriever
+	resultEvaluator TaskResultEvaluator
 }
 
 func NewWakeupWorker(service *Service, definitions *agentcatalog.Service, executions *manager.Manager, workspaces *workspace.Manager, cfg WakeupConfig) (*WakeupWorker, error) {
@@ -73,13 +74,23 @@ func NewWakeupWorker(service *Service, definitions *agentcatalog.Service, execut
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &WakeupWorker{service: service, definitions: definitions, executions: executions, workspaces: workspaces, cfg: cfg, owner: cfg.WorkerID, logger: logger}, nil
+	return &WakeupWorker{service: service, definitions: definitions, executions: executions, workspaces: workspaces, cfg: cfg, owner: cfg.WorkerID, logger: logger, resultEvaluator: ConservativeTaskResultEvaluator{}}, nil
 }
 
 // SetMemoryRetriever enables scoped long-term memory retrieval for assigned tasks.
 // Memory is appended as untrusted reference context and never replaces task instructions.
 func (w *WakeupWorker) SetMemoryRetriever(retriever MemoryRetriever) {
 	w.memories = retriever
+}
+
+// SetTaskResultEvaluator installs a policy/model-backed evaluator for completed work.
+// When omitted, the conservative default requires human review and never auto-accepts.
+func (w *WakeupWorker) SetTaskResultEvaluator(evaluator TaskResultEvaluator) {
+	if evaluator == nil {
+		w.resultEvaluator = ConservativeTaskResultEvaluator{}
+		return
+	}
+	w.resultEvaluator = evaluator
 }
 
 func (w *WakeupWorker) Run(ctx context.Context) error {
@@ -184,7 +195,7 @@ func (w *WakeupWorker) handle(ctx context.Context, lease InboxLease) error {
 			processErr = err
 			break
 		}
-		processErr = w.service.StoreTaskResult(ctx, lease.AgentID, payload.TaskID, payload.AssignmentID, payload.ExecutionID, payload.Result)
+		processErr = w.processTaskResult(ctx, lease.AgentID, payload.TaskID, payload.AssignmentID, payload.ExecutionID, payload.Result)
 	case "approval.approved":
 		var payload struct {
 			ApprovalID string `json:"approval_id"`
