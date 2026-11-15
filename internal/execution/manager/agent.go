@@ -71,12 +71,18 @@ func (a *AgentAdapter) Observe(ctx context.Context, e dom.Entity) (Observation, 
 		// A queued job with execution_started=true is waiting for a safe retry
 		// after a completed model-only failure. Keep the common Execution active
 		// and close the corresponding Attempt instead of regressing to Queued.
-		if job.Attempts > 0 && job.ExecutionStarted && job.LastError != "" {
-			return Observation{
-				Status: dom.LifecycleRunning, CompletedAttempt: job.Attempts,
-				AttemptOutcome: dom.AttemptFailed, AttemptError: job.LastError,
-				AttemptNotStarted: true, Error: job.LastError,
-			}, nil
+		if job.Attempts > 0 && job.LastError != "" {
+			completed := job.Attempts
+			if !job.ExecutionStarted {
+				completed--
+			}
+			if completed > 0 {
+				return Observation{
+					Status: dom.LifecycleRunning, CompletedAttempt: completed,
+					AttemptOutcome: dom.AttemptFailed, AttemptError: job.LastError,
+					AttemptNotStarted: true, Error: job.LastError,
+				}, nil
+			}
 		}
 		return Observation{Status: dom.LifecycleQueued, AttemptNotStarted: true, Error: job.LastError}, nil
 	case scheduler.Running:
