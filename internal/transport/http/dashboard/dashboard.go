@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"html/template"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,7 @@ type Dependencies struct {
 	Credentials      appcredential.Manager
 	AgentDefinitions *agentcatalog.Service
 	WorkflowEngine   *workflowruntime.Engine
+	WorkflowMaxAttempts int
 	Catalog          *handlers.CatalogHandler
 }
 
@@ -59,6 +61,7 @@ type Handler struct {
 	credentials    appcredential.Manager
 	agents         *agentcatalog.Service
 	workflowEngine *workflowruntime.Engine
+	workflowMaxAttempts int
 	workflowRepo   *authoring.Repository
 	catalogAPI     http.Handler
 	tmpl           *template.Template
@@ -156,6 +159,7 @@ func New(d Dependencies) *Handler {
 		credentials:    d.Credentials,
 		agents:         d.AgentDefinitions,
 		workflowEngine: d.WorkflowEngine,
+		workflowMaxAttempts: d.WorkflowMaxAttempts,
 		tmpl:           t,
 		loginAttempts:  make(map[string][]time.Time),
 	}
@@ -616,7 +620,7 @@ func (h *Handler) createAgent(c *gin.Context) {
 		return
 	}
 	temperature, err := strconv.ParseFloat(c.PostForm("temperature"), 64)
-	if err != nil {
+	if err != nil || math.IsNaN(temperature) || math.IsInf(temperature, 0) || temperature < 0 || temperature > 2 {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 		return
 	}
@@ -674,7 +678,9 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 			return
 		}
 	}
-	run, err := h.workflowEngine.StartQueued(c.Request.Context(), c.Param("id"), "", input, 3)
+	maxAttempts := h.workflowMaxAttempts
+	if maxAttempts < 1 { maxAttempts = 3 }
+	run, err := h.workflowEngine.StartQueued(c.Request.Context(), c.Param("id"), "", input, maxAttempts)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-run")
 		return
@@ -710,7 +716,7 @@ func (h *Handler) updateAgent(c *gin.Context) {
 	}
 	if value := c.PostForm("temperature"); value != "" {
 		d.Temperature, err = strconv.ParseFloat(value, 64)
-		if err != nil {
+		if err != nil || math.IsNaN(d.Temperature) || math.IsInf(d.Temperature, 0) || d.Temperature < 0 || d.Temperature > 2 {
 			c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
 			return
 		}
