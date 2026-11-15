@@ -231,6 +231,21 @@ func TestInboxReceiptIsIdempotentPerAgent(t *testing.T) {
 	if err = s.AckInbox(ctx, a.ID, event.ID, "handled"); err != nil { t.Fatal(err) }
 }
 
+func TestDecisionGateRejectsActionsWithoutExecutionContracts(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Decision Contract",Slug:"decision-contract",AutonomyMode:"autonomous"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Agent",Role:"worker"});if err!=nil{t.Fatal(err)}
+ for _,action:=range []string{"execute_workflow","direct_execute"} {
+  if _,err=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:action,ResourceType:"workflow",ResourceID:"workflow-1"});!errors.Is(err,collaboration.ErrInvalid){
+   t.Fatalf("unsupported action %q must not create an orphan approval: %v",action,err)
+  }
+ }
+ var approvals int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_approvals WHERE workspace_id=?",w.ID).Scan(&approvals);err!=nil{t.Fatal(err)}
+ if approvals!=0{t.Fatalf("unsupported actions created %d approvals",approvals)}
+}
+
 func TestDecisionGateRequiresApprovalForPrivilegedActions(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)

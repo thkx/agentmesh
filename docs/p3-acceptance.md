@@ -55,3 +55,6 @@ These boundaries preserve the P3 safety model: only explicitly supported event t
 
 
 Inbox failed events can be inspected with `GET /api/v1/collaboration/inbox/:agent_id?status=failed` and requeued individually with `POST /api/v1/collaboration/inbox/:agent_id/:event_id/requeue` after correcting the underlying cause.
+
+
+The Decision Gate currently exposes executable privileged actions only for Assignment claim and exact-request Handoff delegation. `execute_workflow` and free-form `direct_execute` are rejected until their own durable execution/approval adapters exist; this prevents creating approvals that no worker can safely consume.

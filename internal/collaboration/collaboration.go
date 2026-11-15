@@ -358,14 +358,14 @@ func(s *Service) RenewAssignment(ctx context.Context,id,owner string,version int
 
 func(s *Service) EvaluateDecision(ctx context.Context,req DecisionRequest)(DecisionResult,error){
  agent,err:=s.GetAgent(ctx,req.AgentID);if err!=nil{return DecisionResult{},err}
- allowedAction:=map[string]bool{"ignore":true,"reply":true,"ask_human":true,"claim":true,"delegate":true,"execute_workflow":true,"direct_execute":true}
+ allowedAction:=map[string]bool{"ignore":true,"reply":true,"ask_human":true,"claim":true,"delegate":true}
  if !allowedAction[req.Action]{return DecisionResult{},ErrInvalid}
  workspace,err:=s.GetWorkspace(ctx,agent.WorkspaceID);if err!=nil{return DecisionResult{},err}
  requiresApproval:=false
  switch workspace.AutonomyMode{
- case "directed": requiresApproval=req.Action=="claim"||req.Action=="delegate"||req.Action=="execute_workflow"||req.Action=="direct_execute"
- case "hybrid": requiresApproval=req.Action=="delegate"||req.Action=="execute_workflow"||req.Action=="direct_execute"
- case "autonomous": requiresApproval=req.Action=="direct_execute"
+ case "directed": requiresApproval=req.Action=="claim"||req.Action=="delegate"
+ case "hybrid": requiresApproval=req.Action=="delegate"
+ case "autonomous": requiresApproval=false
  default:return DecisionResult{},ErrInvalid
  }
  if requiresApproval {
