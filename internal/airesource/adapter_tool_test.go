@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
 func TestGeneratePreservesNativeToolCalling(t *testing.T) {
@@ -71,5 +70,4 @@ func TestNormalizeMessagesPreservesAssistantToolCallAndToolResult(t *testing.T) 
 	if messages[0]["role"] != "assistant" || messages[1]["role"] != "tool" || messages[1]["tool_call_id"] != "call_1" {
 		t.Fatalf("tool conversation was not preserved: %+v", messages)
 	}
-	_ = time.Second
 }
