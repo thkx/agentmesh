@@ -75,3 +75,6 @@ A partial unique index enforces one pending approval per Workspace, requester, r
 
 
 Delegation approval is bound to the exact handoff idempotency key, parent Task and recipient. Approving one handoff cannot authorize a different goal or recipient under the same parent Task.
+
+
+Dead-lettered Outbox records remain queryable through `GET /api/v1/collaboration/outbox/dead-letters`, including attempts and the terminal error. They are not mixed into the pending Outbox feed.

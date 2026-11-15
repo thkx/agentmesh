@@ -155,6 +155,9 @@ func TestOutboxPoisonEventDoesNotBlockAndEventuallyDeadLetters(t *testing.T) {
  var lastError string
  if err=db.DB.QueryRowContext(ctx,"SELECT published_at,last_error,attempts FROM collaboration_outbox WHERE id='poison-event'").Scan(&published,&lastError,&attempts);err!=nil{t.Fatal(err)}
  if !published.Valid||!strings.HasPrefix(lastError,"dead-letter:")||attempts!=maxOutboxTestRetries{t.Fatalf("poison event was not dead-lettered: published=%v error=%q attempts=%d",published,lastError,attempts)}
+ deadLetters,err:=s.ListDeadLetters(ctx,20);if err!=nil{t.Fatal(err)}
+ if len(deadLetters)!=1||deadLetters[0].ID!="poison-event"||deadLetters[0].Attempts!=maxOutboxTestRetries{t.Fatalf("dead-letter inspection did not expose poison event: %+v",deadLetters)}
+
 }
 
 func TestMessageEventsRouteOnlyToChannelMembers(t *testing.T) {

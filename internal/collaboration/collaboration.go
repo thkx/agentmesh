@@ -33,7 +33,18 @@ type Assignment struct { ID string `json:"id,omitempty"`; TaskID string `json:"t
 
 type Handoff struct { RequesterAgentID string `json:"requester_agent_id"`; Goal string `json:"goal"`; Completed []string `json:"completed"`; Remaining []string `json:"remaining"`; Artifacts []string `json:"artifacts"`; Constraints []string `json:"constraints"`; AcceptanceCriteria []string `json:"acceptance_criteria"`; Reason string `json:"reason"`; Recipient string `json:"recipient"`; IdempotencyKey string `json:"idempotency_key"` }
 
-type Event struct { ID string `json:"id,omitempty"`; WorkspaceID string `json:"workspace_id,omitempty"`; AggregateType string `json:"aggregate_type,omitempty"`; AggregateID string `json:"aggregate_id,omitempty"`; Type string `json:"type,omitempty"`; Payload json.RawMessage `json:"payload,omitempty"`; CreatedAt time.Time `json:"created_at,omitempty"` }
+type Event struct {
+ ID string `json:"id,omitempty"`
+ WorkspaceID string `json:"workspace_id,omitempty"`
+ AggregateType string `json:"aggregate_type,omitempty"`
+ AggregateID string `json:"aggregate_id,omitempty"`
+ Type string `json:"type,omitempty"`
+ Payload json.RawMessage `json:"payload,omitempty"`
+ Attempts int `json:"attempts,omitempty"`
+ LastError string `json:"last_error,omitempty"`
+ CreatedAt time.Time `json:"created_at,omitempty"`
+ PublishedAt *time.Time `json:"published_at,omitempty"`
+}
 
 
 type ApprovalRequiredError struct { ApprovalID string }
@@ -194,7 +205,29 @@ func(s *Service) ClaimAssignment(ctx context.Context,id,owner string,lease time.
  return Assignment{},ErrConflict
  };var v Assignment;var exp,c,u int64;e=tx.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE id=?",id).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&c,&u);if e!=nil{return v,e};x:=time.UnixMilli(exp).UTC();v.LeaseExpiresAt=&x;v.CreatedAt=time.UnixMilli(c).UTC();v.UpdatedAt=time.UnixMilli(u).UTC();_,e=tx.ExecContext(ctx,"UPDATE collaboration_tasks SET status='in_progress',updated_at=? WHERE id=?",now.UnixMilli(),v.TaskID);if e!=nil{return v,e};return v,tx.Commit()}
 func(s *Service) CompleteAssignment(ctx context.Context,id,owner string,version int64)error{now:=s.clock().UTC();tx,e:=s.db.BeginTx(ctx,nil);if e!=nil{return e};defer tx.Rollback();var taskID,workspaceID string;if e=tx.QueryRowContext(ctx,"SELECT a.task_id,t.workspace_id FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?",id).Scan(&taskID,&workspaceID);e!=nil{if errors.Is(e,sql.ErrNoRows){return ErrNotFound};return e};res,e:=tx.ExecContext(ctx,"UPDATE task_assignments SET status='completed',lease_owner='',lease_expires_at=NULL,updated_at=? WHERE id=? AND status='claimed' AND lease_owner=? AND claim_version=? AND lease_expires_at>=?",now.UnixMilli(),id,owner,version,now.UnixMilli());if e!=nil{return e};n,_:=res.RowsAffected();if n!=1{return ErrLeaseLost};_,e=tx.ExecContext(ctx,"UPDATE collaboration_tasks SET status='completed',updated_at=? WHERE id=?",now.UnixMilli(),taskID);if e!=nil{return e};payload,_:=json.Marshal(map[string]any{"task_id":taskID,"assignment_id":id});eid,e:=newID();if e!=nil{return e};_,e=tx.ExecContext(ctx,"INSERT INTO collaboration_outbox(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?,?)",eid,workspaceID,"task",taskID,"task.completed",string(payload),now.UnixMilli());if e!=nil{return e};return tx.Commit()}
-func(s *Service) PendingOutbox(ctx context.Context,limit int)([]Event,error){if limit<1||limit>500{limit=100};rows,e:=s.db.QueryContext(ctx,"SELECT id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at FROM collaboration_outbox WHERE published_at IS NULL ORDER BY created_at LIMIT ?",limit);if e!=nil{return nil,e};defer rows.Close();out:=[]Event{};for rows.Next(){var v Event;var p string;var t int64;if e=rows.Scan(&v.ID,&v.WorkspaceID,&v.AggregateType,&v.AggregateID,&v.Type,&p,&t);e!=nil{return nil,e};v.Payload=json.RawMessage(p);v.CreatedAt=time.UnixMilli(t).UTC();out=append(out,v)};return out,rows.Err()}
+func(s *Service) PendingOutbox(ctx context.Context,limit int)([]Event,error){
+ if limit<1||limit>500{limit=100}
+ return s.listOutbox(ctx,`SELECT id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,attempts,last_error,created_at,published_at
+  FROM collaboration_outbox WHERE published_at IS NULL ORDER BY created_at,id LIMIT ?`,limit)
+}
+func(s *Service) ListDeadLetters(ctx context.Context,limit int)([]Event,error){
+ if limit<1||limit>500{limit=100}
+ return s.listOutbox(ctx,`SELECT id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,attempts,last_error,created_at,published_at
+  FROM collaboration_outbox WHERE published_at IS NOT NULL AND last_error LIKE 'dead-letter:%'
+  ORDER BY published_at DESC,id LIMIT ?`,limit)
+}
+func(s *Service) listOutbox(ctx context.Context,query string,limit int)([]Event,error){
+ rows,err:=s.db.QueryContext(ctx,query,limit);if err!=nil{return nil,err};defer rows.Close()
+ out:=[]Event{}
+ for rows.Next(){
+  var v Event;var payload string;var created int64;var published sql.NullInt64
+  if err=rows.Scan(&v.ID,&v.WorkspaceID,&v.AggregateType,&v.AggregateID,&v.Type,&payload,&v.Attempts,&v.LastError,&created,&published);err!=nil{return nil,err}
+  v.Payload=json.RawMessage(payload);v.CreatedAt=time.UnixMilli(created).UTC()
+  if published.Valid{at:=time.UnixMilli(published.Int64).UTC();v.PublishedAt=&at}
+  out=append(out,v)
+ }
+ return out,rows.Err()
+}
 func(s *Service) MarkPublished(ctx context.Context,id string)error{_,e:=s.db.ExecContext(ctx,"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error='' WHERE id=? AND published_at IS NULL",s.clock().UTC().UnixMilli(),id);return e}
 func(s *Service) ReceiveEvent(ctx context.Context,agentID string,e Event)(bool,error){if _,err:=s.GetAgent(ctx,agentID);err!=nil{return false,err};if e.ID==""||e.Type==""||!json.Valid(e.Payload){return false,ErrInvalid};res,err:=s.db.ExecContext(ctx,"INSERT OR IGNORE INTO collaboration_inbox(id,agent_id,event_id,event_type,payload_json,status,received_at) VALUES(?,?,?,?,?,'pending',?)",e.ID+":"+agentID,agentID,e.ID,e.Type,string(e.Payload),s.clock().UTC().UnixMilli());if err!=nil{return false,err};n,_:=res.RowsAffected();return n==1,nil}
 func null(v string)any{if v==""{return nil};return v}
