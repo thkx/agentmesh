@@ -1,20 +1,24 @@
 package dashboard
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"encoding/base64"
 	"html/template"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
@@ -33,6 +37,7 @@ type Dependencies struct {
 	Models           *domainprovider.ModelRegistry
 	Credentials      appcredential.Manager
 	AgentDefinitions *agentcatalog.Service
+	Catalog *handlers.CatalogHandler
 }
 
 type Handler struct {
@@ -44,6 +49,7 @@ type Handler struct {
 	credentials  appcredential.Manager
 	agents       *agentcatalog.Service
 	workflowRepo *authoring.Repository
+	catalogAPI http.Handler
 	tmpl         *template.Template
 }
 
@@ -132,6 +138,11 @@ func New(d Dependencies) *Handler {
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
 	}
+	if d.Catalog != nil {
+		catalogRouter := gin.New()
+		d.Catalog.RegisterRoutes(catalogRouter.Group("/api/v1"))
+		h.catalogAPI = catalogRouter
+	}
 	return h
 }
 
@@ -143,9 +154,16 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("", h.requireSession(), h.overview)
 	g.GET("/", h.requireSession(), h.overview)
 	g.GET("/providers", h.requireSession(), h.providers)
+	g.POST("/providers", h.requireSession(), h.createProvider)
+	g.POST("/providers/:id/enabled", h.requireSession(), h.setProviderEnabled)
+	g.POST("/providers/:id/delete", h.requireSession(), h.deleteProvider)
+	g.POST("/providers/:id/test", h.requireSession(), h.testProvider)
 	g.POST("/providers/:id/credential", h.requireSession(), h.setCredential)
 	g.POST("/providers/:id/credential/delete", h.requireSession(), h.deleteCredential)
 	g.GET("/models", h.requireSession(), h.models)
+	g.POST("/models", h.requireSession(), h.createModel)
+	g.POST("/models/:id/enabled", h.requireSession(), h.setModelEnabled)
+	g.POST("/models/:id/delete", h.requireSession(), h.deleteModel)
 	g.GET("/agents", h.requireSession(), h.agents)
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/executions", h.requireSession(), h.executions)
@@ -269,6 +287,59 @@ func (h *Handler) overview(c *gin.Context) {
 		}
 	}
 	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) callCatalog(c *gin.Context, method, path string, payload any) bool {
+	if h.catalogAPI == nil { return false }
+	var body []byte
+	if payload != nil { var err error; body, err = json.Marshal(payload); if err != nil { return false } }
+	req := httptest.NewRequest(method, path, bytes.NewReader(body))
+	req = req.WithContext(c.Request.Context())
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.catalogAPI.ServeHTTP(rec, req)
+	return rec.Code >= 200 && rec.Code < 300
+}
+
+func (h *Handler) createProvider(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	enabled := true
+	payload := map[string]any{"id":c.PostForm("id"),"name":c.PostForm("name"),"type":c.PostForm("type"),"kind":c.PostForm("kind"),"base_url":c.PostForm("base_url"),"enabled":enabled}
+	if !h.callCatalog(c,http.MethodPost,"/api/v1/providers",payload) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-saved")
+}
+func (h *Handler) setProviderEnabled(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	enabled := c.PostForm("enabled") == "true"
+	if !h.callCatalog(c,http.MethodPatch,"/api/v1/providers/"+c.Param("id")+"/enabled",map[string]any{"enabled":enabled}) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-saved")
+}
+func (h *Handler) deleteProvider(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if !h.callCatalog(c,http.MethodDelete,"/api/v1/providers/"+c.Param("id"),nil) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-deleted")
+}
+func (h *Handler) testProvider(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if !h.callCatalog(c,http.MethodPost,"/api/v1/providers/"+c.Param("id")+"/test",map[string]any{}) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider-test"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-tested")
+}
+func (h *Handler) createModel(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	payload := map[string]any{"id":c.PostForm("id"),"provider_id":c.PostForm("provider_id"),"name":c.PostForm("name"),"display_name":c.PostForm("display_name"),"context_window":c.PostForm("context_window"),"max_output_tokens":c.PostForm("max_output_tokens"),"supports_streaming":c.PostForm("supports_streaming")=="true","enabled":true}
+	if !h.callCatalog(c,http.MethodPost,"/api/v1/models",payload) { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/models?message=model-saved")
+}
+func (h *Handler) setModelEnabled(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	enabled := c.PostForm("enabled") == "true"
+	if !h.callCatalog(c,http.MethodPatch,"/api/v1/models/"+c.Param("id")+"/enabled",map[string]any{"enabled":enabled}) { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/models?message=model-saved")
+}
+func (h *Handler) deleteModel(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if !h.callCatalog(c,http.MethodDelete,"/api/v1/models/"+c.Param("id"),nil) { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/models?message=model-deleted")
 }
 
 func (h *Handler) providers(c *gin.Context) {
