@@ -936,6 +936,7 @@ func (h *Handler) agents(c *gin.Context) {
 		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
 		if err == nil {
 			for _, workspace := range workspaces {
+				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: workspace.ID, Name: workspace.Name})
 				identities, listErr := h.collaboration.ListAgents(c.Request.Context(), workspace.ID)
 				if listErr != nil { continue }
 				for _, identity := range identities {
