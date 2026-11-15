@@ -1092,3 +1092,108 @@ func TestArtifactRejectsCrossWorkspaceAndOversizedContent(t *testing.T) {
 		t.Fatalf("expected size rejection, got %v", err)
 	}
 }
+
+func TestArtifactSubmissionRequiresVerificationAndReviewIsImmutable(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+
+	workspace, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Artifact Review", Slug: "artifact-review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, version, err := s.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		WorkspaceID: workspace.ID, Kind: "document", Title: "Release notes",
+		Content: []byte("# Release"), MediaType: "text/markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SubmitArtifact(ctx, artifact.ID); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("submission without a passed verification must fail, got %v", err)
+	}
+	verification, err := s.VerifyArtifact(ctx, artifact.ID, version.Version, collaboration.ArtifactVerificationPolicy{
+		RequireContentDigest: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.Outcome != "passed" {
+		t.Fatalf("expected digest verification to pass, got %+v", verification)
+	}
+	submitted, err := s.SubmitArtifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Status != "submitted" || submitted.SubmittedVersionID != version.ID {
+		t.Fatalf("unexpected submitted artifact: %+v", submitted)
+	}
+
+	review, err := s.ReviewArtifact(ctx, artifact.ID, "human-reviewer", "accepted", "release approved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if review.VersionID != version.ID || review.Outcome != "accepted" {
+		t.Fatalf("unexpected review: %+v", review)
+	}
+	retry, err := s.ReviewArtifact(ctx, artifact.ID, "human-reviewer", "accepted", "release approved")
+	if err != nil {
+		t.Fatalf("identical review retry should be idempotent: %v", err)
+	}
+	if retry.ID != review.ID {
+		t.Fatalf("review retry created another record: %s != %s", retry.ID, review.ID)
+	}
+	if _, err = s.ReviewArtifact(ctx, artifact.ID, "other-reviewer", "rejected", "different decision"); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("conflicting second review must fail, got %v", err)
+	}
+	accepted, err := s.GetArtifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Status != "accepted" {
+		t.Fatalf("expected accepted status, got %s", accepted.Status)
+	}
+
+	next, err := s.AddArtifactVersion(ctx, artifact.ID, collaboration.CreateArtifactRequest{
+		Content: []byte("# Release v2"), MediaType: "text/markdown",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err := s.GetArtifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Status != "draft" || draft.SubmittedVersionID != "" || next.Version != 2 {
+		t.Fatalf("new version must return artifact to draft: %+v version=%+v", draft, next)
+	}
+	if _, err = s.SubmitArtifact(ctx, artifact.ID); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("new version requires its own verification, got %v", err)
+	}
+	if _, err = s.VerifyArtifact(ctx, artifact.ID, 2, collaboration.ArtifactVerificationPolicy{RequireContentDigest: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SubmitArtifact(ctx, artifact.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ReviewArtifact(ctx, artifact.ID, "human-reviewer", "rejected", "needs revision"); err != nil {
+		t.Fatal(err)
+	}
+	final, err := s.GetArtifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != "rejected" {
+		t.Fatalf("expected rejected status, got %s", final.Status)
+	}
+
+	if _, err = db.DB.ExecContext(ctx, "UPDATE collaboration_artifact_reviews SET note='tampered' WHERE artifact_id=?", artifact.ID); err == nil {
+		t.Fatal("artifact review audit must be append-only")
+	}
+	if _, err = db.DB.ExecContext(ctx, "DELETE FROM collaboration_artifact_reviews WHERE artifact_id=?", artifact.ID); err == nil {
+		t.Fatal("artifact review audit must not be deletable")
+	}
+	if _, err = db.DB.ExecContext(ctx, "UPDATE collaboration_artifact_verifications SET reason='tampered' WHERE artifact_id=?", artifact.ID); err == nil {
+		t.Fatal("artifact verifications must be append-only")
+	}
+}

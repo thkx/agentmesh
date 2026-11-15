@@ -104,3 +104,13 @@ HTTP endpoints:
 - `POST /api/v1/collaboration/artifacts/:id/verify`
 
 Run `bash scripts/verify-p3.sh` to validate formatting, build, vet, migrations and race tests. The first implementation deliberately does not claim external blob storage, artifact review UI, signature verification, or semantic truth validation.
+
+### Artifact submission and human acceptance lifecycle
+
+An Artifact remains `draft` until its current immutable version has a deterministic `passed` verification. Submission pins the exact version under review; a later version resets the Artifact to `draft` and requires a new verification and submission. Human review accepts or rejects only the pinned submitted version. One review decision is allowed per Artifact Version; an identical retry is idempotent, while a conflicting second decision is rejected.
+
+Artifact review records and verification records are append-only at the SQLite trigger level. The current `reviewer_id` is supplied by the API caller, just like the P3-2 task-result review identity; production multi-user deployments must bind it to an authenticated principal in middleware rather than trusting arbitrary request JSON.
+
+Additional endpoints:
+- `POST /api/v1/collaboration/artifacts/:id/submit`
+- `POST /api/v1/collaboration/artifacts/:id/review`

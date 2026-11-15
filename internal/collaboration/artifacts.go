@@ -22,7 +22,8 @@ type Artifact struct {
 	Kind           string    `json:"kind"`
 	Title          string    `json:"title"`
 	Status         string    `json:"status"`
-	CurrentVersion int       `json:"current_version"`
+	CurrentVersion     int       `json:"current_version"`
+	SubmittedVersionID string    `json:"submitted_version_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -253,7 +254,7 @@ func (s *Service) AddArtifactVersion(ctx context.Context, artifactID string, in 
 	if err != nil {
 		return ArtifactVersion{}, err
 	}
-	res, err := tx.ExecContext(ctx, "UPDATE collaboration_artifacts SET current_version=?,status='draft',updated_at=? WHERE id=? AND current_version=?",
+	res, err := tx.ExecContext(ctx, "UPDATE collaboration_artifacts SET current_version=?,status='draft',submitted_version_id=NULL,updated_at=? WHERE id=? AND current_version=?",
 		version.Version, now.UnixMilli(), artifactID, current)
 	if err != nil {
 		return ArtifactVersion{}, err
@@ -276,10 +277,10 @@ func (s *Service) GetArtifact(ctx context.Context, id string) (Artifact, error) 
 	var artifact Artifact
 	var taskID, agentID sql.NullString
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,source_task_id,creator_agent_id,kind,title,status,current_version,created_at,updated_at
+	err := s.db.QueryRowContext(ctx, `SELECT id,workspace_id,source_task_id,creator_agent_id,kind,title,status,current_version,COALESCE(submitted_version_id,''),created_at,updated_at
 		FROM collaboration_artifacts WHERE id=?`, id).Scan(
 		&artifact.ID, &artifact.WorkspaceID, &taskID, &agentID, &artifact.Kind, &artifact.Title,
-		&artifact.Status, &artifact.CurrentVersion, &created, &updated)
+		&artifact.Status, &artifact.CurrentVersion, &artifact.SubmittedVersionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return artifact, ErrNotFound
 	}
@@ -485,4 +486,163 @@ func (s *Service) VerifyArtifact(ctx context.Context, artifactID string, version
 		return ArtifactVerification{}, err
 	}
 	return result, nil
+}
+
+type ArtifactReview struct {
+	ID          string    `json:"id"`
+	ArtifactID  string    `json:"artifact_id"`
+	VersionID   string    `json:"version_id"`
+	WorkspaceID string    `json:"workspace_id"`
+	ReviewerID  string    `json:"reviewer_id"`
+	Outcome     string    `json:"outcome"`
+	Note        string    `json:"note"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// SubmitArtifact makes the current immutable version available for human review.
+// Submission is blocked until a deterministic verification for that exact
+// version has passed.
+func (s *Service) SubmitArtifact(ctx context.Context, artifactID string) (Artifact, error) {
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return Artifact{}, ErrInvalid
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Artifact{}, err
+	}
+	defer tx.Rollback()
+
+	var workspaceID, status, submittedVersionID string
+	var currentVersion int
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id,status,current_version,COALESCE(submitted_version_id,'')
+		FROM collaboration_artifacts WHERE id=?`, artifactID).Scan(
+		&workspaceID, &status, &currentVersion, &submittedVersionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Artifact{}, ErrNotFound
+	}
+	if err != nil {
+		return Artifact{}, err
+	}
+	var versionID string
+	err = tx.QueryRowContext(ctx, "SELECT id FROM collaboration_artifact_versions WHERE artifact_id=? AND version=?", artifactID, currentVersion).Scan(&versionID)
+	if err != nil {
+		return Artifact{}, err
+	}
+	if status == "submitted" && submittedVersionID == versionID {
+		_ = tx.Rollback()
+		return s.GetArtifact(ctx, artifactID)
+	}
+	if status != "draft" {
+		return Artifact{}, ErrConflict
+	}
+	var verificationOutcome string
+	err = tx.QueryRowContext(ctx, `SELECT outcome FROM collaboration_artifact_verifications
+		WHERE artifact_id=? AND version_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, artifactID, versionID).Scan(&verificationOutcome)
+	if errors.Is(err, sql.ErrNoRows) || verificationOutcome != "passed" {
+		return Artifact{}, ErrConflict
+	}
+	now := s.clock().UTC()
+	result, err := tx.ExecContext(ctx, `UPDATE collaboration_artifacts
+		SET status='submitted',submitted_version_id=?,updated_at=?
+		WHERE id=? AND status='draft' AND current_version=?`, versionID, now.UnixMilli(), artifactID, currentVersion)
+	if err != nil {
+		return Artifact{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Artifact{}, err
+	}
+	if affected != 1 {
+		return Artifact{}, ErrConflict
+	}
+	if err = s.writeEventTx(ctx, tx, workspaceID, "artifact", artifactID, "artifact.submitted",
+		map[string]any{"artifact_id": artifactID, "version_id": versionID}); err != nil {
+		return Artifact{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return Artifact{}, err
+	}
+	return s.GetArtifact(ctx, artifactID)
+}
+
+// ReviewArtifact records one human decision for the exact submitted version.
+// The unique artifact/version key and identical-request check make retries safe.
+func (s *Service) ReviewArtifact(ctx context.Context, artifactID, reviewerID, outcome, note string) (ArtifactReview, error) {
+	artifactID = strings.TrimSpace(artifactID)
+	reviewerID = strings.TrimSpace(reviewerID)
+	outcome = strings.TrimSpace(outcome)
+	note = strings.TrimSpace(note)
+	if artifactID == "" || reviewerID == "" || len(reviewerID) > 160 ||
+		(outcome != "accepted" && outcome != "rejected") || len(note) > 4000 {
+		return ArtifactReview{}, ErrInvalid
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	defer tx.Rollback()
+
+	var workspaceID, status, versionID string
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id,status,COALESCE(submitted_version_id,'')
+		FROM collaboration_artifacts WHERE id=?`, artifactID).Scan(&workspaceID, &status, &versionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ArtifactReview{}, ErrNotFound
+	}
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	if status != "submitted" || versionID == "" {
+		var existing ArtifactReview
+		var created int64
+		readErr := tx.QueryRowContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,reviewer_id,outcome,note,created_at
+			FROM collaboration_artifact_reviews WHERE artifact_id=? AND version_id=?`, artifactID, versionID).Scan(
+			&existing.ID, &existing.ArtifactID, &existing.VersionID, &existing.WorkspaceID,
+			&existing.ReviewerID, &existing.Outcome, &existing.Note, &created)
+		if readErr == nil {
+			existing.CreatedAt = time.UnixMilli(created).UTC()
+			if existing.ReviewerID == reviewerID && existing.Outcome == outcome && existing.Note == note {
+				return existing, nil
+			}
+			return ArtifactReview{}, ErrConflict
+		}
+		return ArtifactReview{}, ErrConflict
+	}
+
+	id, err := newID()
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	now := s.clock().UTC()
+	review := ArtifactReview{
+		ID: id, ArtifactID: artifactID, VersionID: versionID, WorkspaceID: workspaceID,
+		ReviewerID: reviewerID, Outcome: outcome, Note: note, CreatedAt: now,
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_artifact_reviews
+		(id,artifact_id,version_id,workspace_id,reviewer_id,outcome,note,created_at)
+		VALUES(?,?,?,?,?,?,?,?)`, review.ID, review.ArtifactID, review.VersionID,
+		review.WorkspaceID, review.ReviewerID, review.Outcome, review.Note, now.UnixMilli())
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE collaboration_artifacts SET status=?,updated_at=?
+		WHERE id=? AND status='submitted' AND submitted_version_id=?`, outcome, now.UnixMilli(), artifactID, versionID)
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return ArtifactReview{}, err
+	}
+	if affected != 1 {
+		return ArtifactReview{}, ErrConflict
+	}
+	if err = s.writeEventTx(ctx, tx, workspaceID, "artifact", artifactID, "artifact.reviewed",
+		map[string]any{"artifact_id": artifactID, "version_id": versionID, "reviewer_id": reviewerID, "outcome": outcome, "note": note}); err != nil {
+		return ArtifactReview{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return ArtifactReview{}, err
+	}
+	return review, nil
 }

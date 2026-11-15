@@ -42,6 +42,8 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/artifacts/:id/evidence", h.listArtifactEvidence)
 	g.POST("/artifacts/:id/evidence", h.addArtifactEvidence)
 	g.POST("/artifacts/:id/verify", h.verifyArtifact)
+	g.POST("/artifacts/:id/submit", h.submitArtifact)
+	g.POST("/artifacts/:id/review", h.reviewArtifact)
 	g.GET("/agents/:id/task-results", h.agentTaskResults)
 	g.GET("/agents/:id/task-results/:assignment_id", h.agentTaskResult)
 	g.POST("/agents/:id/task-results/:assignment_id/review", h.reviewAgentTaskResult)
@@ -754,4 +756,31 @@ func (h *CollaborationHandler) verifyArtifact(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, result)
+}
+
+func (h *CollaborationHandler) submitArtifact(c *gin.Context) {
+	artifact, err := h.service.SubmitArtifact(c, c.Param("id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, artifact)
+}
+
+func (h *CollaborationHandler) reviewArtifact(c *gin.Context) {
+	var in struct {
+		ReviewerID string `json:"reviewer_id"`
+		Outcome    string `json:"outcome"`
+		Note       string `json:"note"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	review, err := h.service.ReviewArtifact(c, c.Param("id"), in.ReviewerID, in.Outcome, in.Note)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, review)
 }
