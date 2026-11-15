@@ -103,10 +103,14 @@ type modelView struct {
 	ContextWindow, MaxOutputTokens                    int
 	Streaming                                         bool
 }
+type agentRunView struct { ID, TaskID, Status, CreatedAt, ExecutionID string }
+type workflowRunView struct { ID, Status, CreatedAt, ExecutionID string; Version int }
+
 type agentView struct {
 	ID, Name, ModelID, Description, SystemPrompt            string
 	Temperature                                             float64
 	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds int
+	Runs []agentRunView
 	Enabled                                                 bool
 	Version                                                 int
 }
@@ -114,6 +118,7 @@ type workflowView struct {
 	ID, Name, Description string
 	Version               int
 	UpdatedAt             string
+	Runs                  []workflowRunView
 }
 type credentialView struct {
 	Source, Status string
@@ -859,11 +864,32 @@ func (h *Handler) agents(c *gin.Context) {
 			data.Error = "Could not load agent definitions"
 		} else {
 			for _, item := range items {
-				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, SystemPrompt: item.SystemPrompt, Temperature: item.Temperature, MaxSteps: item.MaxSteps, MaxToolCalls: item.MaxToolCalls, MaxOutputTokens: item.MaxOutputTokens, TimeoutSeconds: item.TimeoutSeconds, Enabled: item.Enabled, Version: item.Version})
+				runs, _ := h.agentCatalog.ListRuns(c.Request.Context(), item.ID, 5)
+			runRows := make([]agentRunView, 0, len(runs))
+			for _, run := range runs {
+				row := agentRunView{ID: run.ID, TaskID: run.TaskID, Status: run.Status, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
+				row.ExecutionID = h.executionForTask(c.Request.Context(), run.TaskID)
+				runRows = append(runRows, row)
+			}
+			data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, SystemPrompt: item.SystemPrompt, Temperature: item.Temperature, MaxSteps: item.MaxSteps, MaxToolCalls: item.MaxToolCalls, MaxOutputTokens: item.MaxOutputTokens, TimeoutSeconds: item.TimeoutSeconds, Runs: runRows, Enabled: item.Enabled, Version: item.Version})
 			}
 		}
 	}
 	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) executionForTask(ctx context.Context, taskID string) string {
+	if h.db == nil || taskID == "" { return "" }
+	var id string
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind='agent' AND task_id=? ORDER BY created_at DESC LIMIT 1", taskID).Scan(&id); err != nil { return "" }
+	return id
+}
+
+func (h *Handler) executionForRuntimeRef(ctx context.Context, kind, runtimeRef string) string {
+	if h.db == nil || runtimeRef == "" { return "" }
+	var id string
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind=? AND runtime_ref=? ORDER BY created_at DESC LIMIT 1", kind, runtimeRef).Scan(&id); err != nil { return "" }
+	return id
 }
 
 func (h *Handler) workflows(c *gin.Context) {
@@ -874,7 +900,16 @@ func (h *Handler) workflows(c *gin.Context) {
 			data.Error = "Could not load workflow templates"
 		} else {
 			for _, item := range items {
-				data.WorkflowRows = append(data.WorkflowRows, workflowView{ID: item.ID, Name: item.Name, Description: item.Description, Version: item.Definition.Version, UpdatedAt: item.UpdatedAt.Format(time.RFC3339)})
+				runs := []workflowRunView{}
+			if h.workflowEngine != nil {
+				workflowRuns, _ := h.workflowEngine.ListRuns(c.Request.Context(), item.ID, 5)
+				for _, run := range workflowRuns {
+					row := workflowRunView{ID: run.ID, Status: string(run.Status), Version: run.WorkflowVersion, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
+					row.ExecutionID = h.executionForRuntimeRef(c.Request.Context(), "workflow", run.ID)
+					runs = append(runs, row)
+				}
+			}
+			data.WorkflowRows = append(data.WorkflowRows, workflowView{ID: item.ID, Name: item.Name, Description: item.Description, Version: item.Definition.Version, UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Runs: runs})
 			}
 		}
 	}
