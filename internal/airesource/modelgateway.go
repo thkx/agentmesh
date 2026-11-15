@@ -2,6 +2,7 @@ package airesource
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -53,19 +54,32 @@ func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.Gene
 	if r == nil || r.router == nil {
 		return nil, errors.New("dynamic model gateway router is not initialized")
 	}
-	if len(req.Tools) > 0 {
-		return nil, modelgateway.ErrNativeToolCallingUnsupported
-	}
 	messages := make([]Message, 0, len(req.Messages))
 	for _, message := range req.Messages {
-		messages = append(messages, Message{Role: string(message.Role), Content: message.Content})
+		item := Message{Role: string(message.Role), Content: message.Content, Name: message.Name, ToolCallID: message.ToolCallID}
+		for _, call := range message.ToolCalls {
+			item.ToolCalls = append(item.ToolCalls, ToolCall{
+				ID: call.ID, Type: "function",
+				Function: ToolCallFunction{Name: call.Name, Arguments: string(call.Arguments)},
+			})
+		}
+		messages = append(messages, item)
+	}
+	tools := make([]Tool, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		tools = append(tools, Tool{Type: "function", Function: ToolFunction{
+			Name: tool.Name, Description: tool.Description, Parameters: tool.Parameters,
+		}})
 	}
 	result, err := r.router.Generate(ctx, GenerateRequest{
 		Model: req.ProviderModel, Messages: messages,
 		Temperature: req.Temperature, TopP: req.TopP,
-		MaxTokens: req.MaxOutputTokens,
+		MaxTokens: req.MaxOutputTokens, Tools: tools, ToolChoice: req.ToolChoice,
 	})
 	if err != nil {
+		if errors.Is(err, ErrNativeToolCallingUnsupported) {
+			return nil, modelgateway.ErrNativeToolCallingUnsupported
+		}
 		return nil, fmt.Errorf("dynamic credential route: %w", err)
 	}
 	out := &modelgateway.GenerateResponse{
@@ -73,8 +87,18 @@ func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.Gene
 		CreatedAt: time.Unix(result.Created, 0).UTC(),
 	}
 	if len(result.Choices) > 0 {
-		out.Content = result.Choices[0].Message.Content
-		out.FinishReason = modelgateway.FinishReason(result.Choices[0].FinishReason)
+		choice := result.Choices[0]
+		out.Content = choice.Message.Content
+		out.FinishReason = modelgateway.FinishReason(choice.FinishReason)
+		for _, call := range choice.Message.ToolCalls {
+			arguments := json.RawMessage(call.Function.Arguments)
+			if !json.Valid(arguments) {
+				return nil, fmt.Errorf("dynamic provider returned invalid tool arguments")
+			}
+			out.ToolCalls = append(out.ToolCalls, modelgateway.ToolCall{
+				ID: call.ID, Name: call.Function.Name, Arguments: arguments,
+			})
+		}
 	}
 	out.Usage = modelgateway.Usage{
 		InputTokens:  int64(result.Usage.PromptTokens),
