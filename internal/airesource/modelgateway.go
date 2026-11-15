@@ -92,7 +92,6 @@ func (r *ModelGatewayRouter) Stream(ctx context.Context, req modelgateway.Genera
 				} else {
 					resp := &modelgateway.GenerateResponse{
 						ID: event.Response.ID, Model: event.Response.Model, CreatedAt: time.Unix(event.Response.Created, 0).UTC(),
-						Content: "", FinishReason: modelgateway.FinishReason(event.Response.Choices[0].FinishReason),
 						Usage: modelgateway.Usage{
 							InputTokens: int64(event.Response.Usage.PromptTokens), OutputTokens: int64(event.Response.Usage.CompletionTokens),
 							TotalTokens: int64(event.Response.Usage.TotalTokens),
@@ -100,6 +99,7 @@ func (r *ModelGatewayRouter) Stream(ctx context.Context, req modelgateway.Genera
 					}
 					if len(event.Response.Choices) > 0 {
 						resp.Content = event.Response.Choices[0].Message.Content
+						resp.FinishReason = modelgateway.FinishReason(event.Response.Choices[0].FinishReason)
 					}
 					mapped = modelgateway.NewCompletedEvent(resp)
 				}
