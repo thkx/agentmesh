@@ -777,6 +777,7 @@ func (s *Service) ClaimAssignment(ctx context.Context, id, owner string, lease t
 	return v, tx.Commit()
 }
 // CompleteAssignment preserves the legacy completion contract for callers without a runtime result.
+// CompleteAssignment preserves the legacy completion contract for callers without a runtime result.
 func (s *Service) CompleteAssignment(ctx context.Context, id, owner string, version int64) error {
 	return s.CompleteAssignmentWithResult(ctx, id, owner, version, "", nil)
 }
@@ -784,6 +785,64 @@ func (s *Service) CompleteAssignment(ctx context.Context, id, owner string, vers
 // CompleteAssignmentWithResult atomically completes an assignment and publishes its
 // execution result through the collaboration outbox. The outbox is the durable
 // handoff boundary for downstream consumers.
+func (s *Service) CompleteAssignmentWithResult(ctx context.Context, id, owner string, version int64, executionID string, result json.RawMessage) error {
+	if len(result) > 4<<20 || (len(result) > 0 && !json.Valid(result)) || len(executionID) > 128 {
+		return ErrInvalid
+	}
+
+	now := s.clock().UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var taskID, workspaceID string
+	err = tx.QueryRowContext(ctx, "SELECT a.task_id,t.workspace_id FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?", id).Scan(&taskID, &workspaceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+
+	res, err := tx.ExecContext(ctx, "UPDATE task_assignments SET status='completed',lease_owner='',lease_expires_at=NULL,updated_at=? WHERE id=? AND status='claimed' AND lease_owner=? AND claim_version=? AND lease_expires_at>=?", now.UnixMilli(), id, owner, version, now.UnixMilli())
+	if err != nil {
+		return err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrLeaseLost
+	}
+
+	_, err = tx.ExecContext(ctx, "UPDATE collaboration_tasks SET status='completed',updated_at=? WHERE id=?", now.UnixMilli(), taskID)
+	if err != nil {
+		return err
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"task_id":       taskID,
+		"assignment_id": id,
+		"execution_id": executionID,
+		"result":        result,
+	})
+	if err != nil {
+		return err
+	}
+	eventID, err := newID()
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, "INSERT INTO collaboration_outbox(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?,?)", eventID, workspaceID, "task", taskID, "task.completed", string(payload), now.UnixMilli())
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
 func (s *Service) CompleteAssignmentWithResult(ctx context.Context, id, owner string, version int64, executionID string, result json.RawMessage) error {
 	if len(result) > 4<<20 || (len(result) > 0 && !json.Valid(result)) || len(executionID) > 128 {
 		return ErrInvalid
