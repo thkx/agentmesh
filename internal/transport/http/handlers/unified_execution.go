@@ -27,36 +27,36 @@ func (h *UnifiedExecutionHandler) RegisterRoutes(r *gin.RouterGroup) {
 }
 
 type unifiedExecution struct {
-	ID             string          `json:"id"`
-	Kind           string          `json:"kind"`
-	Runtime        string          `json:"runtime"`
-	RuntimeRef     string          `json:"runtime_ref,omitempty"`
-	TaskID         string          `json:"task_id,omitempty"`
-	Status         string          `json:"status"`
+	ID             string         `json:"id"`
+	Kind           string         `json:"kind"`
+	Runtime        string         `json:"runtime"`
+	RuntimeRef     string         `json:"runtime_ref,omitempty"`
+	TaskID         string         `json:"task_id,omitempty"`
+	Status         string         `json:"status"`
 	Input          jsonRawMessage `json:"input,omitempty"`
 	Result         jsonRawMessage `json:"result,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	IdempotencyKey string          `json:"idempotency_key,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
-	StartedAt      *time.Time      `json:"started_at,omitempty"`
-	FinishedAt     *time.Time      `json:"finished_at,omitempty"`
+	Error          string         `json:"error,omitempty"`
+	IdempotencyKey string         `json:"idempotency_key,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	StartedAt      *time.Time     `json:"started_at,omitempty"`
+	FinishedAt     *time.Time     `json:"finished_at,omitempty"`
 }
 
 // jsonRawMessage avoids exposing SQL's nullable JSON text as a quoted string.
 type jsonRawMessage = json.RawMessage
 
 type unifiedAttempt struct {
-	ID          string          `json:"id"`
-	Number      int             `json:"number"`
-	Runtime     string          `json:"runtime"`
-	RuntimeRef  string          `json:"runtime_ref,omitempty"`
-	Status      string          `json:"status"`
-	Input       jsonRawMessage `json:"input,omitempty"`
-	Result      jsonRawMessage `json:"result,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	StartedAt   time.Time       `json:"started_at"`
-	FinishedAt  *time.Time      `json:"finished_at,omitempty"`
+	ID         string         `json:"id"`
+	Number     int            `json:"number"`
+	Runtime    string         `json:"runtime"`
+	RuntimeRef string         `json:"runtime_ref,omitempty"`
+	Status     string         `json:"status"`
+	Input      jsonRawMessage `json:"input,omitempty"`
+	Result     jsonRawMessage `json:"result,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	StartedAt  time.Time      `json:"started_at"`
+	FinishedAt *time.Time     `json:"finished_at,omitempty"`
 }
 
 type unifiedArtifactVersion struct {
@@ -221,16 +221,16 @@ func (h *UnifiedExecutionHandler) detail(c *gin.Context) {
 }
 
 type unifiedTimelineEvent struct {
-	OccurredAt time.Time       `json:"occurred_at"`
-	Stream     string          `json:"stream"`
-	Sequence   int64           `json:"sequence"`
-	EventID    string          `json:"event_id"`
-	EventKey   string          `json:"event_key"`
-	Type       string          `json:"type"`
-	ActorType  string          `json:"actor_type"`
-	ActorID    string          `json:"actor_id,omitempty"`
-	Source     string          `json:"source"`
-	AttemptID  string          `json:"attempt_id,omitempty"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	Stream     string         `json:"stream"`
+	Sequence   int64          `json:"sequence"`
+	EventID    string         `json:"event_id"`
+	EventKey   string         `json:"event_key"`
+	Type       string         `json:"type"`
+	ActorType  string         `json:"actor_type"`
+	ActorID    string         `json:"actor_id,omitempty"`
+	Source     string         `json:"source"`
+	AttemptID  string         `json:"attempt_id,omitempty"`
 	Payload    jsonRawMessage `json:"payload"`
 }
 
