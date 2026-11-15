@@ -1,0 +1,9 @@
+DROP TRIGGER IF EXISTS artifact_version_validate_attempt_insert;
+DROP TRIGGER IF EXISTS artifact_evidence_validate_provenance_insert;
+DROP INDEX IF EXISTS idx_artifact_evidence_attempt;
+DROP INDEX IF EXISTS idx_artifact_evidence_execution;
+DROP INDEX IF EXISTS idx_artifact_versions_source_attempt;
+DROP INDEX IF EXISTS idx_artifact_versions_source_execution;
+ALTER TABLE collaboration_artifact_evidence DROP COLUMN attempt_id;
+ALTER TABLE collaboration_artifact_evidence DROP COLUMN execution_id;
+ALTER TABLE collaboration_artifact_versions DROP COLUMN source_attempt_id;
