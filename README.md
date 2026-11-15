@@ -33,6 +33,8 @@ go run ./cmd/agentmesh --config configs/config.yaml
 
 The example configuration binds the HTTP server to `127.0.0.1:8080` and stores local data under `./data`. Adjust the configuration for your environment. Provider keys are supplied through environment variables; do not commit real credentials.
 
+Dashboard: open [http://127.0.0.1:8080/dashboard](http://127.0.0.1:8080/dashboard) after startup. When an API Token is configured, sign in with that token; the Dashboard uses a separate short-lived browser session and does not store the token in the cookie. See [P5 Product Control Plane](docs/p5-product-control-plane.md) and the [P5 Part 1 implementation record](docs/p5-part1-implementation.md).
+
 Health endpoints:
 
 ```bash
