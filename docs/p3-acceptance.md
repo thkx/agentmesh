@@ -78,3 +78,8 @@ A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker 
 ### Result decision boundary (P3-2)
 
 Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. The built-in conservative evaluator records `human_review`; it does not infer acceptance from a successful Runtime exit or unstructured output. Deployments may inject a policy/model-backed evaluator, whose output is constrained to `accepted`, `rejected`, or `human_review` and retained with its reason, confidence and evidence references. This is an assessment record, not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.
+
+
+### P3-2 governance and recovery
+
+Human result review persists reviewer identity, decision note and review time, plus an append-only audit record. Parent progress is computed from child Task status and the parent Agent's own result assessment; other recipients' notifications cannot satisfy acceptance. A parent is ready for its own review only when every child has a durable result accepted by that parent Agent. Aggregation never auto-completes the parent. Assignment failures are fenced by lease owner and claim version, transition the Task to blocked, and emit an Outbox event. Retry is explicit, reuses the Assignment identity, increments a bounded retry counter, and emits its own event.

@@ -23,6 +23,9 @@ type TaskResultAssessment struct {
 	Confidence       float64         `json:"confidence"`
 	Evidence         json.RawMessage `json:"evidence"`
 	CreatedAt        time.Time       `json:"created_at"`
+	ReviewerID       string          `json:"reviewer_id,omitempty"`
+	DecisionNote     string          `json:"decision_note,omitempty"`
+	ReviewedAt       *time.Time      `json:"reviewed_at,omitempty"`
 }
 
 // TaskResultEvaluator is the seam for deterministic policy or model-backed review.
@@ -162,10 +165,12 @@ func (s *Service) GetTaskResultAssessment(ctx context.Context, recipientAgentID,
 	var item TaskResultAssessment
 	var evidence string
 	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at
+	var reviewed sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at,
+		COALESCE(reviewer_id,''),COALESCE(decision_note,''),reviewed_at
 		FROM agent_task_result_assessments WHERE recipient_agent_id=? AND assignment_id=?`, recipientAgentID, assignmentID).
 		Scan(&item.ID, &item.ResultID, &item.WorkspaceID, &item.TaskID, &item.AssignmentID, &item.RecipientAgentID,
-			&item.Outcome, &item.Reason, &item.Confidence, &evidence, &created)
+			&item.Outcome, &item.Reason, &item.Confidence, &evidence, &created, &item.ReviewerID, &item.DecisionNote, &reviewed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, ErrNotFound
 	}
@@ -174,5 +179,9 @@ func (s *Service) GetTaskResultAssessment(ctx context.Context, recipientAgentID,
 	}
 	item.Evidence = json.RawMessage(evidence)
 	item.CreatedAt = time.UnixMilli(created).UTC()
+	if reviewed.Valid {
+		t := time.UnixMilli(reviewed.Int64).UTC()
+		item.ReviewedAt = &t
+	}
 	return item, nil
 }
