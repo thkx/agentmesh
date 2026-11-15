@@ -682,7 +682,7 @@ func writeGatewayError(c *gin.Context, err error) {
 		status = 409
 		code = "streaming_unsupported"
 	}
-	if errors.Is(err, modelgateway.ErrNativeToolCallingUnsupported) {
+	if errors.Is(err, modelgateway.ErrNativeToolCallingUnsupported) || errors.Is(err, modelgateway.ErrNativeToolStreamingUnsupported) {
 		status = 409
 		code = "native_tool_calling_unsupported"
 	}
