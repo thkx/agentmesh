@@ -667,32 +667,91 @@ func (h *CollaborationHandler) retryAssignment(c *gin.Context) {
 
 func (h *CollaborationHandler) createArtifact(c *gin.Context) {
 	var in collaboration.CreateArtifactRequest
-	if c.ShouldBindJSON(&in) != nil { c.JSON(http.StatusBadRequest, gin.H{"error":"invalid_request"}); return }
-	a,v,err:=h.service.CreateArtifact(c,in);if err!=nil{h.fail(c,err);return}
-	c.JSON(http.StatusCreated,gin.H{"artifact":a,"version":v})
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	artifact, version, err := h.service.CreateArtifact(c, in)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"artifact": artifact, "version": version})
 }
+
 func (h *CollaborationHandler) getArtifact(c *gin.Context) {
-	a,err:=h.service.GetArtifact(c,c.Param("id"));if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,a)
+	artifact, err := h.service.GetArtifact(c, c.Param("id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, artifact)
 }
+
 func (h *CollaborationHandler) getArtifactVersion(c *gin.Context) {
-	n,err:=strconv.Atoi(c.Param("version"));if err!=nil||n<1{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_version"});return}
-	v,err:=h.service.GetArtifactVersion(c,c.Param("id"),n);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,v)
+	versionNumber, err := strconv.Atoi(c.Param("version"))
+	if err != nil || versionNumber < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_version"})
+		return
+	}
+	version, err := h.service.GetArtifactVersion(c, c.Param("id"), versionNumber)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, version)
 }
+
 func (h *CollaborationHandler) addArtifactVersion(c *gin.Context) {
 	var in collaboration.CreateArtifactRequest
-	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
-	v,err:=h.service.AddArtifactVersion(c,c.Param("id"),in);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusCreated,v)
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	version, err := h.service.AddArtifactVersion(c, c.Param("id"), in)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, version)
 }
+
 func (h *CollaborationHandler) listArtifactEvidence(c *gin.Context) {
-	items,err:=h.service.ListArtifactEvidence(c,c.Param("id"));if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,gin.H{"items":items})
+	items, err := h.service.ListArtifactEvidence(c, c.Param("id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
 }
+
 func (h *CollaborationHandler) addArtifactEvidence(c *gin.Context) {
 	var in collaboration.AddArtifactEvidenceRequest
-	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
-	item,err:=h.service.AddArtifactEvidence(c,c.Param("id"),in);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusCreated,item)
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	item, err := h.service.AddArtifactEvidence(c, c.Param("id"), in)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
+
 func (h *CollaborationHandler) verifyArtifact(c *gin.Context) {
-	var in struct{Version int `json:"version"`;Policy collaboration.ArtifactVerificationPolicy `json:"policy"`}
-	if c.ShouldBindJSON(&in)!=nil{c.JSON(http.StatusBadRequest,gin.H{"error":"invalid_request"});return}
-	result,err:=h.service.VerifyArtifact(c,c.Param("id"),in.Version,in.Policy);if err!=nil{h.fail(c,err);return};c.JSON(http.StatusOK,result)
+	var in struct {
+		Version int `json:"version"`
+		Policy  collaboration.ArtifactVerificationPolicy `json:"policy"`
+	}
+	if c.ShouldBindJSON(&in) != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request"})
+		return
+	}
+	result, err := h.service.VerifyArtifact(c, c.Param("id"), in.Version, in.Policy)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
