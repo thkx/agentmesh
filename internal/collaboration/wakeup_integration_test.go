@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,9 +17,14 @@ import (
 	"github.com/thkx/agentmesh/internal/workspace"
 )
 
-type immediateSuccessAdapter struct{}
+type immediateSuccessAdapter struct {
+	submitted chan execdom.Entity
+}
 
-func (immediateSuccessAdapter) Submit(context.Context, execdom.Entity) (string, error) {
+func (a immediateSuccessAdapter) Submit(_ context.Context, entity execdom.Entity) (string, error) {
+	if a.submitted != nil {
+		a.submitted <- entity
+	}
 	return "immediate-success", nil
 }
 func (immediateSuccessAdapter) Observe(context.Context, execdom.Entity) (executionmanager.Observation, error) {
@@ -26,6 +32,14 @@ func (immediateSuccessAdapter) Observe(context.Context, execdom.Entity) (executi
 	return executionmanager.Observation{Status: execdom.LifecycleSucceeded, Attempt: 1, Result: result}, nil
 }
 func (immediateSuccessAdapter) Cancel(context.Context, execdom.Entity) error { return nil }
+
+type staticMemoryRetriever struct {
+	value string
+}
+
+func (r staticMemoryRetriever) Retrieve(context.Context, string, string, []string, int) (string, error) {
+	return r.value, nil
+}
 
 type unusedCatalogRunner struct{}
 
@@ -96,7 +110,8 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = executions.Register(execdom.RuntimeAgent, immediateSuccessAdapter{}); err != nil {
+	submitted := make(chan execdom.Entity, 1)
+	if err = executions.Register(execdom.RuntimeAgent, immediateSuccessAdapter{submitted: submitted}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,6 +138,7 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wakeup.SetMemoryRetriever(staticMemoryRetriever{value: "Remember: this workspace requires migration-safe schema changes."})
 	workerCtx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- wakeup.Run(workerCtx) }()
@@ -157,6 +173,21 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 	if assignmentStatus != "completed" || taskStatus != "completed" {
 		cancel()
 		t.Fatalf("wakeup did not complete task: assignment=%s task=%s", assignmentStatus, taskStatus)
+	}
+	select {
+	case submittedExecution := <-submitted:
+		var submittedTask agentdom.Task
+		if err = json.Unmarshal(submittedExecution.Input, &submittedTask); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if !strings.Contains(submittedTask.SystemPrompt, "migration-safe schema changes") {
+			cancel()
+			t.Fatalf("long-term memory was not injected into runtime context: %q", submittedTask.SystemPrompt)
+		}
+	default:
+		cancel()
+		t.Fatal("execution adapter did not receive the assigned task")
 	}
 	session, err := service.GetActiveAgentSession(ctx, identity.ID)
 	if err != nil {

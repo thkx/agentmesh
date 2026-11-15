@@ -84,3 +84,8 @@ Operators can retry a repaired dead-letter record with `POST /api/v1/collaborati
 
 
 - GET /api/v1/collaboration/agents/:id/session returns the Agent Identity's active persistent Session and its current/last Execution pointers.
+
+
+## Long-term memory context
+
+Before submitting an assigned task to the P2 Execution Manager, Wakeup retrieves active global and Agent-scoped memories using the task title and description as the retrieval query. Retrieved content is appended to the bound Agent Definition's system prompt under an explicit untrusted-reference boundary. Memory retrieval failures fail the Inbox item through the existing bounded retry/dead-letter path; they are not silently ignored. Memory candidates remain inactive until explicitly promoted. Conversation Channel/Thread history is not yet automatically merged into the persistent Session context.

@@ -47,7 +47,7 @@ GitHub Actions runs the same build, vet and race verification on every push to `
 These are intentionally not represented as completed P3 behavior:
 
 1. `message.created` is delivered only to channel members as a notification. It does not automatically invoke an LLM or generate a chat reply. Inbox delivery is not equivalent to an Agent decision.
-2. Persistent Session records track execution continuity; they do not yet provide a complete cross-session memory/context assembly policy.
+2. Persistent Session records track execution continuity. Assignment wakeup retrieves promoted global and Agent-scoped memories, but does not yet assemble full Channel/Thread conversation history into each Agent Session.
 3. The Wakeup integration test uses a deterministic fake Execution adapter. A real provider/model/runtime smoke test must be run with the deployment's actual credentials and configured adapter.
 4. The collaboration API is delivered; a dedicated collaboration UI, multi-computer Runner fleet, artifact review UI and automatic agent-to-agent conversational loop are later work.
 

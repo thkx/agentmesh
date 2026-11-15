@@ -646,6 +646,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize collaboration wakeup worker: %w", err)
 	}
+	wakeupWorker.SetMemoryRetriever(memoryService)
 	workerWG.Add(1)
 	go func() {
 		defer workerWG.Done()
