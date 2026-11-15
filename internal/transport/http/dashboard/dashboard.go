@@ -2,12 +2,12 @@ package dashboard
 
 import (
 	"bytes"
-	_ "embed"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"html/template"
