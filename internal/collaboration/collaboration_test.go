@@ -249,7 +249,7 @@ func TestHandoffCreatesChildAndAssignmentAtomically(t *testing.T) {
  parent,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Parent task"});if err!=nil{t.Fatal(err)}
  handoff:=collaboration.Handoff{RequesterAgentID:planner.ID,Goal:"Child task",Recipient:worker.ID,IdempotencyKey:"atomic-child",Reason:"split work"}
  if _,err=db.DB.ExecContext(ctx,`CREATE TRIGGER reject_handoff_assignment BEFORE INSERT ON task_assignments
-  WHEN NEW.assigned_by='planner' BEGIN SELECT RAISE(ABORT,'forced assignment failure'); END;`);err!=nil{t.Fatal(err)}
+  WHEN NEW.status='pending' BEGIN SELECT RAISE(ABORT,'forced assignment failure'); END;`);err!=nil{t.Fatal(err)}
  if _,_,err=s.HandoffTask(ctx,parent.ID,handoff,planner.ID);err==nil{t.Fatal("expected assignment insert failure")}
  var children,childEvents int
  if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_tasks WHERE parent_task_id=?",parent.ID).Scan(&children);err!=nil{t.Fatal(err)}
