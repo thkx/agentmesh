@@ -156,3 +156,26 @@ Task requirements are persisted as normalized capability identifiers. Both direc
 Each managed Agent execution appends an immutable input and terminal result/failure entry to its persistent Agent Session. Entries are idempotent by session, execution and entry type; content is SHA-256 fingerprinted and capped at 256 KiB per entry, with truncation explicitly marked. SQLite triggers prevent updates and deletes. Subsequent assignments receive a bounded chronological snapshot as untrusted historical context. The transcript can be inspected through `GET /api/v1/collaboration/agents/:id/session/transcript`.
 
 This execution transcript complements, but does not replace, the source Channel/Thread message history. The current prompt still receives a separate bounded snapshot from channels where the Agent is an explicit member; complete thread-aware transcript replay remains outside this phase.
+
+## Agent Identity lifecycle
+
+Agent Identity lifecycle is recoverable and preserves execution history:
+
+- New identities start `offline`; `POST /api/v1/collaboration/agents/:id/enable` moves them to `idle`.
+- `POST /api/v1/collaboration/agents/:id/disable` prevents new claims. An unexpired claimed Assignment fences disable with a conflict.
+- `DELETE /api/v1/collaboration/agents/:id` performs a soft-delete, sets the identity to `disabled`, and hides it from active Workspace listings. It refuses to delete while an Assignment lease is active.
+- `POST /api/v1/collaboration/agents/:id/recover` restores the identity to `idle`; historical Assignments, Sessions, results and audit records remain intact.
+
+Soft-delete is intentional: hard deletion would destroy or invalidate immutable collaboration history and foreign-key relationships. The lifecycle state is stored in migration `000038_agent_identity_lifecycle`.
+
+## Stateful API acceptance
+
+Run the mutating end-to-end suite against a running local AgentMesh server:
+
+```bash
+bash scripts/e2e-p3.sh
+```
+
+Optional settings: `API_BASE_URL` and `API_TOKEN`. The script creates uniquely named Workspace, Agent, Channel, Task, Approval and Artifact records and retains them for inspection; it does not delete existing or generated data. It exercises Agent enable/disable/delete/recover, channel message persistence, idempotent Task creation, directed approval rejection through Dispatcher/Wakeup, Task reassignment, decision audit, and Artifact Evidence/Verification/Submission/Review.
+
+The suite deliberately uses the Directed approval rejection path rather than invoking an external LLM. The deterministic Wakeup-to-Execution integration test remains covered by `go test -race ./...`; a real provider-backed model execution requires deployment credentials and a separately configured Agent Runtime binding.
