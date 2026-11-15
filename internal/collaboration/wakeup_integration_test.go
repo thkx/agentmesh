@@ -83,10 +83,12 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 
 	deadline:=time.Now().Add(5*time.Second)
 	for time.Now().Before(deadline) {
-		var status string
-		err=db.DB.QueryRowContext(ctx,"SELECT status FROM task_assignments WHERE id=?",assignment.ID).Scan(&status)
+		var assignmentStatus,inboxStatus string
+		err=db.DB.QueryRowContext(ctx,"SELECT status FROM task_assignments WHERE id=?",assignment.ID).Scan(&assignmentStatus)
 		if err!=nil{cancel();t.Fatal(err)}
-		if status=="completed"{break}
+		err=db.DB.QueryRowContext(ctx,"SELECT status FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assigned' ORDER BY received_at DESC LIMIT 1",identity.ID).Scan(&inboxStatus)
+		if err!=nil{cancel();t.Fatal(err)}
+		if assignmentStatus=="completed"&&inboxStatus=="handled"{break}
 		time.Sleep(10*time.Millisecond)
 	}
 	var assignmentStatus,taskStatus string
