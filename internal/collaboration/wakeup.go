@@ -173,6 +173,18 @@ func (w *WakeupWorker) handle(ctx context.Context, lease InboxLease) error {
 			break
 		}
 		processErr = w.executeAssignment(ctx, lease, assignmentID)
+	case "task.completed":
+		var payload struct {
+			TaskID       string          `json:"task_id"`
+			AssignmentID string          `json:"assignment_id"`
+			ExecutionID  string          `json:"execution_id"`
+			Result       json.RawMessage `json:"result"`
+		}
+		if err := json.Unmarshal(lease.Payload, &payload); err != nil {
+			processErr = err
+			break
+		}
+		processErr = w.service.StoreTaskResult(ctx, lease.AgentID, payload.TaskID, payload.AssignmentID, payload.ExecutionID, payload.Result)
 	case "approval.approved":
 		var payload struct {
 			ApprovalID string `json:"approval_id"`
