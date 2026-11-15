@@ -287,7 +287,6 @@ func (r *Repository) Snapshots(ctx context.Context, taskID string) ([]Snapshot, 
 	return out, rows.Err()
 }
 
-
 // CancelPending atomically cancels a task that has not been claimed by a worker.
 // The state transition and event are committed together so a racing worker either
 // claims the task first or observes that the task is no longer pending.

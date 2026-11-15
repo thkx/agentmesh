@@ -35,7 +35,9 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	defer ticker.Stop()
 	for {
 		if err := d.DispatchOnce(ctx, 100); err != nil {
-			if ctx.Err() != nil { return ctx.Err() }
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			slog.ErrorContext(ctx, "collaboration outbox dispatch batch had failures", "error", err)
 		}
 		select {
@@ -47,7 +49,9 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 func (d *Dispatcher) DispatchOnce(ctx context.Context, limit int) error {
-	if err := d.expireApprovals(ctx, 100); err != nil { return err }
+	if err := d.expireApprovals(ctx, 100); err != nil {
+		return err
+	}
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
@@ -134,41 +138,67 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-type expiredApproval struct { id, workspaceID, requesterID string }
+type expiredApproval struct{ id, workspaceID, requesterID string }
 
 func (d *Dispatcher) expireApprovals(ctx context.Context, limit int) error {
-	if limit < 1 || limit > 500 { limit = 100 }
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
 	rows, err := tx.QueryContext(ctx, `SELECT id,workspace_id,COALESCE(requester_agent_id,'')
 		FROM collaboration_approvals WHERE status='pending' AND expires_at<=?
 		ORDER BY expires_at,id LIMIT ?`, now.UnixMilli(), limit)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	items := make([]expiredApproval, 0)
 	for rows.Next() {
 		var item expiredApproval
-		if err = rows.Scan(&item.id,&item.workspaceID,&item.requesterID); err != nil { rows.Close(); return err }
-		items = append(items,item)
+		if err = rows.Scan(&item.id, &item.workspaceID, &item.requesterID); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
 	}
-	if err = rows.Err(); err != nil { rows.Close(); return err }
-	if err = rows.Close(); err != nil { return err }
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err = rows.Close(); err != nil {
+		return err
+	}
 	for _, item := range items {
-		res, updateErr := tx.ExecContext(ctx,`UPDATE collaboration_approvals SET status='expired',decided_at=?
-			WHERE id=? AND status='pending' AND expires_at<=?`,now.UnixMilli(),item.id,now.UnixMilli())
-		if updateErr != nil { return updateErr }
+		res, updateErr := tx.ExecContext(ctx, `UPDATE collaboration_approvals SET status='expired',decided_at=?
+			WHERE id=? AND status='pending' AND expires_at<=?`, now.UnixMilli(), item.id, now.UnixMilli())
+		if updateErr != nil {
+			return updateErr
+		}
 		n, rowsErr := res.RowsAffected()
-		if rowsErr != nil { return rowsErr }
-		if n != 1 { continue }
-		payload, marshalErr := json.Marshal(map[string]any{"approval_id":item.id,"requester_agent_id":item.requesterID,"status":"expired"})
-		if marshalErr != nil { return marshalErr }
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if n != 1 {
+			continue
+		}
+		payload, marshalErr := json.Marshal(map[string]any{"approval_id": item.id, "requester_agent_id": item.requesterID, "status": "expired"})
+		if marshalErr != nil {
+			return marshalErr
+		}
 		eventID, idErr := newID()
-		if idErr != nil { return idErr }
-		if _, err = tx.ExecContext(ctx,`INSERT INTO collaboration_outbox
+		if idErr != nil {
+			return idErr
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO collaboration_outbox
 			(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at)
 			VALUES(?,?, 'approval', ?, 'approval.expired', ?, ?)`,
-			eventID,item.workspaceID,item.id,string(payload),now.UnixMilli()); err != nil { return err }
+			eventID, item.workspaceID, item.id, string(payload), now.UnixMilli()); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -177,16 +207,26 @@ func (d *Dispatcher) expireApprovals(ctx context.Context, limit int) error {
 // dispatch failures. Once the ceiling is reached, the event is dead-lettered so it
 // cannot block unrelated events behind it.
 func (d *Dispatcher) recordDispatchFailure(ctx context.Context, id string, cause error) error {
-	if cause == nil { return nil }
+	if cause == nil {
+		return nil
+	}
 	message := strings.TrimSpace(cause.Error())
-	if len(message) > 2000 { message = message[:2000] }
+	if len(message) > 2000 {
+		message = message[:2000]
+	}
 	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil { return errors.Join(cause, err) }
+	if err != nil {
+		return errors.Join(cause, err)
+	}
 	defer tx.Rollback()
 	var attempts int
 	err = tx.QueryRowContext(ctx, "SELECT attempts FROM collaboration_outbox WHERE id=? AND published_at IS NULL", id).Scan(&attempts)
-	if errors.Is(err, sql.ErrNoRows) { return nil }
-	if err != nil { return errors.Join(cause, err) }
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return errors.Join(cause, err)
+	}
 	attempts++
 	now := time.Now().UTC()
 	var published any
@@ -199,8 +239,12 @@ func (d *Dispatcher) recordDispatchFailure(ctx context.Context, id string, cause
 	}
 	_, err = tx.ExecContext(ctx, "UPDATE collaboration_outbox SET attempts=?,next_attempt_at=?,published_at=?,last_error=? WHERE id=? AND published_at IS NULL",
 		attempts, nextAttempt, published, lastError, id)
-	if err != nil { return errors.Join(cause, err) }
-	if err = tx.Commit(); err != nil { return errors.Join(cause, err) }
+	if err != nil {
+		return errors.Join(cause, err)
+	}
+	if err = tx.Commit(); err != nil {
+		return errors.Join(cause, err)
+	}
 	return fmt.Errorf("outbox event %s dispatch attempt %d: %w", id, attempts, cause)
 }
 

@@ -18,16 +18,16 @@ import (
 	"github.com/thkx/agentmesh/internal/agent/scheduler"
 	agentstate "github.com/thkx/agentmesh/internal/agent/state"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
-	"github.com/thkx/agentmesh/internal/collaboration"
-	"github.com/thkx/agentmesh/internal/conversation"
 	"github.com/thkx/agentmesh/internal/airesource"
 	"github.com/thkx/agentmesh/internal/coding"
+	"github.com/thkx/agentmesh/internal/collaboration"
 	"github.com/thkx/agentmesh/internal/config"
+	"github.com/thkx/agentmesh/internal/conversation"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/execution"
+	"github.com/thkx/agentmesh/internal/domain/provider"
 	executionmanager "github.com/thkx/agentmesh/internal/execution/manager"
 	executionrepository "github.com/thkx/agentmesh/internal/execution/repository"
-	"github.com/thkx/agentmesh/internal/domain/provider"
 	goalservice "github.com/thkx/agentmesh/internal/goal"
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	memoryservice "github.com/thkx/agentmesh/internal/memory"
@@ -355,11 +355,23 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("register agent execution adapter: %w", err)
 	}
 	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService)
-	if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize coding execution adapter: %w", err) }
-	if err := executionManager.Register(execution.RuntimeCoding, codingExecutionAdapter); err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("register coding execution adapter: %w", err) }
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize coding execution adapter: %w", err)
+	}
+	if err := executionManager.Register(execution.RuntimeCoding, codingExecutionAdapter); err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("register coding execution adapter: %w", err)
+	}
 	cliExecutionAdapter, err := executionmanager.NewCLIAdapter(agentExec, executionStore)
-	if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize CLI execution adapter: %w", err) }
-	if err := executionManager.Register(execution.RuntimeCLI, cliExecutionAdapter); err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("register CLI execution adapter: %w", err) }
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize CLI execution adapter: %w", err)
+	}
+	if err := executionManager.Register(execution.RuntimeCLI, cliExecutionAdapter); err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("register CLI execution adapter: %w", err)
+	}
 	agentExecutionObserver, err := executionmanager.NewAgentObserver(executionStore)
 	if err != nil {
 		_ = sqliteDB.Close()
@@ -464,8 +476,18 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize workflow engine: %w", err)
 	}
 	workflowExecutionAdapter, err := executionmanager.NewWorkflowAdapter(workflowEngine, cfg.Scheduler.MaxAttempts)
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize workflow execution adapter: %w", err) }
-	if err := executionManager.Register(execution.RuntimeWorkflow, workflowExecutionAdapter); err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("register workflow execution adapter: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize workflow execution adapter: %w", err)
+	}
+	if err := executionManager.Register(execution.RuntimeWorkflow, workflowExecutionAdapter); err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("register workflow execution adapter: %w", err)
+	}
 	workerWG.Add(1)
 	go func() {
 		defer workerWG.Done()
@@ -578,24 +600,59 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	go func() { workerWG.Wait(); close(workerDone) }()
 
 	conversationRepo, err := conversation.NewSQLiteRepository(sqliteDB.DB)
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration conversation repository: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration conversation repository: %w", err)
+	}
 	conversationService, err := conversation.NewService(conversationRepo)
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration conversation service: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration conversation service: %w", err)
+	}
 	collaborationService, err := collaboration.NewService(sqliteDB.DB, conversationService)
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration service: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration service: %w", err)
+	}
 	collaborationDispatcher, err := collaboration.NewDispatcher(sqliteDB.DB, time.Second)
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration dispatcher: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration dispatcher: %w", err)
+	}
 	workerWG.Add(1)
-	go func() { defer workerWG.Done(); if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) { log.Error("collaboration dispatcher stopped", "error", runErr) } }()
+	go func() {
+		defer workerWG.Done()
+		if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
+			log.Error("collaboration dispatcher stopped", "error", runErr)
+		}
+	}()
 
 	wakeupWorker, err := collaboration.NewWakeupWorker(collaborationService, agentDefinitions, executionManager, workspaceManager, collaboration.WakeupConfig{
 		WorkerID: cfg.Scheduler.WorkerID, PollInterval: cfg.Scheduler.PollInterval,
-		InboxLease: 2*time.Minute, AssignmentLease: 2*time.Minute,
+		InboxLease: 2 * time.Minute, AssignmentLease: 2 * time.Minute,
 		MaxInboxAttempts: 8, Logger: log,
 	})
-	if err != nil { workerCancel(); workerWG.Wait(); _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize collaboration wakeup worker: %w", err) }
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration wakeup worker: %w", err)
+	}
 	workerWG.Add(1)
-	go func() { defer workerWG.Done(); if runErr := wakeupWorker.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) { log.Error("collaboration wakeup worker stopped", "error", runErr) } }()
+	go func() {
+		defer workerWG.Done()
+		if runErr := wakeupWorker.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
+			log.Error("collaboration wakeup worker stopped", "error", runErr)
+		}
+	}()
 
 	container := &Container{
 		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,

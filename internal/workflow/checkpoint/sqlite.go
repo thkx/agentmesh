@@ -460,27 +460,41 @@ func (s *Store) EnqueueRun(ctx context.Context, runID string, maxAttempts int) e
 // CancelQueuedRun atomically cancels a run that has not been claimed by a worker.
 func (s *Store) CancelQueuedRun(ctx context.Context, runID string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	var raw string
 	if err = tx.QueryRowContext(ctx, `SELECT state_json FROM workflow_runs WHERE id=? AND status='queued'`, runID).Scan(&raw); err != nil {
-		if errors.Is(err, sql.ErrNoRows) { return errors.New("workflow run is not queued") }
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("workflow run is not queued")
+		}
 		return err
 	}
 	var run workflow.Run
-	if err = json.Unmarshal([]byte(raw), &run); err != nil { return err }
+	if err = json.Unmarshal([]byte(raw), &run); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	run.Status = workflow.RunCanceled
 	run.Error = "canceled before worker claim"
 	run.FinishedAt = now
 	run.UpdatedAt = now
 	encoded, err := json.Marshal(run)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `UPDATE workflow_runs SET status='canceled',state_json=?,updated_at=? WHERE id=? AND status='queued'`, string(encoded), now.Unix(), runID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	n, _ := res.RowsAffected()
-	if n != 1 { return errors.New("workflow run state changed during cancellation") }
-	if _, err = tx.ExecContext(ctx, `UPDATE workflow_jobs SET status='canceled',last_error='canceled before worker claim',updated_at=? WHERE run_id=? AND status='queued'`, now.Unix(), runID); err != nil { return err }
+	if n != 1 {
+		return errors.New("workflow run state changed during cancellation")
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE workflow_jobs SET status='canceled',last_error='canceled before worker claim',updated_at=? WHERE run_id=? AND status='queued'`, now.Unix(), runID); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -772,7 +786,9 @@ func (s *Store) FinishRun(ctx context.Context, job Job, run workflow.Run, runErr
 	case workflow.RunFailed:
 		status = "failed"
 	default:
-		if runErr != nil { status = "failed" }
+		if runErr != nil {
+			status = "failed"
+		}
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

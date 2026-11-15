@@ -126,17 +126,31 @@ func (s *Service) RenewInboxLease(ctx context.Context, agentID, eventID, owner, 
 	return expires, nil
 }
 
-func (s *Service) RequeueInbox(ctx context.Context,agentID,eventID string) error {
-	if strings.TrimSpace(agentID)==""||strings.TrimSpace(eventID)=="" { return ErrInvalid }
-	res,err:=s.db.ExecContext(ctx,`UPDATE collaboration_inbox
+func (s *Service) RequeueInbox(ctx context.Context, agentID, eventID string) error {
+	if strings.TrimSpace(agentID) == "" || strings.TrimSpace(eventID) == "" {
+		return ErrInvalid
+	}
+	res, err := s.db.ExecContext(ctx, `UPDATE collaboration_inbox
 		SET status='pending',attempts=0,next_attempt_at=0,lease_owner='',lease_token='',
 		lease_expires_at=NULL,last_error='',handled_at=NULL
-		WHERE agent_id=? AND event_id=? AND status='failed'`,agentID,eventID)
-	if err!=nil{return err}
-	n,err:=res.RowsAffected();if err!=nil{return err};if n==1{return nil}
+		WHERE agent_id=? AND event_id=? AND status='failed'`, agentID, eventID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 1 {
+		return nil
+	}
 	var count int
-	if err=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_id=?",agentID,eventID).Scan(&count);err!=nil{return err}
-	if count==0{return ErrNotFound}
+	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_id=?", agentID, eventID).Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotFound
+	}
 	return ErrConflict
 }
 
@@ -186,10 +200,16 @@ func (s *Service) FailInboxLease(ctx context.Context, agentID, eventID, owner, t
 			SET status='failed', handled_at=?, lease_owner='', lease_token='', lease_expires_at=NULL, last_error=?
 			WHERE agent_id=? AND event_id=? AND status='processing' AND lease_owner=? AND lease_token=? AND lease_expires_at>?`,
 			now.UnixMilli(), cause, agentID, eventID, owner, token, now.UnixMilli())
-		if err != nil { return time.Time{}, err }
+		if err != nil {
+			return time.Time{}, err
+		}
 		n, rowsErr := res.RowsAffected()
-		if rowsErr != nil { return time.Time{}, rowsErr }
-		if n != 1 { return time.Time{}, ErrInboxLeaseLost }
+		if rowsErr != nil {
+			return time.Time{}, rowsErr
+		}
+		if n != 1 {
+			return time.Time{}, ErrInboxLeaseLost
+		}
 		return time.Time{}, nil
 	}
 	delay := time.Second * time.Duration(1<<min(attempts-1, 8))

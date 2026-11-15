@@ -218,7 +218,6 @@ func (m *Manager) Cancel(ctx context.Context, id string) error {
 	return adapter.Cancel(ctx, e)
 }
 
-
 // Resolve records an explicit human decision for an execution whose runtime
 // outcome could not be determined safely. It never replays the underlying work.
 func (m *Manager) Resolve(ctx context.Context, id string, status dom.LifecycleStatus, result json.RawMessage, reason string) (dom.Entity, error) {
@@ -268,8 +267,8 @@ func (m *Manager) List(ctx context.Context, f dom.ListFilter) ([]dom.Entity, err
 }
 
 type ReconcileReport struct {
-	Scanned         int `json:"scanned"`
-	Recovered       int `json:"recovered"`
+	Scanned        int `json:"scanned"`
+	Recovered      int `json:"recovered"`
 	NeedsAttention int `json:"needs_attention"`
 }
 
@@ -344,7 +343,9 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 // It never replays a running execution; ambiguous outcomes remain visible for
 // manual reconciliation according to the adapter's observation contract.
 func (m *Manager) RunReconciler(ctx context.Context, interval time.Duration, limit int, onError func(error)) {
-	if interval <= 0 { interval = 15 * time.Second }
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {

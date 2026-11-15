@@ -84,7 +84,9 @@ func (w *Worker) runOne(ctx context.Context) error {
 	}
 	if w.cfg.Observer != nil {
 		observerCtx, observerCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if observerErr := w.cfg.Observer.Started(observerCtx, job); observerErr != nil { w.logger.ErrorContext(observerCtx, "execution observer start failed", "job_id", job.ID, "error", observerErr) }
+		if observerErr := w.cfg.Observer.Started(observerCtx, job); observerErr != nil {
+			w.logger.ErrorContext(observerCtx, "execution observer start failed", "job_id", job.ID, "error", observerErr)
+		}
 		observerCancel()
 	}
 	workCtx, cancel := context.WithCancel(ctx)
@@ -104,14 +106,22 @@ func (w *Worker) runOne(ctx context.Context) error {
 		finishErr := w.store.Fail(finishCtx, job.ID, w.cfg.ID, runErr)
 		if w.cfg.Observer != nil {
 			finalJob, getErr := w.store.Get(finishCtx, job.ID)
-			if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, runErr); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
+			if getErr == nil {
+				if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, runErr); observerErr != nil {
+					w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr)
+				}
+			}
 		}
 		return finishErr
 	}
 	finishErr := w.store.Complete(finishCtx, job.ID, w.cfg.ID)
 	if w.cfg.Observer != nil {
 		finalJob, getErr := w.store.Get(finishCtx, job.ID)
-		if getErr == nil { if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, nil); observerErr != nil { w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr) } }
+		if getErr == nil {
+			if observerErr := w.cfg.Observer.Finished(finishCtx, finalJob, result, nil); observerErr != nil {
+				w.logger.ErrorContext(finishCtx, "execution observer finish failed", "job_id", job.ID, "error", observerErr)
+			}
+		}
 	}
 	return finishErr
 }
