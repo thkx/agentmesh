@@ -28,7 +28,7 @@ jobs:
             exit 1
           fi
       - name: Check P3 acceptance scripts
-        run: bash -n scripts/test-p3.sh scripts/e2e-p3.sh scripts/verify-p3.sh
+        run: bash -n scripts/test-p3.sh scripts/e2e-p3.sh scripts/verify-p3.sh scripts/verify-p5-part1.sh
       - name: Build
         run: go build ./...
       - name: Vet
