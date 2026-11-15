@@ -191,7 +191,7 @@ func TestRouterStreamsOpenAICompatibleSSEAndRecordsUsage(t *testing.T) {
 	addRouterTestModel(t, service, "stream-model", "stream-model-key", []struct {
 		id string
 		url string
-		priority int
+		priority     int
 		credentialID string
 		key string
 	}{
