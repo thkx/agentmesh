@@ -175,3 +175,31 @@ func TestLLMTaskResultEvaluatorHonorsDirectedWorkspaceMode(t *testing.T) {
 		t.Fatal("directed workspace must not invoke the model reviewer")
 	}
 }
+
+func TestLLMTaskResultEvaluatorUsesLatestVerificationOnly(t *testing.T) {
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(&fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"Looks good.","confidence":0.99,"evidence_refs":["evidence-1","verification-old"]}`,
+	}, func(context.Context, string) (string, error) { return "reviewer-model", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
+		Artifacts: []collaboration.TaskArtifactContext{{
+			Artifact: collaboration.Artifact{ID: "artifact-1", Status: "submitted", SubmittedVersionID: "version-1"},
+			Version:  collaboration.ArtifactVersion{ID: "version-1"},
+			Evidence: []collaboration.ArtifactEvidence{{ID: "evidence-1"}},
+			Verifications: []collaboration.ArtifactVerification{
+				{ID: "verification-new", Outcome: "failed"},
+				{ID: "verification-old", Outcome: "passed"},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("an older passed verification must not override the latest failed verification, got %+v", assessment)
+	}
+}

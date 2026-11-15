@@ -164,10 +164,14 @@ func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Conte
 			for _, evidence := range artifact.Evidence {
 				acceptanceRefs[evidence.ID] = struct{}{}
 			}
-			for _, verification := range artifact.Verifications {
-				acceptanceRefs[verification.ID] = struct{}{}
-				if verification.Outcome == "passed" {
+			// Verification history is newest-first. Only the latest result for
+			// the submitted version is authoritative: an older pass must not
+			// override a later failed or incomplete verification.
+			if len(artifact.Verifications) > 0 {
+				latest := artifact.Verifications[0]
+				if latest.Outcome == "passed" {
 					hasPassedVerification = true
+					acceptanceRefs[latest.ID] = struct{}{}
 				}
 			}
 		}
