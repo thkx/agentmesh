@@ -9,6 +9,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -315,9 +316,8 @@ func (h *Handler) workflows(c *gin.Context) {
 
 func (h *Handler) executions(c *gin.Context) {
 	data := pageData{
-		Title:      "Executions",
-		Active:     "executions",
-		Executions: []executionRow{},
+		Title: "Executions", Active: "executions", Executions: []executionRow{},
+		FilterStatus: c.Query("status"), FilterKind: c.Query("kind"), FilterRuntime: c.Query("runtime"),
 	}
 	if h.db == nil {
 		h.render(c, data, http.StatusOK)
@@ -336,9 +336,14 @@ func (h *Handler) executions(c *gin.Context) {
 		offset = 0
 	}
 
-	query := `SELECT id,kind,runtime,COALESCE(task_id,''),status,created_at,updated_at
-		FROM executions ORDER BY created_at DESC LIMIT ? OFFSET ?`
-	rows, err := h.db.QueryContext(c.Request.Context(), query, limit, offset)
+	where := []string{"1=1"}
+	args := []any{}
+	if data.FilterStatus != "" { where = append(where, "status=?"); args = append(args, data.FilterStatus) }
+	if data.FilterKind != "" { where = append(where, "kind=?"); args = append(args, data.FilterKind) }
+	if data.FilterRuntime != "" { where = append(where, "runtime=?"); args = append(args, data.FilterRuntime) }
+	query := `SELECT id,kind,runtime,COALESCE(task_id,''),status,created_at,updated_at FROM executions WHERE ` + strings.Join(where, " AND ") + ` ORDER BY created_at DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := h.db.QueryContext(c.Request.Context(), query, args...)
 	if err != nil {
 		data.Error = "Could not load executions"
 		h.render(c, data, http.StatusInternalServerError)
@@ -388,9 +393,50 @@ func (h *Handler) execution(c *gin.Context) {
 	}
 	item.CreatedAt = time.Unix(0, created).UTC().Format(time.RFC3339)
 	item.UpdatedAt = time.Unix(0, updated).UTC().Format(time.RFC3339)
-	h.render(c, pageData{
-		Title: "Execution " + item.ID, Active: "executions", Execution: &item,
-	}, http.StatusOK)
+	data := pageData{Title:"Execution " + item.ID, Active:"executions", Execution:&item}
+	if err := h.loadExecutionRelations(c, item.ID, &data); err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageData) error {
+	data.Attempts = []attemptView{}
+	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT id,attempt_number,runtime,status,started_at,finished_at FROM execution_attempts WHERE execution_id=? ORDER BY attempt_number`, id)
+	if err != nil { return err }
+	for rows.Next() {
+		var v attemptView; var started int64; var finished sql.NullInt64
+		if err = rows.Scan(&v.ID,&v.Number,&v.Runtime,&v.Status,&started,&finished); err != nil { rows.Close(); return err }
+		v.StartedAt=time.Unix(0,started).UTC().Format(time.RFC3339)
+		if finished.Valid { v.FinishedAt=time.Unix(0,finished.Int64).UTC().Format(time.RFC3339) }
+		data.Attempts=append(data.Attempts,v)
+	}
+	if err=rows.Err(); err!=nil { rows.Close(); return err }; if err=rows.Close(); err!=nil { return err }
+
+	data.Artifacts=[]artifactView{}
+	rows,err=h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version,COALESCE(media_type,''),COALESCE(content_sha256,''),COALESCE(size_bytes,0) FROM collaboration_artifact_versions WHERE source_execution_id=? OR source_attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY artifact_id,version`,id,id)
+	if err!=nil{return err}
+	for rows.Next(){var v artifactView;if err=rows.Scan(&v.ID,&v.ArtifactID,&v.Version,&v.MediaType,&v.Hash,&v.Size);err!=nil{rows.Close();return err};data.Artifacts=append(data.Artifacts,v)}
+	if err=rows.Err();err!=nil{rows.Close();return err};if err=rows.Close();err!=nil{return err}
+
+	data.Evidence=[]evidenceView{}
+	rows,err=h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version_id,kind,COALESCE(statement,'') FROM collaboration_artifact_evidence WHERE execution_id=? OR attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY created_at,id`,id,id)
+	if err!=nil{return err}
+	for rows.Next(){var v evidenceView;if err=rows.Scan(&v.ID,&v.ArtifactID,&v.VersionID,&v.Kind,&v.Statement);err!=nil{rows.Close();return err};data.Evidence=append(data.Evidence,v)}
+	if err=rows.Err();err!=nil{rows.Close();return err};if err=rows.Close();err!=nil{return err}
+
+	data.Events=[]eventView{}
+	for _,stream:=range []string{"lifecycle","control"} {
+		table:="execution_events"; if stream=="control"{table="execution_control_events"}
+		q:="SELECT sequence,event_type,actor_type,source,payload_json,occurred_at FROM "+table+" WHERE execution_id=? ORDER BY occurred_at DESC,sequence DESC LIMIT 100"
+		rows,err=h.db.QueryContext(c.Request.Context(),q,id);if err!=nil{return err}
+		for rows.Next(){var v eventView;var payload sql.NullString;var ts int64;v.Stream=stream
+			if err=rows.Scan(&v.Sequence,&v.Type,&v.Actor,&v.Source,&payload,&ts);err!=nil{rows.Close();return err}
+			v.Payload=payload.String;v.OccurredAt=time.Unix(0,ts).UTC().Format(time.RFC3339Nano);data.Events=append(data.Events,v)
+		}
+		if err=rows.Err();err!=nil{rows.Close();return err};if err=rows.Close();err!=nil{return err}
+	}
+	sort.Slice(data.Events,func(i,j int)bool{return data.Events[i].OccurredAt>data.Events[j].OccurredAt})
+	if len(data.Events)>100 {data.Events=data.Events[:100]}
+	return nil
 }
 
 func (h *Handler) cancelExecution(c *gin.Context) {
