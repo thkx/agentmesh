@@ -23,9 +23,13 @@ func TestDashboardBrowserSessionDoesNotAuthorizeAPI(t *testing.T) {
 	}
 	var session *http.Cookie
 	for _, cookie := range loginResponse.Result().Cookies() {
-		if cookie.Name == "agentmesh_dashboard" { session = cookie }
+		if cookie.Name == "agentmesh_dashboard" {
+			session = cookie
+		}
 	}
-	if session == nil { t.Fatal("dashboard login did not issue a browser session") }
+	if session == nil {
+		t.Fatal("dashboard login did not issue a browser session")
+	}
 
 	apiRequest := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil)
 	apiRequest.AddCookie(session)
