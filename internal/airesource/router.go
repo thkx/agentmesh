@@ -143,6 +143,18 @@ func (r *Router) Generate(ctx context.Context, req GenerateRequest) (GenerateRes
 	if err != nil {
 		return GenerateResponse{}, err
 	}
+	if len(req.Tools) > 0 {
+		compatible := make([]Candidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.Provider.Protocol == ProtocolOpenAI {
+				compatible = append(compatible, candidate)
+			}
+		}
+		if len(compatible) == 0 {
+			return GenerateResponse{}, ErrNativeToolCallingUnsupported
+		}
+		candidates = compatible
+	}
 	if len(candidates) == 0 {
 		return GenerateResponse{}, ErrNoCandidate
 	}
