@@ -401,6 +401,10 @@ func (h *CatalogHandler) getModel(c *gin.Context) {
 			c.JSON(200, modelAPIResponse{ID: dynamic.ID, ProviderID: "ai-resource", Name: dynamic.ModelKey, DisplayName: dynamic.DisplayName, SupportsStreaming: dynamic.SupportsStreaming, Enabled: dynamic.Enabled, Status: status, CreatedAt: dynamic.CreatedAt, UpdatedAt: dynamic.UpdatedAt, Source: "ai_resource", ModelKey: dynamic.ModelKey})
 			return
 		}
+		if !errors.Is(err, airesource.ErrNotFound) {
+			apiError(c, 500, "dynamic_model_lookup_failed", "Could not load AI Resource model")
+			return
+		}
 	}
 	apiError(c, 404, "model_not_found", "Model does not exist")
 }
