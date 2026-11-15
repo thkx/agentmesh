@@ -351,13 +351,17 @@ func (h *UnifiedExecutionHandler) readTimelineStream(c *gin.Context, id, stream 
 	for rows.Next() {
 		var item unifiedTimelineEvent
 		var occurred int64
+		var payload sql.NullString
 		item.Stream = stream
 		if err = rows.Scan(&item.Sequence, &item.EventID, &item.EventKey, &item.Type,
-			&item.ActorType, &item.ActorID, &item.Source, &item.Payload, &occurred, &item.AttemptID); err != nil {
+			&item.ActorType, &item.ActorID, &item.Source, &payload, &occurred, &item.AttemptID); err != nil {
 			return err
 		}
 		item.OccurredAt = time.Unix(0, occurred).UTC()
-		item.Payload = append(jsonRawMessage(nil), item.Payload...)
+		item.Payload = nullableRawJSON(payload)
+		if item.Payload == nil {
+			item.Payload = jsonRawMessage("{}")
+		}
 		*out = append(*out, item)
 	}
 	return rows.Err()
