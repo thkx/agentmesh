@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -22,7 +23,7 @@ type ExecutionEvent struct {
 	ActorType   string         `json:"actor_type"`
 	ActorID     string         `json:"actor_id,omitempty"`
 	Source      string         `json:"source"`
-	Payload     string         `json:"payload"`
+	Payload     json.RawMessage `json:"payload"`
 	OccurredAt  time.Time      `json:"occurred_at"`
 }
 
@@ -84,12 +85,14 @@ func (h *ExecutionEventsHandler) list(c *gin.Context) {
 	for rows.Next() {
 		var item ExecutionEvent
 		var occurredAt int64
+		var payload []byte
 		if err = rows.Scan(&item.Sequence, &item.EventID, &item.EventKey, &item.ExecutionID,
 			&item.AttemptID, &item.Type, &item.ActorType, &item.ActorID, &item.Source,
-			&item.Payload, &occurredAt); err != nil {
+			&payload, &occurredAt); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "execution_events_read_failed"})
 			return
 		}
+		item.Payload = append(json.RawMessage(nil), payload...)
 		item.OccurredAt = time.Unix(0, occurredAt).UTC()
 		items = append(items, item)
 	}
