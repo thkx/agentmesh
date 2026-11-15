@@ -90,12 +90,20 @@ type executionDetail struct {
 
 func New(d Dependencies) *Handler {
 	t := template.Must(template.New("dashboard").Parse(layoutTemplate + pageTemplate + loginTemplate))
-	return &Handler{
+	h := &Handler{
 		db:      d.DB,
 		token:   d.APIToken,
 		manager: d.ExecutionManager,
-		tmpl:    t,
+		providers: d.Providers,
+		models: d.Models,
+		credentials: d.Credentials,
+		agents: d.AgentDefinitions,
+		tmpl: t,
 	}
+	if d.DB != nil {
+		h.workflowRepo, _ = authoring.NewRepository(d.DB)
+	}
+	return h
 }
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
