@@ -37,7 +37,7 @@ func TestArtifactProvenanceBindingPreservesVersionContentImmutability(t *testing
 		WorkspaceID:     workspace.ID,
 		Kind:            "report",
 		Title:           "Immutable report",
-		Content:         []byte("original artifact bytes",
+		Content:         []byte("original artifact bytes"),
 		SourceExecution: "immutable-exec",
 	})
 	if err != nil {
