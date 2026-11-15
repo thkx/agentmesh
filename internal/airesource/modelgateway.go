@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/thkx/agentmesh/internal/domain/provider"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
@@ -19,6 +20,26 @@ type ModelGatewayRouter struct {
 
 func NewModelGatewayRouter(service *Service, router *Router) *ModelGatewayRouter {
 	return &ModelGatewayRouter{service: service, router: router}
+}
+
+// ResolveModel exposes AI Resource models to AgentMesh by ai_models.id.
+// The provider ID is a logical namespace, not a legacy ProviderRegistry entry.
+func (r *ModelGatewayRouter) ResolveModel(ctx context.Context, modelID string) (provider.Model, bool, error) {
+	if r == nil || r.service == nil || r.router == nil {
+		return provider.Model{}, false, errors.New("dynamic model gateway router is not initialized")
+	}
+	m, err := r.service.GetModelByID(ctx, modelID)
+	if errors.Is(err, ErrNotFound) {
+		return provider.Model{}, false, nil
+	}
+	if err != nil {
+		return provider.Model{}, false, err
+	}
+	return provider.Model{
+		ID: m.ID, ProviderID: provider.ID("ai-resource"), Name: m.ModelKey,
+		DisplayName: m.DisplayName, SupportsStreaming: m.SupportsStreaming,
+		Enabled: m.Enabled, CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}, true, nil
 }
 
 func (r *ModelGatewayRouter) Supports(ctx context.Context, modelKey string) (bool, error) {
