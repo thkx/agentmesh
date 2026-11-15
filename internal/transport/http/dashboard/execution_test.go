@@ -54,4 +54,14 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 	if strings.Index(rec.Body.String(), "cancel.requested") > strings.Index(rec.Body.String(), "attempt.succeeded") {
 		t.Fatal("timeline events are not ordered oldest first")
 	}
+
+	cursorRequest := httptest.NewRequest(http.MethodGet, "/dashboard/executions/exec-1?after_time_ns=250&after_stream=control&after_sequence=1", nil)
+	cursorResponse := httptest.NewRecorder()
+	r.ServeHTTP(cursorResponse, cursorRequest)
+	if cursorResponse.Code != http.StatusOK {
+		t.Fatalf("cursor detail status=%d body=%s", cursorResponse.Code, cursorResponse.Body.String())
+	}
+	if strings.Contains(cursorResponse.Body.String(), "cancel.requested") || !strings.Contains(cursorResponse.Body.String(), "attempt.succeeded") {
+		t.Fatalf("timeline cursor did not advance correctly: %s", cursorResponse.Body.String())
+	}
 }
