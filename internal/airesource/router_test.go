@@ -189,11 +189,11 @@ func TestRouterStreamsOpenAICompatibleSSEAndRecordsUsage(t *testing.T) {
 
 	service, db := newRouterTestEnvironment(t)
 	addRouterTestModel(t, service, "stream-model", "stream-model-key", []struct {
-		id string
-		url string
+		id           string
+		url          string
 		priority     int
 		credentialID string
-		key string
+		key          string
 	}{
 		{id: "stream-endpoint", url: server.URL + "/v1", priority: 1, credentialID: "stream-credential", key: "stream-secret"},
 	})
