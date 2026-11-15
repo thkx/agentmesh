@@ -54,10 +54,10 @@ This checklist is the implementation gate for M49–M52. A milestone is not comp
 - [ ] No new queue, scheduler, execution state machine, event ledger or duplicate persistence model.
 - [ ] No new migration unless explicitly justified and reviewed.
 - [x] `gofmt` check passes without auto-formatting during the verification script.
-- [ ] `go build ./...` passes.
-- [ ] `go vet ./...` passes.
-- [ ] `go test -race ./...` passes.
-- [ ] `bash scripts/verify-p5-part1.sh` passes.
+- [x] `go build ./...` passes (GitHub Actions, Go 1.27.3).
+- [x] `go vet ./...` passes (GitHub Actions, Go 1.27.3).
+- [x] `go test -race ./...` passes (GitHub Actions, Go 1.27.3).
+- [ ] `bash scripts/verify-p5-part1.sh` passes locally on Go 1.27.3 darwin/arm64.
 - [ ] Existing P2/P3/P4 verification scripts remain compatible.
 - [ ] Documentation and root README point to the Dashboard usage and security guidance.
-- [ ] Final report records exact commit SHA and exact local/CI verification evidence.
+- [x] Final report records exact commit SHA and exact GitHub CI verification evidence; local macOS acceptance remains outstanding.
