@@ -89,3 +89,21 @@ Add cross-runtime end-to-end scenarios for success, failure, cancellation, timeo
 ## 6. Definition of done
 
 P4 is complete when all four runtimes expose the same explainable execution history and provenance contract; lifecycle transitions are validated and auditable; restart recovery does not invent outcomes or duplicate side effects; evidence and artifact versions can be traced to the Attempt that produced them; and the full acceptance suite passes on the exact release commit.
+
+## 7. Part 1 implementation record (M42–M44)
+
+The source-level audit is recorded in [M42 Execution Contract Audit](p4-m42-audit.md).
+
+The P4 branch contains the following additive implementation:
+
+- Migration `000039_execution_event_ledger` captures Execution/Attempt creation, status changes and runtime-reference binding in an append-only SQLite ledger. The ledger has a global monotonic sequence; query consumers filter by Execution and use sequence as the ordering/cursor key.
+- `GET /api/v1/managed-executions/:id/events?limit=50&after_sequence=0` exposes bounded, ordered history. It is protected by the same optional API-token middleware as the rest of the API.
+- Migration `000040_execution_artifact_provenance` adds Attempt lineage to Artifact Versions and Execution/Attempt lineage to Evidence, with a legacy Evidence backfill from source Execution.
+- Migration `000041_execution_provenance_immutability` validates provenance updates and prevents rewriting a bound source Execution/Attempt.
+- `GET /api/v1/collaboration/artifacts/:id/provenance` reads Artifact Version and Evidence lineage without duplicating Artifact content, Verification or Review storage.
+- `POST /api/v1/collaboration/artifacts/:id/versions/:version/provenance` binds an existing Artifact Version to its producing Execution/Attempt. Repeating the same binding is idempotent; a conflicting binding is rejected.
+- `POST /api/v1/collaboration/artifacts/:id/evidence/provenance` creates version-scoped Evidence with optional validated Execution/Attempt lineage. Legacy/manual Evidence without provenance remains supported.
+
+M43/M44 implementation tests are included for event ordering/pagination, append-only ledger behavior, provenance binding, mismatch rejection and provenance reads.
+
+**Verification status:** code and tests have been committed to the P4 branch, but no local Go command or CI result has yet been observed for these commits. Do not treat this record as a passing build/race/acceptance result.
