@@ -67,7 +67,16 @@ func (w *WakeupWorker) processTaskResult(ctx context.Context, recipientID, taskI
 	if evaluator == nil {
 		evaluator = ConservativeTaskResultEvaluator{}
 	}
-	assessment, err := evaluator.EvaluateTaskResult(ctx, task, stored)
+	var assessment TaskResultAssessment
+	if contextual, ok := evaluator.(ContextualTaskResultEvaluator); ok {
+		evaluationContext, contextErr := w.service.BuildTaskResultEvaluationContext(ctx, recipientID, assignmentID)
+		if contextErr != nil {
+			return contextErr
+		}
+		assessment, err = contextual.EvaluateTaskResultWithContext(ctx, evaluationContext)
+	} else {
+		assessment, err = evaluator.EvaluateTaskResult(ctx, task, stored)
+	}
 	if err != nil {
 		return err
 	}

@@ -116,3 +116,10 @@ Additional endpoints:
 - `POST /api/v1/collaboration/artifacts/:id/review`
 
 Artifact discovery and audit history are also available through `GET /api/v1/collaboration/workspaces/:id/artifacts` and `GET /api/v1/collaboration/artifacts/:id/verifications`. Listing endpoints return bounded metadata/history; version content is fetched separately by exact version number.
+
+
+### P3-4 Artifact-aware Agent result evaluation
+
+The result-evaluation seam now supports an optional contextual evaluator. In addition to the Task and durable Runtime result, it can receive a bounded snapshot of Artifacts explicitly linked to that Task, including the exact current immutable version, SHA-256 digest, evidence records and recent deterministic verification history.
+
+The context is Workspace-scoped and bounded to eight Artifacts, 4 MiB of included Artifact content, 50 evidence records and five verification records per Artifact. When the content budget is exhausted, the evaluator still receives version metadata and digest with `content_included=false`; it must not infer that omitted content was inspected. Existing `TaskResultEvaluator` implementations remain compatible and continue receiving the original Task/Result pair. The conservative default still returns `human_review`; this feature does not silently auto-accept results.
