@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX idx_collaboration_pending_approval_dedupe ON collaboration_approvals(workspace_id,requester_agent_id,resource_type,resource_id,action) WHERE status='pending' AND requester_agent_id IS NOT NULL;

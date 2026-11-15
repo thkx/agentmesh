@@ -7,7 +7,7 @@ on:
     branches: ["main"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
@@ -18,20 +18,14 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Normalize formatting in CI workspace
-        run: gofmt -w $(find . -name '*.go' -type f)
-      - name: Commit gofmt normalization
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/p3/')
+      - name: Check Go formatting
         run: |
-          if git diff --quiet; then
-            echo "All Go files are already gofmt-formatted."
-            exit 0
+          unformatted="$(gofmt -l $(find . -type f -name '*.go' -not -path './.git/*'))"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not gofmt-formatted:"
+            printf '%s\\n' "$unformatted"
+            exit 1
           fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -u -- '*.go'
-          git commit -m "style: normalize Go formatting"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
       - name: Build
         run: go build ./...
       - name: Vet
