@@ -123,3 +123,6 @@ Artifact discovery and audit history are also available through `GET /api/v1/col
 The result-evaluation seam now supports an optional contextual evaluator. In addition to the Task and durable Runtime result, it can receive a bounded snapshot of Artifacts explicitly linked to that Task, including the exact current immutable version, SHA-256 digest, evidence records and recent deterministic verification history.
 
 The context is Workspace-scoped and bounded to eight Artifacts, 4 MiB of included Artifact content, 50 evidence records and five verification records per Artifact. When the content budget is exhausted, the evaluator still receives version metadata and digest with `content_included=false`; it must not infer that omitted content was inspected. Existing `TaskResultEvaluator` implementations remain compatible and continue receiving the original Task/Result pair. The conservative default still returns `human_review`; this feature does not silently auto-accept results.
+
+
+Model-based result assessment also respects Workspace autonomy: `directed` always returns `human_review` without invoking the model; `hybrid` and `autonomous` may use the evidence-grounded evaluator. Missing or invalid autonomy policy fails closed to human review. This is an assessment of a child result, not permission to execute tools, delegate, or complete the parent Task.

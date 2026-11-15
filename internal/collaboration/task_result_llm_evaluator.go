@@ -73,6 +73,15 @@ func humanReviewAssessment(reason string) TaskResultAssessment {
 }
 
 func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Context, evaluation TaskResultEvaluationContext) (TaskResultAssessment, error) {
+	// Directed workspaces never let a model make the acceptance decision.
+	// Hybrid/autonomous workspaces may use evidence-grounded model assessment.
+	switch evaluation.Workspace.AutonomyMode {
+	case "directed":
+		return humanReviewAssessment("directed workspace policy requires explicit human review"), nil
+	case "hybrid", "autonomous":
+	default:
+		return humanReviewAssessment("workspace autonomy policy is missing or invalid; human review is required"), nil
+	}
 	modelID, err := e.resolve(ctx, evaluation.Result.RecipientAgentID)
 	if err != nil || strings.TrimSpace(modelID) == "" {
 		if err == nil {

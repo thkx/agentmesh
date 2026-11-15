@@ -31,7 +31,8 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	assessment, err := evaluator.EvaluateTaskResultWithContext(ctx, collaboration.TaskResultEvaluationContext{
-		Task:   collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
 		Result: collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
 		Artifacts: []collaboration.TaskArtifactContext{{
 			Artifact:        collaboration.Artifact{ID: "artifact-1"},
@@ -60,7 +61,8 @@ func TestLLMTaskResultEvaluatorRejectsInventedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
-		Result: collaboration.TaskResult{RecipientAgentID: "agent-1"},
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
 			Evidence:      []collaboration.ArtifactEvidence{{ID: "real-evidence"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "real-verification", Outcome: "passed"}},
@@ -93,5 +95,28 @@ func TestLLMTaskResultEvaluatorRequiresPassedArtifactVerificationForAcceptance(t
 	}
 	if assessment.Outcome != "human_review" {
 		t.Fatalf("unverified artifact must require human review, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorHonorsDirectedWorkspaceMode(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"accepted","reason":"Looks good.","confidence":0.99,"evidence_refs":["evidence-1","verification-1"]}`}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "directed"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("directed workspace must require human review, got %+v", assessment)
+	}
+	if model.request.ModelID != "" {
+		t.Fatal("directed workspace must not invoke the model reviewer")
 	}
 }

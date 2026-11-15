@@ -27,6 +27,7 @@ type TaskArtifactContext struct {
 // TaskResultEvaluationContext joins a completed result with the deliverables
 // explicitly attached to its Task. It is a snapshot, not a mutable live view.
 type TaskResultEvaluationContext struct {
+	Workspace            Workspace             `json:"workspace"`
 	Task                 Task                  `json:"task"`
 	Result               TaskResult            `json:"result"`
 	Artifacts            []TaskArtifactContext `json:"artifacts"`
@@ -56,8 +57,12 @@ func (s *Service) BuildTaskResultEvaluationContext(ctx context.Context, recipien
 		return TaskResultEvaluationContext{}, ErrConflict
 	}
 
+	workspace, err := s.GetWorkspace(ctx, task.WorkspaceID)
+	if err != nil {
+		return TaskResultEvaluationContext{}, err
+	}
 	out := TaskResultEvaluationContext{
-		Task: task, Result: result, Artifacts: make([]TaskArtifactContext, 0),
+		Workspace: workspace, Task: task, Result: result, Artifacts: make([]TaskArtifactContext, 0),
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM collaboration_artifacts
 		WHERE workspace_id=? AND source_task_id=? ORDER BY updated_at DESC,id LIMIT ?`,
