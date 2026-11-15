@@ -50,7 +50,7 @@ func (s *SQLiteStore) RequestCancel(ctx context.Context, executionID string) err
 		INSERT INTO execution_control_events (
 			event_id,event_key,execution_id,event_type,actor_type,actor_id,source,payload_json,occurred_at
 		) VALUES (?,?,?,?,?,?,?,?,?)
-		ON CONFLICT(event_key) DO NOTHING
+		ON CONFLICT DO NOTHING
 	`, "evt-cancel-requested-"+executionID, "execution.cancel_requested:"+executionID,
 		executionID, "execution.cancel_requested", "system", "", "execution_manager",
 		string(payload), now.UnixNano())
