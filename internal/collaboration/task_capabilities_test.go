@@ -55,6 +55,37 @@ func TestAssignTaskEnforcesRequiredCapabilities(t *testing.T) {
 	}
 }
 
+func TestCreateTaskIdempotencyCannotDropCapabilityRequirements(t *testing.T) {
+	ctx := context.Background()
+	service, db := testService(t)
+	defer db.Close()
+
+	workspace, err := service.CreateWorkspace(ctx, collaboration.Workspace{Name: "Capability Idempotency", Slug: "capability-idempotency"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := service.CreateTask(ctx, collaboration.Task{
+		WorkspaceID: workspace.ID, Title: "Protected task", IdempotencyKey: "cap-task-1",
+		RequiredCapabilities: []string{"code.write"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.CreateTask(ctx, collaboration.Task{
+		WorkspaceID: workspace.ID, Title: "Protected task", IdempotencyKey: "cap-task-1",
+		RequiredCapabilities: []string{"research"},
+	}); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("idempotency replay with changed capabilities must conflict, got %v", err)
+	}
+	stored, err := service.GetTask(ctx, original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.RequiredCapabilities) != 1 || stored.RequiredCapabilities[0] != "code.write" {
+		t.Fatalf("idempotency replay changed task capabilities: %+v", stored.RequiredCapabilities)
+	}
+}
+
 func TestHandoffRejectsRecipientWithoutRequiredCapabilities(t *testing.T) {
 	ctx := context.Background()
 	service, db := testService(t)

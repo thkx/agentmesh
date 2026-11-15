@@ -521,9 +521,17 @@ func (s *Service) CreateThread(ctx context.Context, v Thread) (Thread, error) {
 }
 
 func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
+	normalizedRequirements, capabilityErr := normalizeCapabilityList(v.RequiredCapabilities, 32)
+	if capabilityErr != nil {
+		return v, capabilityErr
+	}
+	v.RequiredCapabilities = normalizedRequirements
 	if v.IdempotencyKey != "" {
 		existing, err := s.findTaskByIdempotency(ctx, v.WorkspaceID, v.IdempotencyKey)
 		if err == nil {
+			if !sameCapabilities(existing.RequiredCapabilities, v.RequiredCapabilities) {
+				return v, ErrConflict
+			}
 			return existing, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -550,11 +558,6 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 	if v.WorkspaceID == "" || v.Title == "" || len(v.Title) > 240 || v.Priority < 1 || v.Priority > 5 {
 		return v, ErrInvalid
 	}
-	normalizedRequirements, capabilityErr := normalizeCapabilityList(v.RequiredCapabilities, 32)
-	if capabilityErr != nil {
-		return v, capabilityErr
-	}
-	v.RequiredCapabilities = normalizedRequirements
 	w, err := s.GetWorkspace(ctx, v.WorkspaceID)
 	if err != nil {
 		return v, err
