@@ -277,6 +277,21 @@ func TestAgentAdapterKeepsExecutionRunningBetweenSafeRetries(t *testing.T) {
 		t.Fatalf("retry wait observation=%+v", observed)
 	}
 
+	// A retry claim that expires before MarkStarted still keeps the parent
+	// Execution active and must not create an Attempt for the unstarted claim.
+	queue.job.ExecutionStarted = false
+	queue.job.Attempts = 2
+	observed, err = adapter.Observe(context.Background(), dom.Entity{
+		ID: "agent-retry-execution", RuntimeRef: queue.job.ID, Status: dom.LifecycleRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleRunning || observed.CompletedAttempt != 1 ||
+		observed.AttemptOutcome != dom.AttemptFailed || !observed.AttemptNotStarted {
+		t.Fatalf("pre-start retry recovery observation=%+v", observed)
+	}
+
 	// A claimed retry has not started until the scheduler crosses MarkStarted.
 	queue.job.Status = scheduler.Running
 	queue.job.Attempts = 2
