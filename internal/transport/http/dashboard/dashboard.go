@@ -438,13 +438,38 @@ func (h *Handler) deleteCredential(c *gin.Context) {
 
 func (h *Handler) models(c *gin.Context) {
 	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
-	if h.models != nil {
+	if h.catalogAPI != nil {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil).WithContext(c.Request.Context())
+		rec := httptest.NewRecorder()
+		h.catalogAPI.ServeHTTP(rec, req)
+		var response map[string]json.RawMessage
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &response) != nil {
+			data.Error = "Could not load model catalog"
+		} else {
+			var items []map[string]json.RawMessage
+			if err := json.Unmarshal(response["data"], &items); err != nil {
+				data.Error = "Could not decode model catalog"
+			} else {
+				for _, item := range items {
+					var v modelView
+					_ = json.Unmarshal(item["id"], &v.ID)
+					_ = json.Unmarshal(item["provider_id"], &v.ProviderID)
+					_ = json.Unmarshal(item["name"], &v.Name)
+					_ = json.Unmarshal(item["display_name"], &v.DisplayName)
+					_ = json.Unmarshal(item["status"], &v.Status)
+					_ = json.Unmarshal(item["source"], &v.Source)
+					_ = json.Unmarshal(item["context_window"], &v.ContextWindow)
+					_ = json.Unmarshal(item["max_output_tokens"], &v.MaxOutputTokens)
+					_ = json.Unmarshal(item["supports_streaming"], &v.Streaming)
+					data.ModelRows = append(data.ModelRows, v)
+				}
+			}
+		}
+	} else if h.models != nil {
 		for _, m := range h.models.List() {
 			status := "disabled"
-			if m.Enabled {
-				status = "enabled"
-			}
-			data.ModelRows = append(data.ModelRows, modelView{ID: m.ID, ProviderID: string(m.ProviderID), Name: m.Name, DisplayName: m.DisplayName, Status: status, Source: "provider", ContextWindow: m.ContextWindow, MaxOutputTokens: m.MaxOutputTokens, Streaming: m.SupportsStreaming})
+			if m.Enabled { status = "enabled" }
+			data.ModelRows = append(data.ModelRows, modelView{ID:m.ID, ProviderID:string(m.ProviderID), Name:m.Name, DisplayName:m.DisplayName, Status:status, Source:"provider", ContextWindow:m.ContextWindow, MaxOutputTokens:m.MaxOutputTokens, Streaming:m.SupportsStreaming})
 		}
 	}
 	h.render(c, data, http.StatusOK)
