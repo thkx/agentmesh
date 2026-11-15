@@ -105,7 +105,7 @@ func (h *UnifiedExecutionHandler) detail(c *gin.Context) {
 		return
 	}
 	e.RuntimeRef, e.TaskID, e.IdempotencyKey = runtimeRef.String, taskID.String, idem.String
-	e.Input, e.Result = jsonRawMessage(input.String), jsonRawMessage(result.String)
+	e.Input, e.Result = nullableRawJSON(input), nullableRawJSON(result)
 	e.CreatedAt, e.UpdatedAt = time.Unix(0, created).UTC(), time.Unix(0, updated).UTC()
 	e.StartedAt, e.FinishedAt = nullableNanoTime(started), nullableNanoTime(finished)
 
@@ -129,7 +129,7 @@ func (h *UnifiedExecutionHandler) detail(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "execution_attempts_read_failed"})
 			return
 		}
-		a.RuntimeRef, a.Input, a.Result = ref.String, jsonRawMessage(in.String), jsonRawMessage(out.String)
+		a.RuntimeRef, a.Input, a.Result = ref.String, nullableRawJSON(in), nullableRawJSON(out)
 		a.StartedAt, a.FinishedAt = time.Unix(0, began).UTC(), nullableNanoTime(ended)
 		attempts = append(attempts, a)
 	}
@@ -351,4 +351,14 @@ func nullableNanoTime(value sql.NullInt64) *time.Time {
 	}
 	t := time.Unix(0, value.Int64).UTC()
 	return &t
+}
+
+func nullableRawJSON(value sql.NullString) jsonRawMessage {
+	if !value.Valid || value.String == "" {
+		return nil
+	}
+	if !json.Valid([]byte(value.String)) {
+		return nil
+	}
+	return jsonRawMessage(append([]byte(nil), value.String...))
 }
