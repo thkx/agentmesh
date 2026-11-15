@@ -60,3 +60,6 @@ Approval rejection is acknowledged only after the target assignment is rejected,
 ## Outbox retry and dead-letter behavior
 
 The dispatcher processes due Outbox records independently. A malformed or temporarily unroutable event records its attempt and schedules bounded exponential backoff; it does not prevent later valid events from being delivered. After eight failed attempts the event is marked dead-lettered (`published_at` set with a `dead-letter:` error prefix) for operator inspection.
+
+
+Pending approvals are expired by the Outbox dispatcher. Expiration is an atomic state transition that emits `approval.expired` and routes the notification only to the original requester; expired requests no longer block a fresh decision request.

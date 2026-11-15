@@ -47,6 +47,7 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 }
 
 func (d *Dispatcher) DispatchOnce(ctx context.Context, limit int) error {
+	if err := d.expireApprovals(ctx, 100); err != nil { return err }
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
@@ -129,6 +130,45 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
 		now, lastError, id)
 	if err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+type expiredApproval struct { id, workspaceID, requesterID string }
+
+func (d *Dispatcher) expireApprovals(ctx context.Context, limit int) error {
+	if limit < 1 || limit > 500 { limit = 100 }
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil { return err }
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	rows, err := tx.QueryContext(ctx, `SELECT id,workspace_id,COALESCE(requester_agent_id,'')
+		FROM collaboration_approvals WHERE status='pending' AND expires_at<=?
+		ORDER BY expires_at,id LIMIT ?`, now.UnixMilli(), limit)
+	if err != nil { return err }
+	items := make([]expiredApproval, 0)
+	for rows.Next() {
+		var item expiredApproval
+		if err = rows.Scan(&item.id,&item.workspaceID,&item.requesterID); err != nil { rows.Close(); return err }
+		items = append(items,item)
+	}
+	if err = rows.Err(); err != nil { rows.Close(); return err }
+	if err = rows.Close(); err != nil { return err }
+	for _, item := range items {
+		res, updateErr := tx.ExecContext(ctx,`UPDATE collaboration_approvals SET status='expired',decided_at=?
+			WHERE id=? AND status='pending' AND expires_at<=?`,now.UnixMilli(),item.id,now.UnixMilli())
+		if updateErr != nil { return updateErr }
+		n, rowsErr := res.RowsAffected()
+		if rowsErr != nil { return rowsErr }
+		if n != 1 { continue }
+		payload, marshalErr := json.Marshal(map[string]any{"approval_id":item.id,"requester_agent_id":item.requesterID,"status":"expired"})
+		if marshalErr != nil { return marshalErr }
+		eventID, idErr := newID()
+		if idErr != nil { return idErr }
+		if _, err = tx.ExecContext(ctx,`INSERT INTO collaboration_outbox
+			(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at)
+			VALUES(?,?, 'approval', ?, 'approval.expired', ?, ?)`,
+			eventID,item.workspaceID,item.id,string(payload),now.UnixMilli()); err != nil { return err }
 	}
 	return tx.Commit()
 }
@@ -222,7 +262,7 @@ func routeRecipients(ctx context.Context, tx *sql.Tx, event Event) ([]string, er
 		}
 		return activeWorkspaceRecipient(ctx, tx, event.WorkspaceID, p.AgentID)
 
-	case "approval.approved", "approval.rejected":
+	case "approval.approved", "approval.rejected", "approval.expired":
 		var p struct {
 			ApprovalID string `json:"approval_id"`
 		}

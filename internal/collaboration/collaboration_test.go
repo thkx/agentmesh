@@ -165,6 +165,24 @@ func TestMessageEventsRouteOnlyToChannelMembers(t *testing.T) {
 	if outsiderCount != 0 { t.Fatalf("channel outsider received message: %d", outsiderCount) }
 }
 
+func TestDispatcherExpiresApprovalsAndNotifiesRequester(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Approval Expiry",Slug:"approval-expiry"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Requester",Role:"planner"});if err!=nil{t.Fatal(err)}
+ decision,err:=s.EvaluateDecision(ctx,collaboration.DecisionRequest{AgentID:a.ID,Action:"delegate",ResourceType:"task",ResourceID:"task-expire",Reason:"test expiry"});if err!=nil{t.Fatal(err)}
+ if decision.ApprovalID==""{t.Fatal("expected approval id")}
+ if _,err=db.DB.ExecContext(ctx,"UPDATE collaboration_approvals SET expires_at=? WHERE id=?",time.Now().Add(-time.Minute).UnixMilli(),decision.ApprovalID);err!=nil{t.Fatal(err)}
+ dispatcher,err:=collaboration.NewDispatcher(db.DB,time.Millisecond);if err!=nil{t.Fatal(err)}
+ if err=dispatcher.DispatchOnce(ctx,100);err!=nil{t.Fatal(err)}
+ var status string
+ if err=db.DB.QueryRowContext(ctx,"SELECT status FROM collaboration_approvals WHERE id=?",decision.ApprovalID).Scan(&status);err!=nil{t.Fatal(err)}
+ if status!="expired"{t.Fatalf("approval status=%q",status)}
+ var notified int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='approval.expired'",a.ID).Scan(&notified);err!=nil{t.Fatal(err)}
+ if notified!=1{t.Fatalf("requester should receive one expiry event, got %d",notified)}
+}
+
 func TestInboxReceiptIsIdempotentPerAgent(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)
