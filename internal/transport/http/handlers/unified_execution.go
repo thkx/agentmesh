@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -43,7 +44,7 @@ type unifiedExecution struct {
 }
 
 // jsonRawMessage avoids exposing SQL's nullable JSON text as a quoted string.
-type jsonRawMessage []byte
+type jsonRawMessage = json.RawMessage
 
 type unifiedAttempt struct {
 	ID          string          `json:"id"`
