@@ -36,10 +36,10 @@ type ConservativeTaskResultEvaluator struct{}
 
 func (ConservativeTaskResultEvaluator) EvaluateTaskResult(_ context.Context, _ Task, _ TaskResult) (TaskResultAssessment, error) {
 	return TaskResultAssessment{
-		Outcome: "human_review",
-		Reason: "execution completed, but no configured evaluator can verify task acceptance criteria",
+		Outcome:    "human_review",
+		Reason:     "execution completed, but no configured evaluator can verify task acceptance criteria",
 		Confidence: 0,
-		Evidence: json.RawMessage("[]"),
+		Evidence:   json.RawMessage("[]"),
 	}, nil
 }
 

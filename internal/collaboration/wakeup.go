@@ -35,14 +35,14 @@ type WakeupConfig struct {
 }
 
 type WakeupWorker struct {
-	service     *Service
-	definitions *agentcatalog.Service
-	executions  *manager.Manager
-	workspaces  *workspace.Manager
-	cfg         WakeupConfig
-	owner       string
-	logger      *slog.Logger
-	memories    MemoryRetriever
+	service         *Service
+	definitions     *agentcatalog.Service
+	executions      *manager.Manager
+	workspaces      *workspace.Manager
+	cfg             WakeupConfig
+	owner           string
+	logger          *slog.Logger
+	memories        MemoryRetriever
 	resultEvaluator TaskResultEvaluator
 }
 
