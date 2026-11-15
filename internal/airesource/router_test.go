@@ -237,7 +237,6 @@ func TestRouterStreamsOpenAICompatibleSSEAndRecordsUsage(t *testing.T) {
 	}
 }
 
-
 func TestRouterFailsOverOnUnauthorizedRateLimitAndServerErrors(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusBadGateway} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
