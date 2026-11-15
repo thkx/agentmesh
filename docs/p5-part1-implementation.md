@@ -28,8 +28,10 @@
 
 ### M51 — Agent and Workflow Console
 
-- Agent Definition list, create, enable/disable and delete use the existing Agent Catalog service.
+- Agent Definition list, create, edit, enable/disable and delete use the existing Agent Catalog service.
+- Collaboration Agent Identity list, create, enable/disable and delete use the existing Collaboration service.
 - Agent launch calls the existing Agent Catalog run entry point with a supplied workspace and prompt.
+- Canonical Collaboration Tasks are listed across workspaces; create and assignment use the existing Collaboration service, including its capability/workspace validation.
 - Workflow Template list, create and delete use the existing Workflow Authoring repository.
 - Applying a template calls the existing Workflow Engine definition writer.
 - Workflow launch calls the existing durable `StartQueued` entry point; no new queue is introduced.
@@ -38,7 +40,8 @@
 
 - Execution list reads canonical `executions` and supports status, kind and runtime filters with bounded pagination.
 - Execution detail reads canonical Execution and Attempt state plus existing Artifact Version and Evidence provenance.
-- Timeline merges the existing lifecycle and control event streams for display; timestamps are ordered numerically in UTC and ties use stream/sequence ordering.
+- Timeline uses the P4 merged lifecycle/control API and its documented compound cursor; the Dashboard renders cursor-based “Load more” navigation.
+- Artifact Versions and Evidence display their source Execution/Attempt provenance identifiers.
 - Cancellation calls the existing Execution Manager. The UI says cancellation was requested, not that the runtime has confirmed cancellation.
 - No generic replay/retry action is exposed for ambiguous outcomes.
 
