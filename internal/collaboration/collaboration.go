@@ -37,16 +37,16 @@ type Workspace struct {
 	UpdatedAt           time.Time `json:"updated_at,omitempty"`
 }
 type AgentIdentity struct {
-	ID           string    `json:"id,omitempty"`
-	WorkspaceID  string    `json:"workspace_id,omitempty"`
-	DefinitionID string    `json:"definition_id,omitempty"`
-	Name         string    `json:"name,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	Role         string    `json:"role,omitempty"`
-	Status       string    `json:"status,omitempty"`
-	Capabilities []string  `json:"capabilities,omitempty"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	ID           string     `json:"id,omitempty"`
+	WorkspaceID  string     `json:"workspace_id,omitempty"`
+	DefinitionID string     `json:"definition_id,omitempty"`
+	Name         string     `json:"name,omitempty"`
+	Description  string     `json:"description,omitempty"`
+	Role         string     `json:"role,omitempty"`
+	Status       string     `json:"status,omitempty"`
+	Capabilities []string   `json:"capabilities,omitempty"`
+	CreatedAt    time.Time  `json:"created_at,omitempty"`
+	UpdatedAt    time.Time  `json:"updated_at,omitempty"`
 	DeletedAt    *time.Time `json:"deleted_at,omitempty"`
 }
 type Channel struct {
