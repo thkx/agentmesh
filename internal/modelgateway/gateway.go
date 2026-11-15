@@ -31,6 +31,11 @@ type DynamicModelResolver interface {
 	ResolveModel(context.Context, string) (provider.Model, bool, error)
 }
 
+// DynamicStreamingRouter is implemented by dynamic credential pools that support SSE.
+type DynamicStreamingRouter interface {
+	Stream(context.Context, GenerateRequest) (<-chan StreamEvent, error)
+}
+
 // DynamicRouter routes configured model keys through the persisted AI resource pool.
 type DynamicRouter interface {
 	Supports(context.Context, string) (bool, error)
@@ -160,7 +165,40 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 			return nil, fmt.Errorf("resolve dynamic credential route: %w", supportErr)
 		}
 		if supported {
-			return nil, ErrDynamicStreamingUnsupported
+			if !model.SupportsStreaming {
+				return nil, fmt.Errorf("%w: %s", ErrStreamingDisabled, model.ID)
+			}
+			streamRouter, ok := g.dynamicRouter.(DynamicStreamingRouter)
+			if !ok {
+				return nil, ErrDynamicStreamingUnsupported
+			}
+			source, streamErr := streamRouter.Stream(ctx, resolvedReq)
+			if streamErr != nil {
+				return nil, streamErr
+			}
+			if source == nil {
+				return nil, ErrNilStream
+			}
+			output := make(chan StreamEvent)
+			go func() {
+				defer close(output)
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case event, open := <-source:
+						if !open { return }
+						normalizeStreamEvent(&event, model)
+						select {
+						case output <- event:
+						case <-ctx.Done():
+							return
+						}
+						if event.Type == StreamEventError || event.Type == StreamEventCompleted { return }
+					}
+				}
+			}()
+			return output, nil
 		}
 	}
 	if adapter == nil {
