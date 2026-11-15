@@ -81,3 +81,6 @@ Dead-lettered Outbox records remain queryable through `GET /api/v1/collaboration
 
 
 Operators can retry a repaired dead-letter record with `POST /api/v1/collaboration/outbox/dead-letters/:id/requeue`. Requeue resets its retry counter and due time; delivery remains idempotent because Inbox receipts are unique by Agent and Event ID.
+
+
+- GET /api/v1/collaboration/agents/:id/session returns the Agent Identity's active persistent Session and its current/last Execution pointers.
