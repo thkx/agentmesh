@@ -137,13 +137,13 @@ func (s *memoryStore) FinishAttempt(_ context.Context, id string, status dom.Att
 }
 
 type fakeAdapter struct {
-	submitted   bool
-	submitCount int
-	cancelCount int
-	submitErr   error
-	cancelErr   error
-	observeErr  error
-	observation Observation
+	submitted    bool
+	submitCount  int
+	cancelCount  int
+	submitErr    error
+	cancelErr    error
+	observeErr   error
+	observation  Observation
 }
 
 func (a *fakeAdapter) Submit(context.Context, dom.Entity) (string, error) {
