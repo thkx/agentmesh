@@ -115,7 +115,12 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
-type taskView struct{ TaskID, AgentID, RunID, Status, CreatedAt, ExecutionID string }
+type agentOption struct { ID, Name, Role, Status, Capabilities string }
+type taskView struct {
+	TaskID, WorkspaceID, ParentTaskID, Title, Type, Status, CreatedAt, ExecutionID string
+	Priority int
+	AgentOptions []agentOption
+}
 type workflowRunView struct {
 	ID, Status, CreatedAt, ExecutionID string
 	Version                            int
