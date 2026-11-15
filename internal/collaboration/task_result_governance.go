@@ -51,13 +51,13 @@ func scanTaskResultAssessment(row interface{Scan(...any)error})(TaskResultAssess
 func (s *Service) GetTaskChildProgress(ctx context.Context,parentTaskID string)(TaskChildProgress,error){
 	if _,err:=s.GetTask(ctx,parentTaskID);err!=nil{return TaskChildProgress{},err}
 	p:=TaskChildProgress{ParentTaskID:parentTaskID}
-	err:=s.db.QueryRowContext(ctx,`SELECT COALESCE((SELECT agent_id FROM task_assignments WHERE task_id=? AND status IN ('claimed','completed') ORDER BY updated_at DESC LIMIT 1),'')`,parentTaskID).Scan(&p.ParentAgentID);if err!=nil{return p,err}
+	err:=s.db.QueryRowContext(ctx,`SELECT COALESCE((SELECT agent_id FROM task_assignments WHERE task_id=? AND status IN ('pending','claimed','completed') ORDER BY CASE status WHEN 'claimed' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,updated_at DESC LIMIT 1),'')`,parentTaskID).Scan(&p.ParentAgentID);if err!=nil{return p,err}
 	if p.ParentAgentID=="" { return p,nil }
 	err=s.db.QueryRowContext(ctx,`SELECT COUNT(*),
 	COALESCE(SUM(CASE WHEN child.status='completed' THEN 1 ELSE 0 END),0),
 	COALESCE(SUM(CASE WHEN child.status='blocked' THEN 1 ELSE 0 END),0),
 	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r WHERE r.task_id=child.id AND r.recipient_agent_id=?) THEN 1 ELSE 0 END),0),
-	COALESCE(SUM(CASE WHEN child.status='completed' AND EXISTS(SELECT 1 FROM agent_task_results r JOIN agent_task_result_assessments a ON a.result_id=r.id WHERE r.task_id=child.id AND r.recipient_agent_id=? AND a.outcome='accepted' AND a.reviewed_at IS NOT NULL) THEN 1 ELSE 0 END),0),
+	COALESCE(SUM(CASE WHEN child.status='completed' AND EXISTS(SELECT 1 FROM agent_task_results r JOIN agent_task_result_assessments a ON a.result_id=r.id WHERE r.task_id=child.id AND r.recipient_agent_id=? AND a.outcome='accepted') THEN 1 ELSE 0 END),0),
 	COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_task_results r LEFT JOIN agent_task_result_assessments a ON a.result_id=r.id AND a.recipient_agent_id=r.recipient_agent_id WHERE r.task_id=child.id AND r.recipient_agent_id=? AND (a.id IS NULL OR a.outcome IN ('human_review','rejected'))) THEN 1 ELSE 0 END),0)
 	FROM collaboration_tasks child WHERE child.parent_task_id=?`,p.ParentAgentID,p.ParentAgentID,p.ParentAgentID,parentTaskID).Scan(&p.TotalChildren,&p.CompletedChildren,&p.BlockedChildren,&p.ChildrenWithResults,&p.ChildrenFullyAccepted,&p.NeedsReviewChildren)
 	if err!=nil{return TaskChildProgress{},err}
