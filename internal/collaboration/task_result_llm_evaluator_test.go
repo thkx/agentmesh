@@ -33,7 +33,7 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 	assessment, err := evaluator.EvaluateTaskResultWithContext(ctx, collaboration.TaskResultEvaluationContext{
 		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
 		Task:      collaboration.Task{ID: "task-1", Title: "Deliver tested work", Description: "Provide implementation and tests."},
-		Result: collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
+		Result:    collaboration.TaskResult{TaskID: "task-1", RecipientAgentID: "agent-1", Result: json.RawMessage(`{"summary":"done"}`)},
 		Artifacts: []collaboration.TaskArtifactContext{{
 			Artifact:        collaboration.Artifact{ID: "artifact-1"},
 			Version:         collaboration.ArtifactVersion{ID: "version-1", ContentSHA256: "digest"},
@@ -84,7 +84,8 @@ func TestLLMTaskResultEvaluatorRequiresPassedArtifactVerificationForAcceptance(t
 		t.Fatal(err)
 	}
 	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
-		Result: collaboration.TaskResult{RecipientAgentID: "agent-1"},
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Result:    collaboration.TaskResult{RecipientAgentID: "agent-1"},
 		Artifacts: []collaboration.TaskArtifactContext{{
 			Evidence:      []collaboration.ArtifactEvidence{{ID: "evidence-1"}},
 			Verifications: []collaboration.ArtifactVerification{{ID: "verification-1", Outcome: "needs_evidence"}},
