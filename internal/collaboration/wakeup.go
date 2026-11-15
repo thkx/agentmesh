@@ -338,7 +338,7 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 		}
 		switch current.Status {
 		case execdom.LifecycleSucceeded:
-			if err = w.service.CompleteAssignment(ctx, assignment.ID, w.owner, assignment.ClaimVersion); err != nil {
+			if err = w.service.CompleteAssignmentWithResult(ctx, assignment.ID, w.owner, assignment.ClaimVersion, current.ID, current.Result); err != nil {
 				return err
 			}
 			return w.service.RecordSessionExecution(ctx, session.ID, current.ID, task.ID, true)
