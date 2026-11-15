@@ -67,20 +67,20 @@ type Thread struct {
 	CreatedAt     time.Time `json:"created_at,omitempty"`
 }
 type Task struct {
-	ID              string    `json:"id,omitempty"`
-	WorkspaceID     string    `json:"workspace_id,omitempty"`
-	ParentTaskID    string    `json:"parent_task_id,omitempty"`
-	Title           string    `json:"title,omitempty"`
-	Description     string    `json:"description,omitempty"`
-	Type            string    `json:"type,omitempty"`
-	Status          string    `json:"status,omitempty"`
-	Priority        int       `json:"priority,omitempty"`
-	CreatedBy       string    `json:"created_by,omitempty"`
-	IdempotencyKey  string    `json:"idempotency_key,omitempty"`
-	DelegationDepth     int       `json:"delegation_depth,omitempty"`
+	ID                   string    `json:"id,omitempty"`
+	WorkspaceID          string    `json:"workspace_id,omitempty"`
+	ParentTaskID         string    `json:"parent_task_id,omitempty"`
+	Title                string    `json:"title,omitempty"`
+	Description          string    `json:"description,omitempty"`
+	Type                 string    `json:"type,omitempty"`
+	Status               string    `json:"status,omitempty"`
+	Priority             int       `json:"priority,omitempty"`
+	CreatedBy            string    `json:"created_by,omitempty"`
+	IdempotencyKey       string    `json:"idempotency_key,omitempty"`
+	DelegationDepth      int       `json:"delegation_depth,omitempty"`
 	RequiredCapabilities []string  `json:"required_capabilities,omitempty"`
-	CreatedAt       time.Time `json:"created_at,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	CreatedAt            time.Time `json:"created_at,omitempty"`
+	UpdatedAt            time.Time `json:"updated_at,omitempty"`
 }
 type Assignment struct {
 	ID             string     `json:"id,omitempty"`
@@ -96,17 +96,17 @@ type Assignment struct {
 }
 
 type Handoff struct {
-	RequesterAgentID   string   `json:"requester_agent_id"`
-	Goal               string   `json:"goal"`
-	Completed          []string `json:"completed"`
-	Remaining          []string `json:"remaining"`
-	Artifacts          []string `json:"artifacts"`
-	Constraints        []string `json:"constraints"`
-	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	RequesterAgentID     string   `json:"requester_agent_id"`
+	Goal                 string   `json:"goal"`
+	Completed            []string `json:"completed"`
+	Remaining            []string `json:"remaining"`
+	Artifacts            []string `json:"artifacts"`
+	Constraints          []string `json:"constraints"`
+	AcceptanceCriteria   []string `json:"acceptance_criteria"`
 	RequiredCapabilities []string `json:"required_capabilities,omitempty"`
-	Reason             string   `json:"reason"`
-	Recipient          string   `json:"recipient"`
-	IdempotencyKey     string   `json:"idempotency_key"`
+	Reason               string   `json:"reason"`
+	Recipient            string   `json:"recipient"`
+	IdempotencyKey       string   `json:"idempotency_key"`
 }
 
 type Event struct {
