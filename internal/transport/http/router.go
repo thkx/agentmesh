@@ -111,6 +111,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	api := router.Group("/api/v1")
+	if deps.DB != nil {
+		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
+	}
 	if deps.CodingService != nil {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
 	}
