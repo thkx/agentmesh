@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	_ "embed"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -30,6 +31,9 @@ import (
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 )
+
+//go:embed static/htmx.min.js
+var htmxJS []byte
 
 const sessionCookie = "agentmesh_dashboard"
 
@@ -156,6 +160,7 @@ func New(d Dependencies) *Handler {
 
 func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g := r.Group("/dashboard")
+	g.GET("/assets/htmx.min.js", h.htmxAsset)
 	g.GET("/login", h.loginPage)
 	g.POST("/login", h.login)
 	g.POST("/logout", h.requireSession(), h.logout)
@@ -187,6 +192,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
 	g.POST("/executions/:id/cancel", h.requireSession(), h.cancelExecution)
+}
+
+func (h *Handler) htmxAsset(c *gin.Context) {
+	c.Header("Content-Type", "text/javascript; charset=utf-8")
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Data(http.StatusOK, "text/javascript; charset=utf-8", htmxJS)
 }
 
 func (h *Handler) requireSession() gin.HandlerFunc {
@@ -1042,6 +1053,6 @@ const pageTemplate = `{{define "page"}}<section class="panel"><h1>{{.Title}}</h1
 <h2>Timeline</h2>{{if .Events}}<ol>{{range .Events}}<li><time>{{.OccurredAt}}</time> <strong>{{.Stream}} · {{.Type}}</strong> — {{.Actor}} / {{.Source}} <pre>{{.Payload}}</pre></li>{{end}}</ol>{{else}}<p>No execution events recorded.</p>{{end}}{{end}}
 </section>{{end}}`
 
-const layoutTemplate = `{{define "layout"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}} · AgentMesh</title><style>
+const layoutTemplate = `{{define "layout"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><script src="/dashboard/assets/htmx.min.js" defer></script><title>{{.Title}} · AgentMesh</title><style>
 :root{color-scheme:dark;font:15px/1.5 Inter,system-ui,sans-serif;background:#0b1020;color:#e8ecf5}*{box-sizing:border-box}body{margin:0}.shell{display:grid;grid-template-columns:230px 1fr;min-height:100vh}aside{padding:28px 18px;background:#111a2e;border-right:1px solid #27334b}aside h2{font-size:18px;margin:0 0 28px}nav{display:grid;gap:6px}nav a{padding:10px 12px;border-radius:8px;color:#aebbd2;text-decoration:none}nav a.active,nav a:hover{background:#24324e;color:#fff}main{padding:38px;max-width:1200px;width:100%}.panel{background:#121c31;border:1px solid #293650;border-radius:14px;padding:26px;min-height:180px}.panel h1{margin-top:0}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px}.stats div{padding:18px;background:#1b2942;border-radius:10px;display:grid}.stats strong{font-size:28px}.stats span,dt{color:#9eacc4;text-transform:capitalize}table{width:100%;border-collapse:collapse;margin-top:20px}th,td{text-align:left;padding:12px;border-bottom:1px solid #293650}a{color:#8eb8ff}label{display:grid;gap:8px}textarea{padding:12px;background:#0b1020;color:white;border:1px solid #40506c;border-radius:8px;min-height:110px} .wide{grid-column:1/-1}input{padding:12px;background:#0b1020;color:white;border:1px solid #40506c;border-radius:8px}.inline-form{display:grid;gap:6px;margin:8px 0}.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:18px 0}.form-grid label{display:grid;gap:6px}.run-form{display:grid;gap:8px;margin:12px 0}.run-form input{width:100%}small{display:block;color:#9eacc4;font-size:12px}button{margin-top:14px;padding:10px 16px;border:0;border-radius:8px;background:#477fe0;color:white;cursor:pointer}.danger{background:#a84352}.error{color:#ff9b9b}.notice{color:#9ec7ff}.narrow{max-width:440px;margin:10vh auto}dl{display:grid;grid-template-columns:150px 1fr;gap:10px}dd{margin:0;overflow-wrap:anywhere}@media(max-width:760px){.shell{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid #27334b;padding:16px}nav{grid-template-columns:repeat(2,1fr)}main{padding:18px}.panel{padding:18px}table{font-size:13px;display:block;overflow-x:auto}}
-</style></head><body><div class="shell"><aside><h2>◈ AgentMesh</h2><nav><a href="/dashboard" class="{{if eq .Active "overview"}}active{{end}}">Overview</a><a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a><a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}">Models</a><a href="/dashboard/agents" class="{{if eq .Active "agents"}}active{{end}}">Agents</a><a href="/dashboard/workflows" class="{{if eq .Active "workflows"}}active{{end}}">Workflows</a><a href="/dashboard/executions" class="{{if eq .Active "executions"}}active{{end}}">Executions</a></nav>{{if ne .Title "Sign in"}}<form method="post" action="/dashboard/logout"><button>Sign out</button></form>{{end}}</aside><main>{{if eq .Title "Sign in"}}{{template "login" .}}{{else}}{{template "page" .}}{{end}}</main></div></body></html>{{end}}`
+</style></head><body hx-boost="true"><div class="shell"><aside><h2>◈ AgentMesh</h2><nav><a href="/dashboard" class="{{if eq .Active "overview"}}active{{end}}">Overview</a><a href="/dashboard/providers" class="{{if eq .Active "providers"}}active{{end}}">Providers</a><a href="/dashboard/models" class="{{if eq .Active "models"}}active{{end}}">Models</a><a href="/dashboard/agents" class="{{if eq .Active "agents"}}active{{end}}">Agents</a><a href="/dashboard/workflows" class="{{if eq .Active "workflows"}}active{{end}}">Workflows</a><a href="/dashboard/executions" class="{{if eq .Active "executions"}}active{{end}}">Executions</a></nav>{{if ne .Title "Sign in"}}<form method="post" action="/dashboard/logout"><button>Sign out</button></form>{{end}}</aside><main>{{if eq .Title "Sign in"}}{{template "login" .}}{{else}}{{template "page" .}}{{end}}</main></div></body></html>{{end}}`
