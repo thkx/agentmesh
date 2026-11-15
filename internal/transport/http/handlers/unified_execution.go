@@ -266,11 +266,11 @@ func (h *UnifiedExecutionHandler) timeline(c *gin.Context) {
 	}
 
 	events := make([]unifiedTimelineEvent, 0, 64)
-	if err = h.readTimelineStream(c, id, "lifecycle", afterTime, &events); err != nil {
+	if err = h.readTimelineStream(c, id, "lifecycle", afterTime, afterStream, afterSequence, &events); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "execution_timeline_read_failed"})
 		return
 	}
-	if err = h.readTimelineStream(c, id, "control", afterTime, &events); err != nil {
+	if err = h.readTimelineStream(c, id, "control", afterTime, afterStream, afterSequence, &events); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "execution_timeline_read_failed"})
 		return
 	}
@@ -313,7 +313,7 @@ func (h *UnifiedExecutionHandler) timeline(c *gin.Context) {
 	})
 }
 
-func (h *UnifiedExecutionHandler) readTimelineStream(c *gin.Context, id, stream string, after int64, out *[]unifiedTimelineEvent) error {
+func (h *UnifiedExecutionHandler) readTimelineStream(c *gin.Context, id, stream string, after int64, afterStream string, afterSequence int64, out *[]unifiedTimelineEvent) error {
 	table := "execution_events"
 	if stream == "control" {
 		table = "execution_control_events"
@@ -324,8 +324,26 @@ func (h *UnifiedExecutionHandler) readTimelineStream(c *gin.Context, id, stream 
 	} else {
 		query += ",''"
 	}
-	query += " FROM " + table + " WHERE execution_id=? AND occurred_at>=? ORDER BY occurred_at,sequence LIMIT 1001"
-	rows, err := h.db.QueryContext(c.Request.Context(), query, id, after)
+	query += " FROM " + table + " WHERE execution_id=?"
+	args := []any{id}
+	switch {
+	case afterStream == "":
+		query += " AND occurred_at>=?"
+		args = append(args, after)
+	case stream > afterStream:
+		// This stream sorts after the cursor stream, so all events at the
+		// cursor timestamp are still ahead of the cursor.
+		query += " AND occurred_at>=?"
+		args = append(args, after)
+	case stream == afterStream:
+		query += " AND (occurred_at>? OR (occurred_at=? AND sequence>?))"
+		args = append(args, after, after, afterSequence)
+	default:
+		query += " AND occurred_at>?"
+		args = append(args, after)
+	}
+	query += " ORDER BY occurred_at,sequence LIMIT 1001"
+	rows, err := h.db.QueryContext(c.Request.Context(), query, args...)
 	if err != nil {
 		return err
 	}
