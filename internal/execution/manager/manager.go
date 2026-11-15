@@ -109,7 +109,7 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 		// lost. Preserve that uncertainty; never label it failed.
 		reason := "runtime submission outcome uncertain: " + err.Error()
 		pending, transitionErr := m.store.Transition(context.Background(), created.ID,
-			[]dom.LifecycleStatus{dom.LifecycleQueued}, dom.LifecycleNeedsReconciliation, reason, nil)
+			[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleNeedsReconciliation, reason, nil)
 		return pending, errors.Join(err, transitionErr)
 	}
 	if ref != "" {
