@@ -71,34 +71,34 @@ type Handler struct {
 }
 
 type pageData struct {
-	Title         string
-	Active        string
-	Error         string
-	Message       string
-	Readiness     string
-	Counts        map[string]int64
-	Executions    []executionRow
-	Execution     *executionDetail
-	ProviderRows  []providerView
-	ModelRows     []modelView
-	AgentRows     []agentView
-	WorkflowRows  []workflowView
-	Credential    *credentialView
-	FilterStatus  string
-	FilterKind    string
-	FilterRuntime string
-	Offset        int
-	PrevOffset    int
-	NextOffset    int
-	HasPrevious   bool
-	HasNext       bool
-	Attempts      []attemptView
-	Artifacts     []artifactView
-	Evidence      []evidenceView
-	Events        []eventView
+	Title           string
+	Active          string
+	Error           string
+	Message         string
+	Readiness       string
+	Counts          map[string]int64
+	Executions      []executionRow
+	Execution       *executionDetail
+	ProviderRows    []providerView
+	ModelRows       []modelView
+	AgentRows       []agentView
+	WorkflowRows    []workflowView
+	Credential      *credentialView
+	FilterStatus    string
+	FilterKind      string
+	FilterRuntime   string
+	Offset          int
+	PrevOffset      int
+	NextOffset      int
+	HasPrevious     bool
+	HasNext         bool
+	Attempts        []attemptView
+	Artifacts       []artifactView
+	Evidence        []evidenceView
+	Events          []eventView
 	TimelineHasMore bool
 	TimelineNextURL string
-	RunResult     string
+	RunResult       string
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -107,14 +107,17 @@ type modelView struct {
 	ContextWindow, MaxOutputTokens                    int
 	Streaming                                         bool
 }
-type agentRunView struct { ID, TaskID, Status, CreatedAt, ExecutionID string }
-type workflowRunView struct { ID, Status, CreatedAt, ExecutionID string; Version int }
+type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
+type workflowRunView struct {
+	ID, Status, CreatedAt, ExecutionID string
+	Version                            int
+}
 
 type agentView struct {
 	ID, Name, ModelID, Description, SystemPrompt            string
 	Temperature                                             float64
 	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds int
-	Runs []agentRunView
+	Runs                                                    []agentRunView
 	Enabled                                                 bool
 	Version                                                 int
 }
@@ -872,13 +875,13 @@ func (h *Handler) agents(c *gin.Context) {
 		} else {
 			for _, item := range items {
 				runs, _ := h.agentCatalog.ListRuns(c.Request.Context(), item.ID, 5)
-			runRows := make([]agentRunView, 0, len(runs))
-			for _, run := range runs {
-				row := agentRunView{ID: run.ID, TaskID: run.TaskID, Status: run.Status, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
-				row.ExecutionID = h.executionForTask(c.Request.Context(), run.TaskID)
-				runRows = append(runRows, row)
-			}
-			data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, SystemPrompt: item.SystemPrompt, Temperature: item.Temperature, MaxSteps: item.MaxSteps, MaxToolCalls: item.MaxToolCalls, MaxOutputTokens: item.MaxOutputTokens, TimeoutSeconds: item.TimeoutSeconds, Runs: runRows, Enabled: item.Enabled, Version: item.Version})
+				runRows := make([]agentRunView, 0, len(runs))
+				for _, run := range runs {
+					row := agentRunView{ID: run.ID, TaskID: run.TaskID, Status: run.Status, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
+					row.ExecutionID = h.executionForTask(c.Request.Context(), run.TaskID)
+					runRows = append(runRows, row)
+				}
+				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, SystemPrompt: item.SystemPrompt, Temperature: item.Temperature, MaxSteps: item.MaxSteps, MaxToolCalls: item.MaxToolCalls, MaxOutputTokens: item.MaxOutputTokens, TimeoutSeconds: item.TimeoutSeconds, Runs: runRows, Enabled: item.Enabled, Version: item.Version})
 			}
 		}
 	}
@@ -886,16 +889,24 @@ func (h *Handler) agents(c *gin.Context) {
 }
 
 func (h *Handler) executionForTask(ctx context.Context, taskID string) string {
-	if h.db == nil || taskID == "" { return "" }
+	if h.db == nil || taskID == "" {
+		return ""
+	}
 	var id string
-	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind='agent' AND task_id=? ORDER BY created_at DESC LIMIT 1", taskID).Scan(&id); err != nil { return "" }
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind='agent' AND task_id=? ORDER BY created_at DESC LIMIT 1", taskID).Scan(&id); err != nil {
+		return ""
+	}
 	return id
 }
 
 func (h *Handler) executionForRuntimeRef(ctx context.Context, kind, runtimeRef string) string {
-	if h.db == nil || runtimeRef == "" { return "" }
+	if h.db == nil || runtimeRef == "" {
+		return ""
+	}
 	var id string
-	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind=? AND runtime_ref=? ORDER BY created_at DESC LIMIT 1", kind, runtimeRef).Scan(&id); err != nil { return "" }
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE kind=? AND runtime_ref=? ORDER BY created_at DESC LIMIT 1", kind, runtimeRef).Scan(&id); err != nil {
+		return ""
+	}
 	return id
 }
 
@@ -908,15 +919,15 @@ func (h *Handler) workflows(c *gin.Context) {
 		} else {
 			for _, item := range items {
 				runs := []workflowRunView{}
-			if h.workflowEngine != nil {
-				workflowRuns, _ := h.workflowEngine.ListRuns(c.Request.Context(), item.ID, 5)
-				for _, run := range workflowRuns {
-					row := workflowRunView{ID: run.ID, Status: string(run.Status), Version: run.WorkflowVersion, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
-					row.ExecutionID = h.executionForRuntimeRef(c.Request.Context(), "workflow", run.ID)
-					runs = append(runs, row)
+				if h.workflowEngine != nil {
+					workflowRuns, _ := h.workflowEngine.ListRuns(c.Request.Context(), item.ID, 5)
+					for _, run := range workflowRuns {
+						row := workflowRunView{ID: run.ID, Status: string(run.Status), Version: run.WorkflowVersion, CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339)}
+						row.ExecutionID = h.executionForRuntimeRef(c.Request.Context(), "workflow", run.ID)
+						runs = append(runs, row)
+					}
 				}
-			}
-			data.WorkflowRows = append(data.WorkflowRows, workflowView{ID: item.ID, Name: item.Name, Description: item.Description, Version: item.Definition.Version, UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Runs: runs})
+				data.WorkflowRows = append(data.WorkflowRows, workflowView{ID: item.ID, Name: item.Name, Description: item.Description, Version: item.Definition.Version, UpdatedAt: item.UpdatedAt.Format(time.RFC3339), Runs: runs})
 			}
 		}
 	}
@@ -1104,18 +1115,30 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 	if h.executionAPI != nil {
 		query := url.Values{}
 		query.Set("limit", "50")
-		if raw := c.Query("after_time_ns"); raw != "" { query.Set("after_time_ns", raw) }
-		if raw := c.Query("after_stream"); raw != "" { query.Set("after_stream", raw) }
-		if raw := c.Query("after_sequence"); raw != "" { query.Set("after_sequence", raw) }
+		if raw := c.Query("after_time_ns"); raw != "" {
+			query.Set("after_time_ns", raw)
+		}
+		if raw := c.Query("after_stream"); raw != "" {
+			query.Set("after_stream", raw)
+		}
+		if raw := c.Query("after_sequence"); raw != "" {
+			query.Set("after_sequence", raw)
+		}
 		path := "/api/v1/managed-executions/" + url.PathEscape(id) + "/timeline?" + query.Encode()
 		req := httptest.NewRequest(http.MethodGet, path, nil).WithContext(c.Request.Context())
 		rec := httptest.NewRecorder()
 		h.executionAPI.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK { return errors.New("could not load execution timeline") }
+		if rec.Code != http.StatusOK {
+			return errors.New("could not load execution timeline")
+		}
 		var response map[string]json.RawMessage
-		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil { return err }
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			return err
+		}
 		var items []map[string]json.RawMessage
-		if err := json.Unmarshal(response["items"], &items); err != nil { return err }
+		if err := json.Unmarshal(response["items"], &items); err != nil {
+			return err
+		}
 		for _, item := range items {
 			var v eventView
 			var occurred time.Time
@@ -1131,7 +1154,9 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 		_ = json.Unmarshal(response["has_more"], &data.TimelineHasMore)
 		if data.TimelineHasMore {
 			var cursor map[string]json.RawMessage
-			if err := json.Unmarshal(response["next_cursor"], &cursor); err != nil { return err }
+			if err := json.Unmarshal(response["next_cursor"], &cursor); err != nil {
+				return err
+			}
 			var afterTime, afterSequence int64
 			var afterStream string
 			_ = json.Unmarshal(cursor["after_time_ns"], &afterTime)
