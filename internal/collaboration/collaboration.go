@@ -776,6 +776,7 @@ func (s *Service) ClaimAssignment(ctx context.Context, id, owner string, lease t
 	}
 	return v, tx.Commit()
 }
+
 // CompleteAssignment preserves the legacy completion contract for callers without a runtime result.
 // CompleteAssignment preserves the legacy completion contract for callers without a runtime result.
 func (s *Service) CompleteAssignment(ctx context.Context, id, owner string, version int64) error {
@@ -826,7 +827,7 @@ func (s *Service) CompleteAssignmentWithResult(ctx context.Context, id, owner st
 	payload, err := json.Marshal(map[string]any{
 		"task_id":       taskID,
 		"assignment_id": id,
-		"execution_id": executionID,
+		"execution_id":  executionID,
 		"result":        result,
 	})
 	if err != nil {
