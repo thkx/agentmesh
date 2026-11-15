@@ -25,6 +25,12 @@ var (
 	ErrDynamicStreamingUnsupported    = errors.New("dynamic credential routing does not support streaming yet")
 )
 
+// DynamicModelResolver optionally resolves AI Resource model IDs without requiring
+// a duplicate legacy provider/model catalog entry.
+type DynamicModelResolver interface {
+	ResolveModel(context.Context, string) (provider.Model, bool, error)
+}
+
 // DynamicRouter routes configured model keys through the persisted AI resource pool.
 type DynamicRouter interface {
 	Supports(context.Context, string) (bool, error)
@@ -241,32 +247,44 @@ func (g *Gateway) SupportsNativeToolCalling(ctx context.Context, modelID string)
 
 func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Model, Model, GenerateRequest, error) {
 	model, err := g.resolver.Resolve(ctx, req.ModelID)
+	dynamicModel := false
 	if err != nil {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("resolve model: %w", err)
+		if resolver, ok := g.dynamicRouter.(DynamicModelResolver); ok {
+			resolved, found, dynamicErr := resolver.ResolveModel(ctx, req.ModelID)
+			if dynamicErr != nil {
+				return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve dynamic model: %w", dynamicErr)
+			}
+			if found {
+				model = resolved
+				dynamicModel = true
+				err = nil
+			}
+		}
 	}
-
+	if err != nil {
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve model: %w", err)
+	}
 	if err := model.Validate(); err != nil {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("invalid resolved model: %w", err)
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("invalid resolved model: %w", err)
 	}
-
 	if !model.Enabled {
-		return provider.Model{}, nil, GenerateRequest{},
-			fmt.Errorf("%w: %s", provider.ErrModelDisabled, model.ID)
+		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: %s", provider.ErrModelDisabled, model.ID)
 	}
-
-	// The model catalog is the authority for the maximum output size.
-	// Input token counting is intentionally left to provider tokenizers; the
-	// gateway must not pretend that character counts are token counts.
 	if model.MaxOutputTokens > 0 && req.MaxOutputTokens > model.MaxOutputTokens {
 		return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf(
 			"%w: requested=%d allowed=%d model=%s",
-			ErrOutputTokenLimitExceeded,
-			req.MaxOutputTokens,
-			model.MaxOutputTokens,
-			model.ID,
+			ErrOutputTokenLimitExceeded, req.MaxOutputTokens, model.MaxOutputTokens, model.ID,
 		)
+	}
+
+	resolvedReq := req
+	resolvedReq.ProviderID = model.ProviderID
+	resolvedReq.ProviderModel = model.Name
+
+	// Dynamic models are backed by AI Resource credentials and must not be
+	// coupled to the legacy ProviderRegistry or its single-key adapter.
+	if dynamicModel {
+		return model, nil, resolvedReq, nil
 	}
 
 	var providerInstance *provider.Provider
@@ -280,12 +298,9 @@ func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Mo
 			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: %s", provider.ErrProviderDisabled, p.ID)
 		}
 	}
-
 	adapter, err := g.registry.Get(model.ProviderID)
 	if err != nil {
 		if providerInstance != nil && providerInstance.Kind == provider.KindCloud && g.dynamicRouter != nil {
-			// A configured dynamic model may provide credentials even when the
-			// legacy single-key adapter has not been initialized.
 			adapter = nil
 		} else if providerInstance != nil && providerInstance.Kind == provider.KindCloud {
 			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("%w: provider %s", appcredential.ErrCredentialUnavailable, model.ProviderID)
@@ -293,11 +308,6 @@ func (g *Gateway) resolve(ctx context.Context, req GenerateRequest) (provider.Mo
 			return provider.Model{}, nil, GenerateRequest{}, fmt.Errorf("resolve provider adapter: %w", err)
 		}
 	}
-
-	resolvedReq := req
-	resolvedReq.ProviderID = model.ProviderID
-	resolvedReq.ProviderModel = model.Name
-
 	return model, adapter, resolvedReq, nil
 }
 
