@@ -19,10 +19,13 @@ var (
 )
 
 type Observation struct {
-	Status  dom.LifecycleStatus
-	Attempt int
-	Result  json.RawMessage
-	Error   string
+	Status              dom.LifecycleStatus
+	Attempt             int
+	AttemptOutcome      dom.AttemptStatus
+	AttemptError        string
+	AttemptNotStarted   bool
+	Result              json.RawMessage
+	Error               string
 }
 
 // Adapter implementations must make Submit idempotent for the same durable
@@ -159,11 +162,34 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 		return e, attemptErr
 	}
 
-	// A queued observation means the runtime has accepted or retained the work,
-	// but no execution attempt has started. Never synthesize a running attempt
-	// until the runtime reports running or a terminal outcome.
-	needsAttempt := observed.Status == dom.LifecycleRunning ||
-		(observed.Status != dom.LifecycleQueued && isTerminalOrRetry(observed.Status))
+	// A runtime may report a completed retry while the overall Execution
+	// remains active. Close that exact Attempt before considering the current
+	// Execution status; this also repairs a missed observer callback.
+	if observed.AttemptOutcome != "" && observed.Attempt > 0 {
+		for _, attempt := range attempts {
+			if attempt.Number != observed.Attempt || attempt.Status != dom.AttemptRunning {
+				continue
+			}
+			message := observed.AttemptError
+			if message == "" {
+				message = observed.Error
+			}
+			if _, finishErr := m.store.FinishAttempt(ctx, attempt.ID, observed.AttemptOutcome,
+				attempt.RuntimeRef, nil, message); finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
+				return e, finishErr
+			}
+			break
+		}
+		attempts, attemptErr = m.store.ListAttempts(ctx, e.ID)
+		if attemptErr != nil {
+			return e, attemptErr
+		}
+	}
+
+	// A runtime can be queued between attempts or have a worker claim that has
+	// not crossed its execution boundary yet. Those are not running Attempts.
+	needsAttempt := !observed.AttemptNotStarted && (observed.Status == dom.LifecycleRunning ||
+		(observed.Status != dom.LifecycleQueued && isTerminalOrRetry(observed.Status)))
 	if needsAttempt {
 		number := observed.Attempt
 		if number < 1 {
@@ -202,14 +228,20 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 	if !dom.CanTransition(e.Status, observed.Status) {
 		return e, dom.ErrInvalidTransition
 	}
-	if observed.Status != dom.LifecycleRunning && len(attempts) > 0 {
-		last := attempts[len(attempts)-1]
-		if last.Status == dom.AttemptRunning {
+	if observed.Status != dom.LifecycleRunning && !observed.AttemptNotStarted {
+		number := observed.Attempt
+		if number < 1 && len(attempts) > 0 {
+			number = attempts[len(attempts)-1].Number
+		}
+		for _, attempt := range attempts {
+			if attempt.Number != number || attempt.Status != dom.AttemptRunning {
+				continue
+			}
 			attemptStatus := toAttemptStatus(observed.Status)
-			_, finishErr := m.store.FinishAttempt(ctx, last.ID, attemptStatus, e.RuntimeRef, observed.Result, observed.Error)
-			if finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
+			if _, finishErr := m.store.FinishAttempt(ctx, attempt.ID, attemptStatus, e.RuntimeRef, observed.Result, observed.Error); finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
 				return e, finishErr
 			}
+			break
 		}
 	}
 	updated, transitionErr := m.store.Transition(ctx, e.ID, []dom.LifecycleStatus{e.Status}, observed.Status, observed.Error, observed.Result)
