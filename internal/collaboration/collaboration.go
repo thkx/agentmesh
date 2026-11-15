@@ -358,7 +358,7 @@ func (s *Service) EnableAgent(ctx context.Context, id string) (AgentIdentity, er
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil { return AgentIdentity{}, err }
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=? AND status<>'disabled' OR (id=? AND status='disabled' AND NOT EXISTS (SELECT 1 FROM agent_identity_lifecycle WHERE agent_id=? AND deleted_at IS NOT NULL))", now.UnixMilli(), id, id, id)
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_identity_lifecycle WHERE agent_id=? AND deleted_at IS NOT NULL)", now.UnixMilli(), id, id)
 	if err != nil { return AgentIdentity{}, err }
 	n, err := res.RowsAffected()
 	if err != nil { return AgentIdentity{}, err }
@@ -450,6 +450,9 @@ func (s *Service) CreateChannel(ctx context.Context, v Channel) (Channel, error)
 		a, e := s.GetAgent(ctx, id)
 		if e != nil {
 			return v, e
+		}
+		if a.DeletedAt != nil || a.Status == "disabled" {
+			return v, ErrConflict
 		}
 		if a.WorkspaceID != v.WorkspaceID {
 			return v, ErrInvalid
