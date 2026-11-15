@@ -106,3 +106,22 @@ func TestDashboardServesVendoredHTMXAsset(t *testing.T) {
 		t.Fatal("vendored HTMX asset was not served")
 	}
 }
+
+func TestDashboardLoginRateLimit(t *testing.T) {
+	r := testRouter("expected-token")
+	for attempt := 1; attempt <= 6; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token=wrong"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://127.0.0.1")
+		req.Host = "127.0.0.1"
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if attempt <= 5 && rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected unauthorized, got %d", attempt, rec.Code)
+		}
+		if attempt == 6 && rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: expected rate limit, got %d", attempt, rec.Code)
+		}
+	}
+}
