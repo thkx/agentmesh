@@ -253,3 +253,105 @@ func TestAgentAdapterCancellationUsesRuntimeForRunningAndQueueForQueued(t *testi
 		t.Fatalf("running cancel target=%q", runtime.canceledTask)
 	}
 }
+
+
+func TestAgentAdapterKeepsExecutionRunningBetweenSafeRetries(t *testing.T) {
+	queue := &fakeAgentScheduler{job: scheduler.Job{
+		ID: "agent-retry-job", Task: agentdom.Task{ID: "agent-retry-task"},
+		Status: scheduler.Queued, Attempts: 1, MaxAttempts: 3,
+		ExecutionStarted: true, LastError: "transient model failure",
+	}}
+	adapter, err := NewAgentAdapter(queue, &fakeAgentRuntime{}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := adapter.Observe(context.Background(), dom.Entity{
+		ID: "agent-retry-execution", RuntimeRef: queue.job.ID, Status: dom.LifecycleRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleRunning || observed.CompletedAttempt != 1 ||
+		observed.AttemptOutcome != dom.AttemptFailed || !observed.AttemptNotStarted {
+		t.Fatalf("retry wait observation=%+v", observed)
+	}
+
+	// A claimed retry has not started until the scheduler crosses MarkStarted.
+	queue.job.Status = scheduler.Running
+	queue.job.Attempts = 2
+	queue.job.ExecutionStarted = false
+	observed, err = adapter.Observe(context.Background(), dom.Entity{
+		ID: "agent-retry-execution", RuntimeRef: queue.job.ID, Status: dom.LifecycleRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleRunning || observed.CompletedAttempt != 1 ||
+		observed.AttemptOutcome != dom.AttemptFailed || !observed.AttemptNotStarted {
+		t.Fatalf("claimed retry observation=%+v", observed)
+	}
+
+	queue.job.ExecutionStarted = true
+	observed, err = adapter.Observe(context.Background(), dom.Entity{
+		ID: "agent-retry-execution", RuntimeRef: queue.job.ID, Status: dom.LifecycleRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleRunning || observed.Attempt != 2 || observed.AttemptNotStarted {
+		t.Fatalf("started retry observation=%+v", observed)
+	}
+}
+
+func TestAgentObserverKeepsParentExecutionRunningAcrossRetries(t *testing.T) {
+	store := newMemoryStore()
+	now := time.Now().UTC()
+	task := agentdom.Task{ID: "agent-observer-task", ModelID: "model-1", WorkspaceID: "workspace-1", Prompt: "retry"}
+	input, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity := dom.Entity{
+		ID: "agent-observer-execution", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: task.ID, Status: dom.LifecycleQueued, Input: input, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err = store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	observer, err := NewAgentObserver(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := scheduler.Job{ID: task.ID, Task: task, Status: scheduler.Running, Attempts: 1}
+	if err = observer.Started(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	job.Status = scheduler.Queued
+	if err = observer.Finished(context.Background(), job, agentdom.Result{TaskID: task.ID, Status: agentdom.StatusFailed}, errors.New("safe retry")); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := store.ListAttempts(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != dom.LifecycleRunning || len(attempts) != 1 || attempts[0].Status != dom.AttemptFailed {
+		t.Fatalf("retry transition corrupted parent lifecycle: execution=%+v attempts=%+v", current, attempts)
+	}
+
+	job.Status = scheduler.Running
+	job.Attempts = 2
+	if err = observer.Started(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err = store.ListAttempts(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 2 || attempts[1].Number != 2 || attempts[1].Status != dom.AttemptRunning {
+		t.Fatalf("next retry attempt was not appended: %+v", attempts)
+	}
+}
