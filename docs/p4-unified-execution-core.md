@@ -106,4 +106,4 @@ The P4 branch contains the following additive implementation:
 
 M43/M44 implementation tests are included for event ordering/pagination, append-only ledger behavior, provenance binding, mismatch rejection and provenance reads.
 
-**Verification status:** code and tests have been committed to the P4 branch, but no local Go command or CI result has yet been observed for these commits. Do not treat this record as a passing build/race/acceptance result.
+**Verification status:** code and tests have been committed to the P4 branch. Run `bash scripts/verify-p4-part1.sh` from the repository root. No local Go command or CI result has yet been observed for these commits; do not treat this record as a passing build/race/acceptance result.
