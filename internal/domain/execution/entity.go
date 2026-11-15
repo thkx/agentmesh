@@ -131,17 +131,23 @@ func (a Attempt) Validate() error {
 }
 
 func CanTransition(from, to LifecycleStatus) bool {
+	// A transition is a fact, not a write of the current label. No-op writes
+	// must not replace result/error fields or manufacture lifecycle events.
 	if from == to {
-		return true
+		return false
 	}
 	switch from {
 	case LifecycleQueued:
 		return to == LifecycleRunning || to == LifecycleSucceeded || to == LifecycleCanceled || to == LifecycleFailed || to == LifecycleTimedOut || to == LifecycleInterrupted || to == LifecycleNeedsReconciliation
 	case LifecycleRunning:
-		return to == LifecycleQueued || to == LifecycleSucceeded || to == LifecycleFailed || to == LifecycleCanceled || to == LifecycleTimedOut || to == LifecycleInterrupted || to == LifecycleNeedsReconciliation
+		// Returning to queued would erase the fact that a runtime attempt began.
+		// Retries are represented by a new Attempt, never a state regression.
+		return to == LifecycleSucceeded || to == LifecycleFailed || to == LifecycleCanceled || to == LifecycleTimedOut || to == LifecycleInterrupted || to == LifecycleNeedsReconciliation
 	case LifecycleInterrupted, LifecycleNeedsReconciliation:
+		// Uncertain outcomes can only be closed by an explicit resolution.
 		return to == LifecycleSucceeded || to == LifecycleFailed || to == LifecycleCanceled
 	default:
+		// All terminal outcomes are immutable.
 		return false
 	}
 }
