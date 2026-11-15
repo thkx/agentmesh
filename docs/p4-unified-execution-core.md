@@ -107,3 +107,10 @@ The P4 branch contains the following additive implementation:
 M43/M44 implementation tests are included for event ordering/pagination, append-only ledger behavior, provenance binding, mismatch rejection and provenance reads.
 
 **Verification status:** code and tests have been committed to the P4 branch. Run `bash scripts/verify-p4-part1.sh` from the repository root. No local Go command or CI result has yet been observed for these commits; do not treat this record as a passing build/race/acceptance result.
+
+### Part 1 migration correction
+
+- Migration 000042 replaces the P3 blanket Artifact Version update trigger with a field-aware immutability guard. Content and identity fields remain immutable; one-time Execution/Attempt provenance binding is allowed only through the existing 000041 validation triggers.
+- A regression test proves that the provenance bind succeeds while content and metadata updates remain rejected.
+
+**Verification status remains pending:** this environment cannot execute the repository's Go toolchain or SQLite migration suite. Run `bash scripts/verify-p4-part1.sh` on the target Go 1.27.3 environment before treating Part 1 as accepted.
