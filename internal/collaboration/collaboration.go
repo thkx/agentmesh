@@ -19,6 +19,7 @@ var (
  ErrNotFound = errors.New("collaboration resource not found")
  ErrConflict = errors.New("collaboration state conflict")
  ErrLeaseLost = errors.New("assignment lease lost")
+ ErrWorkspaceConcurrencyLimit = errors.New("workspace agent concurrency limit reached")
  ErrApprovalRequired = errors.New("human approval required")
 )
 
@@ -160,7 +161,28 @@ func(s *Service) findAssignment(ctx context.Context,taskID,agentID string)(Assig
  err:=s.db.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE task_id=? AND agent_id=?",taskID,agentID).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&c,&u)
  if err!=nil{return v,err};if exp.Valid{x:=time.UnixMilli(exp.Int64).UTC();v.LeaseExpiresAt=&x};v.CreatedAt=time.UnixMilli(c).UTC();v.UpdatedAt=time.UnixMilli(u).UTC();return v,nil
 }
-func(s *Service) ClaimAssignment(ctx context.Context,id,owner string,lease time.Duration)(Assignment,error){if strings.TrimSpace(owner)==""||lease<time.Second||lease>24*time.Hour{return Assignment{},ErrInvalid};now:=s.clock().UTC();tx,e:=s.db.BeginTx(ctx,nil);if e!=nil{return Assignment{},e};defer tx.Rollback();res,e:=tx.ExecContext(ctx,"UPDATE task_assignments SET status='claimed',lease_owner=?,lease_expires_at=?,claim_version=claim_version+1,updated_at=? WHERE id=? AND (status='pending' OR (status='claimed' AND lease_expires_at<?))",owner,now.Add(lease).UnixMilli(),now.UnixMilli(),id,now.UnixMilli());if e!=nil{return Assignment{},e};n,_:=res.RowsAffected();if n!=1{return Assignment{},ErrConflict};var v Assignment;var exp,c,u int64;e=tx.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE id=?",id).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&c,&u);if e!=nil{return v,e};x:=time.UnixMilli(exp).UTC();v.LeaseExpiresAt=&x;v.CreatedAt=time.UnixMilli(c).UTC();v.UpdatedAt=time.UnixMilli(u).UTC();_,e=tx.ExecContext(ctx,"UPDATE collaboration_tasks SET status='in_progress',updated_at=? WHERE id=?",now.UnixMilli(),v.TaskID);if e!=nil{return v,e};return v,tx.Commit()}
+func(s *Service) ClaimAssignment(ctx context.Context,id,owner string,lease time.Duration)(Assignment,error){if strings.TrimSpace(owner)==""||lease<time.Second||lease>24*time.Hour{return Assignment{},ErrInvalid};now:=s.clock().UTC();tx,e:=s.db.BeginTx(ctx,nil);if e!=nil{return Assignment{},e};defer tx.Rollback();res,e:=tx.ExecContext(ctx,`UPDATE task_assignments
+ SET status='claimed',lease_owner=?,lease_expires_at=?,claim_version=claim_version+1,updated_at=?
+ WHERE id=? AND (status='pending' OR (status='claimed' AND lease_expires_at<?))
+ AND (
+   SELECT COUNT(*) FROM task_assignments active
+   JOIN collaboration_tasks active_task ON active_task.id=active.task_id
+   WHERE active_task.workspace_id=(SELECT workspace_id FROM collaboration_tasks WHERE id=(SELECT task_id FROM task_assignments WHERE id=?))
+     AND active.status='claimed' AND active.lease_expires_at>=?
+ ) < (
+   SELECT max_agent_concurrency FROM collaboration_workspaces
+   WHERE id=(SELECT workspace_id FROM collaboration_tasks WHERE id=(SELECT task_id FROM task_assignments WHERE id=?))
+ )`,owner,now.Add(lease).UnixMilli(),now.UnixMilli(),id,now.UnixMilli(),id,now.UnixMilli(),id);if e!=nil{return Assignment{},e};n,_:=res.RowsAffected();if n!=1 {
+ var limit,active int
+ checkErr:=tx.QueryRowContext(ctx,`SELECT w.max_agent_concurrency,
+  (SELECT COUNT(*) FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id
+   WHERE t.workspace_id=w.id AND a.status='claimed' AND a.lease_expires_at>=?)
+  FROM collaboration_workspaces w JOIN collaboration_tasks target ON target.workspace_id=w.id
+  JOIN task_assignments target_assignment ON target_assignment.task_id=target.id
+  WHERE target_assignment.id=?`,now.UnixMilli(),id).Scan(&limit,&active)
+ if checkErr==nil && active>=limit { return Assignment{},ErrWorkspaceConcurrencyLimit }
+ return Assignment{},ErrConflict
+ };var v Assignment;var exp,c,u int64;e=tx.QueryRowContext(ctx,"SELECT id,task_id,agent_id,status,assigned_by,lease_owner,lease_expires_at,claim_version,created_at,updated_at FROM task_assignments WHERE id=?",id).Scan(&v.ID,&v.TaskID,&v.AgentID,&v.Status,&v.AssignedBy,&v.LeaseOwner,&exp,&v.ClaimVersion,&c,&u);if e!=nil{return v,e};x:=time.UnixMilli(exp).UTC();v.LeaseExpiresAt=&x;v.CreatedAt=time.UnixMilli(c).UTC();v.UpdatedAt=time.UnixMilli(u).UTC();_,e=tx.ExecContext(ctx,"UPDATE collaboration_tasks SET status='in_progress',updated_at=? WHERE id=?",now.UnixMilli(),v.TaskID);if e!=nil{return v,e};return v,tx.Commit()}
 func(s *Service) CompleteAssignment(ctx context.Context,id,owner string,version int64)error{now:=s.clock().UTC();tx,e:=s.db.BeginTx(ctx,nil);if e!=nil{return e};defer tx.Rollback();var taskID,workspaceID string;if e=tx.QueryRowContext(ctx,"SELECT a.task_id,t.workspace_id FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?",id).Scan(&taskID,&workspaceID);e!=nil{if errors.Is(e,sql.ErrNoRows){return ErrNotFound};return e};res,e:=tx.ExecContext(ctx,"UPDATE task_assignments SET status='completed',lease_owner='',lease_expires_at=NULL,updated_at=? WHERE id=? AND status='claimed' AND lease_owner=? AND claim_version=? AND lease_expires_at>=?",now.UnixMilli(),id,owner,version,now.UnixMilli());if e!=nil{return e};n,_:=res.RowsAffected();if n!=1{return ErrLeaseLost};_,e=tx.ExecContext(ctx,"UPDATE collaboration_tasks SET status='completed',updated_at=? WHERE id=?",now.UnixMilli(),taskID);if e!=nil{return e};payload,_:=json.Marshal(map[string]any{"task_id":taskID,"assignment_id":id});eid,e:=newID();if e!=nil{return e};_,e=tx.ExecContext(ctx,"INSERT INTO collaboration_outbox(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?,?)",eid,workspaceID,"task",taskID,"task.completed",string(payload),now.UnixMilli());if e!=nil{return e};return tx.Commit()}
 func(s *Service) PendingOutbox(ctx context.Context,limit int)([]Event,error){if limit<1||limit>500{limit=100};rows,e:=s.db.QueryContext(ctx,"SELECT id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at FROM collaboration_outbox WHERE published_at IS NULL ORDER BY created_at LIMIT ?",limit);if e!=nil{return nil,e};defer rows.Close();out:=[]Event{};for rows.Next(){var v Event;var p string;var t int64;if e=rows.Scan(&v.ID,&v.WorkspaceID,&v.AggregateType,&v.AggregateID,&v.Type,&p,&t);e!=nil{return nil,e};v.Payload=json.RawMessage(p);v.CreatedAt=time.UnixMilli(t).UTC();out=append(out,v)};return out,rows.Err()}
 func(s *Service) MarkPublished(ctx context.Context,id string)error{_,e:=s.db.ExecContext(ctx,"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error='' WHERE id=? AND published_at IS NULL",s.clock().UTC().UnixMilli(),id);return e}

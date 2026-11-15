@@ -47,3 +47,6 @@ The binding request contains definition_id and runtime_workspace_id. The runtime
 ## Verification
 
 Run `bash scripts/verify-p3.sh` for read-only formatting checks, build, vet and race tests.
+
+
+Workspace `max_agent_concurrency` is enforced inside the assignment-claim SQL statement. Expired leases do not consume capacity; active claimed assignments reserve one slot until completion, rejection or lease expiry. The limit is shared by all wakeup workers and API callers using the same SQLite database.
