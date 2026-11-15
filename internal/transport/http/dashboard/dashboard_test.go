@@ -94,3 +94,15 @@ func TestDashboardRejectsCrossOriginLogin(t *testing.T) {
 		t.Fatalf("expected forbidden, got %d", rec.Code)
 	}
 }
+
+func TestDashboardServesVendoredHTMXAsset(t *testing.T) {
+	r := testRouter("")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/assets/htmx.min.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "javascript") || !strings.Contains(rec.Body.String(), "htmx") {
+		t.Fatal("vendored HTMX asset was not served")
+	}
+}
