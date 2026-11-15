@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 )
 
 // Dispatcher delivers only events with an explicit, validated recipient rule.
 // Unknown event types are marked unroutable; they are never broadcast to a workspace.
+const maxOutboxAttempts = 8
+
 type Dispatcher struct {
 	db       *sql.DB
 	interval time.Duration
@@ -30,8 +34,9 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 	ticker := time.NewTicker(d.interval)
 	defer ticker.Stop()
 	for {
-		if err := d.DispatchOnce(ctx, 100); err != nil && ctx.Err() != nil {
-			return ctx.Err()
+		if err := d.DispatchOnce(ctx, 100); err != nil {
+			if ctx.Err() != nil { return ctx.Err() }
+			slog.ErrorContext(ctx, "collaboration outbox dispatch batch had failures", "error", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -45,7 +50,7 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context, limit int) error {
 	if limit < 1 || limit > 500 {
 		limit = 100
 	}
-	rows, err := d.db.QueryContext(ctx, "SELECT id FROM collaboration_outbox WHERE published_at IS NULL ORDER BY created_at,id LIMIT ?", limit)
+	rows, err := d.db.QueryContext(ctx, "SELECT id FROM collaboration_outbox WHERE published_at IS NULL AND next_attempt_at<=? ORDER BY created_at,id LIMIT ?", time.Now().UTC().UnixMilli(), limit)
 	if err != nil {
 		return err
 	}
@@ -65,12 +70,13 @@ func (d *Dispatcher) DispatchOnce(ctx context.Context, limit int) error {
 	if err = rows.Close(); err != nil {
 		return err
 	}
+	var batchErr error
 	for _, id := range ids {
-		if err = d.dispatchOne(ctx, id); err != nil {
-			return err
+		if dispatchErr := d.dispatchOne(ctx, id); dispatchErr != nil {
+			batchErr = errors.Join(batchErr, dispatchErr)
 		}
 	}
-	return nil
+	return batchErr
 }
 
 func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
@@ -92,14 +98,17 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
 		return err
 	}
 	if !json.Valid([]byte(payload)) {
-		return fmt.Errorf("outbox event %s has invalid JSON payload", id)
+		cause := fmt.Errorf("outbox event %s has invalid JSON payload", id)
+		_ = tx.Rollback()
+		return d.recordDispatchFailure(ctx, id, cause)
 	}
 	event.Payload = json.RawMessage(payload)
 	event.CreatedAt = time.UnixMilli(created).UTC()
 
 	recipients, routeErr := routeRecipients(ctx, tx, event)
 	if routeErr != nil {
-		return routeErr
+		_ = tx.Rollback()
+		return d.recordDispatchFailure(ctx, id, routeErr)
 	}
 	now := time.Now().UTC().UnixMilli()
 	for _, agentID := range recipients {
@@ -107,7 +116,8 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
 			"INSERT OR IGNORE INTO collaboration_inbox(id,agent_id,event_id,event_type,payload_json,status,received_at) VALUES(?,?,?,?,?,'pending',?)",
 			event.ID+":"+agentID, agentID, event.ID, event.Type, payload, now)
 		if err != nil {
-			return err
+			_ = tx.Rollback()
+			return d.recordDispatchFailure(ctx, id, err)
 		}
 	}
 	lastError := ""
@@ -115,12 +125,43 @@ func (d *Dispatcher) dispatchOne(ctx context.Context, id string) error {
 		lastError = "unroutable: no explicit recipient rule or eligible recipient"
 	}
 	_, err = tx.ExecContext(ctx,
-		"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error=? WHERE id=? AND published_at IS NULL",
+		"UPDATE collaboration_outbox SET published_at=?,attempts=attempts+1,last_error=?,next_attempt_at=0 WHERE id=? AND published_at IS NULL",
 		now, lastError, id)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// recordDispatchFailure applies bounded exponential retry to poison or transient
+// dispatch failures. Once the ceiling is reached, the event is dead-lettered so it
+// cannot block unrelated events behind it.
+func (d *Dispatcher) recordDispatchFailure(ctx context.Context, id string, cause error) error {
+	if cause == nil { return nil }
+	message := strings.TrimSpace(cause.Error())
+	if len(message) > 2000 { message = message[:2000] }
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil { return errors.Join(cause, err) }
+	defer tx.Rollback()
+	var attempts int
+	err = tx.QueryRowContext(ctx, "SELECT attempts FROM collaboration_outbox WHERE id=? AND published_at IS NULL", id).Scan(&attempts)
+	if errors.Is(err, sql.ErrNoRows) { return nil }
+	if err != nil { return errors.Join(cause, err) }
+	attempts++
+	now := time.Now().UTC()
+	var published any
+	lastError := message
+	nextAttempt := now.Add(time.Second * time.Duration(1<<min(attempts-1, 8))).UnixMilli()
+	if attempts >= maxOutboxAttempts {
+		published = now.UnixMilli()
+		lastError = "dead-letter: " + message
+		nextAttempt = now.UnixMilli()
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE collaboration_outbox SET attempts=?,next_attempt_at=?,published_at=?,last_error=? WHERE id=? AND published_at IS NULL",
+		attempts, nextAttempt, published, lastError, id)
+	if err != nil { return errors.Join(cause, err) }
+	if err = tx.Commit(); err != nil { return errors.Join(cause, err) }
+	return fmt.Errorf("outbox event %s dispatch attempt %d: %w", id, attempts, cause)
 }
 
 // routeRecipients is intentionally an allow-list. Adding a new event type requires

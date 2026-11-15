@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -110,6 +112,34 @@ func TestOutboxDispatchUsesExplicitRecipientsOnly(t *testing.T) {
 	var unroutable int
 	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_outbox WHERE published_at IS NOT NULL AND last_error LIKE 'unroutable:%'").Scan(&unroutable); err != nil { t.Fatal(err) }
 	if unroutable == 0 { t.Fatal("expected unsupported events to be recorded as unroutable") }
+}
+
+const maxOutboxTestRetries = 8
+
+func TestOutboxPoisonEventDoesNotBlockAndEventuallyDeadLetters(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Outbox Retry",Slug:"outbox-retry"});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Worker",Role:"worker"});if err!=nil{t.Fatal(err)}
+ _,err=db.DB.ExecContext(ctx,`INSERT INTO collaboration_outbox(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at)
+ VALUES('poison-event',?,'task','bad-task','task.assigned','[]',1)`,w.ID);if err!=nil{t.Fatal(err)}
+ task,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Valid task"});if err!=nil{t.Fatal(err)}
+ if _,err=s.AssignTask(ctx,task.ID,a.ID,"human");err!=nil{t.Fatal(err)}
+ dispatcher,err:=collaboration.NewDispatcher(db.DB,time.Millisecond);if err!=nil{t.Fatal(err)}
+ if err=dispatcher.DispatchOnce(ctx,100);err==nil{t.Fatal("expected malformed event dispatch error")}
+ var inboxCount,attempts int
+ if err=db.DB.QueryRowContext(ctx,"SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=?",a.ID).Scan(&inboxCount);err!=nil{t.Fatal(err)}
+ if inboxCount!=1{t.Fatalf("valid event behind poison event was not delivered: inbox=%d",inboxCount)}
+ if err=db.DB.QueryRowContext(ctx,"SELECT attempts FROM collaboration_outbox WHERE id='poison-event'").Scan(&attempts);err!=nil{t.Fatal(err)}
+ if attempts!=1{t.Fatalf("expected first retry attempt, got %d",attempts)}
+ for i:=1;i<maxOutboxTestRetries;i++ {
+  if _,err=db.DB.ExecContext(ctx,"UPDATE collaboration_outbox SET next_attempt_at=0 WHERE id='poison-event'");err!=nil{t.Fatal(err)}
+  _=dispatcher.DispatchOnce(ctx,100)
+ }
+ var published sql.NullInt64
+ var lastError string
+ if err=db.DB.QueryRowContext(ctx,"SELECT published_at,last_error,attempts FROM collaboration_outbox WHERE id='poison-event'").Scan(&published,&lastError,&attempts);err!=nil{t.Fatal(err)}
+ if !published.Valid||!strings.HasPrefix(lastError,"dead-letter:")||attempts!=maxOutboxTestRetries{t.Fatalf("poison event was not dead-lettered: published=%v error=%q attempts=%d",published,lastError,attempts)}
 }
 
 func TestMessageEventsRouteOnlyToChannelMembers(t *testing.T) {

@@ -55,3 +55,8 @@ Workspace `max_agent_concurrency` is enforced inside the assignment-claim SQL st
 Runtime bindings execute from their immutable definition snapshot, including the pinned model ID. The live definition is checked for continued enablement before execution, but editing a definition does not silently mutate an existing binding.
 
 Approval rejection is acknowledged only after the target assignment is rejected, or when it is already terminal. Transient claim failures are retried rather than silently discarded. Inbox retry exhaustion is covered by an explicit dead-letter test.
+
+
+## Outbox retry and dead-letter behavior
+
+The dispatcher processes due Outbox records independently. A malformed or temporarily unroutable event records its attempt and schedules bounded exponential backoff; it does not prevent later valid events from being delivered. After eight failed attempts the event is marked dead-lettered (`published_at` set with a `dead-letter:` error prefix) for operator inspection.
