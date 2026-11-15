@@ -58,6 +58,14 @@ func TestLifecycleEnforcementAndDurableCancellationIntent(t *testing.T) {
 	if requests != 1 || eventType != "execution.cancel_requested" {
 		t.Fatalf("cancel events=%d type=%q; want one durable cancellation request", requests, eventType)
 	}
+	if _, err = db.DB.ExecContext(ctx,
+		"UPDATE execution_control_events SET source='tampered' WHERE execution_id=?", execution.ID); err == nil {
+		t.Fatal("database allowed cancellation intent to be rewritten")
+	}
+	if _, err = db.DB.ExecContext(ctx,
+		"DELETE FROM execution_control_events WHERE execution_id=?", execution.ID); err == nil {
+		t.Fatal("database allowed cancellation intent to be deleted")
+	}
 	current, err := store.Get(ctx, execution.ID)
 	if err != nil {
 		t.Fatal(err)
