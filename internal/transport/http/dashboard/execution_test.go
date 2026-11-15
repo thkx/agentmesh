@@ -13,7 +13,9 @@ import (
 
 func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	statements := []string{
@@ -31,7 +33,9 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 		`INSERT INTO execution_control_events VALUES (1,'cancel.requested','operator','dashboard','{}',250,'exec-1')`,
 	}
 	for _, statement := range statements {
-		if _, err = db.Exec(statement); err != nil { t.Fatalf("execute fixture: %v", err) }
+		if _, err = db.Exec(statement); err != nil {
+			t.Fatalf("execute fixture: %v", err)
+		}
 	}
 
 	gin.SetMode(gin.TestMode)
@@ -39,9 +43,13 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 	New(Dependencies{DB: db}).RegisterRoutes(r)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/executions/exec-1", nil))
-	if rec.Code != http.StatusOK { t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String()) }
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
 	for _, want := range []string{"attempt-1", "artifact-1", "evidence-1", "attempt.succeeded", "cancel.requested"} {
-		if !strings.Contains(rec.Body.String(), want) { t.Fatalf("detail response missing %q: %s", want, rec.Body.String()) }
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("detail response missing %q: %s", want, rec.Body.String())
+		}
 	}
 	if strings.Index(rec.Body.String(), "attempt.succeeded") > strings.Index(rec.Body.String(), "cancel.requested") {
 		t.Fatal("timeline events are not ordered newest first")

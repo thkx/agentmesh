@@ -16,8 +16,8 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strconv"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -82,11 +82,11 @@ type pageData struct {
 	FilterStatus  string
 	FilterKind    string
 	FilterRuntime string
-	Offset int
-	PrevOffset int
-	NextOffset int
-	HasPrevious bool
-	HasNext bool
+	Offset        int
+	PrevOffset    int
+	NextOffset    int
+	HasPrevious   bool
+	HasNext       bool
 	Attempts      []attemptView
 	Artifacts     []artifactView
 	Evidence      []evidenceView
@@ -240,7 +240,9 @@ func (h *Handler) allowLogin(remoteAddr string) bool {
 	attempts := h.loginAttempts[remoteAddr]
 	kept := attempts[:0]
 	for _, attempt := range attempts {
-		if attempt.After(cutoff) { kept = append(kept, attempt) }
+		if attempt.After(cutoff) {
+			kept = append(kept, attempt)
+		}
 	}
 	if len(kept) >= 5 {
 		h.loginAttempts[remoteAddr] = kept
@@ -839,7 +841,9 @@ func (h *Handler) executions(c *gin.Context) {
 	}
 	data.Offset = offset
 	data.PrevOffset = offset - limit
-	if data.PrevOffset < 0 { data.PrevOffset = 0 }
+	if data.PrevOffset < 0 {
+		data.PrevOffset = 0
+	}
 	data.NextOffset = offset + limit
 	data.HasPrevious = offset > 0
 
