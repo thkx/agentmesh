@@ -85,4 +85,14 @@ func TestDashboardExecutionDetailShowsAttemptsProvenanceAndTimeline(t *testing.T
 	if taskResponse.Code != http.StatusOK || !strings.Contains(taskResponse.Body.String(), "exec-coding") || strings.Contains(taskResponse.Body.String(), "exec-cli") {
 		t.Fatalf("task filter did not isolate the expected execution: %s", taskResponse.Body.String())
 	}
+	pageOne := httptest.NewRecorder()
+	r.ServeHTTP(pageOne, httptest.NewRequest(http.MethodGet, "/dashboard/executions?limit=1", nil))
+	if pageOne.Code != http.StatusOK || !strings.Contains(pageOne.Body.String(), "Next") {
+		t.Fatalf("expected next page control: %s", pageOne.Body.String())
+	}
+	pageTwo := httptest.NewRecorder()
+	r.ServeHTTP(pageTwo, httptest.NewRequest(http.MethodGet, "/dashboard/executions?limit=1&offset=1", nil))
+	if pageTwo.Code != http.StatusOK || !strings.Contains(pageTwo.Body.String(), "Previous") {
+		t.Fatalf("expected previous page control: %s", pageTwo.Body.String())
+	}
 }
