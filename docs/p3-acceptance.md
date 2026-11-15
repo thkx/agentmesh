@@ -52,3 +52,6 @@ These are intentionally not represented as completed P3 behavior:
 4. The collaboration API is delivered; a dedicated collaboration UI, multi-computer Runner fleet, artifact review UI and automatic agent-to-agent conversational loop are later work.
 
 These boundaries preserve the P3 safety model: only explicitly supported event types cause execution, approval is rechecked before privileged work, and unknown notifications are never broadcast into arbitrary execution.
+
+
+Inbox failed events can be inspected with `GET /api/v1/collaboration/inbox/:agent_id?status=failed` and requeued individually with `POST /api/v1/collaboration/inbox/:agent_id/:event_id/requeue` after correcting the underlying cause.

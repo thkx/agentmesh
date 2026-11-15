@@ -71,4 +71,9 @@ func TestInboxLeaseRetryExhaustionMovesToFailed(t *testing.T) {
  if err=db.DB.QueryRowContext(ctx,"SELECT status,last_error FROM collaboration_inbox WHERE event_id='evt-dead'").Scan(&status,&lastError);err!=nil{t.Fatal(err)}
  if status!="failed"||lastError!="permanent failure"{t.Fatalf("expected terminal failed event, got status=%q error=%q",status,lastError)}
  if _,err=s.ClaimInbox(ctx,a.ID,collaboration.InboxLeaseOptions{Owner:"worker-2",Duration:time.Minute,MaxAttempts:1});!errors.Is(err,collaboration.ErrNotFound){t.Fatalf("failed event must not be claimable, got %v",err)}
+ if err=s.RequeueInbox(ctx,a.ID,"evt-dead");err!=nil{t.Fatal(err)}
+ requeued,err:=s.ClaimInbox(ctx,a.ID,collaboration.InboxLeaseOptions{Owner:"operator-retry",Duration:time.Minute,MaxAttempts:1});if err!=nil{t.Fatal(err)}
+ if requeued.Attempts!=1{t.Fatalf("requeued inbox should start at attempt one, got %d",requeued.Attempts)}
+ if err=s.AckInboxLease(ctx,a.ID,requeued.EventID,"operator-retry",requeued.LeaseToken,"handled");err!=nil{t.Fatal(err)}
+
 }
