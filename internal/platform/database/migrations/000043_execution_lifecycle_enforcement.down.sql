@@ -1,0 +1,7 @@
+DROP TRIGGER IF EXISTS execution_control_events_no_delete;
+DROP TRIGGER IF EXISTS execution_control_events_no_update;
+DROP INDEX IF EXISTS idx_execution_control_events_execution_sequence;
+DROP TABLE IF EXISTS execution_control_events;
+DROP TRIGGER IF EXISTS execution_attempts_lifecycle_validate_update;
+DROP TRIGGER IF EXISTS executions_identity_immutable;
+DROP TRIGGER IF EXISTS executions_lifecycle_validate_update;
