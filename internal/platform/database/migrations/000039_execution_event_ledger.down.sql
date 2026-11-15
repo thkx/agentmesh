@@ -1,0 +1,11 @@
+DROP TRIGGER IF EXISTS execution_events_no_delete;
+DROP TRIGGER IF EXISTS execution_events_no_update;
+DROP TRIGGER IF EXISTS execution_attempts_event_after_status_update;
+DROP TRIGGER IF EXISTS execution_attempts_event_after_insert;
+DROP TRIGGER IF EXISTS executions_event_after_runtime_ref_update;
+DROP TRIGGER IF EXISTS executions_event_after_status_update;
+DROP TRIGGER IF EXISTS executions_event_after_insert;
+DROP INDEX IF EXISTS idx_execution_events_type_occurred;
+DROP INDEX IF EXISTS idx_execution_events_attempt_sequence;
+DROP INDEX IF EXISTS idx_execution_events_execution_sequence;
+DROP TABLE IF EXISTS execution_events;
