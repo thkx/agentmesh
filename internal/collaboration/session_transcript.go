@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -37,10 +38,10 @@ func (s *Service) AppendAgentSessionTranscript(ctx context.Context, entry AgentS
 	}
 	var owner string
 	if err := s.db.QueryRowContext(ctx, "SELECT agent_id FROM agent_sessions WHERE id=?", entry.SessionID).Scan(&owner); err != nil {
-		if errors.Is(err, context.Canceled) {
-			return AgentSessionTranscriptEntry{}, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return AgentSessionTranscriptEntry{}, ErrNotFound
 		}
-		return AgentSessionTranscriptEntry{}, ErrNotFound
+		return AgentSessionTranscriptEntry{}, err
 	}
 	if owner != entry.AgentID {
 		return AgentSessionTranscriptEntry{}, ErrInvalid
@@ -64,7 +65,7 @@ func (s *Service) AppendAgentSessionTranscript(ctx context.Context, entry AgentS
 		(id,session_id,agent_id,execution_id,task_id,entry_type,content,content_sha256,content_truncated,created_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		entry.ID, entry.SessionID, entry.AgentID, entry.ExecutionID, entry.TaskID, entry.EntryType,
-		entry.Content, entry.ContentSHA256, boolInt(entry.ContentTruncated), entry.CreatedAt.UnixMilli())
+		entry.Content, entry.ContentSHA256, sessionTranscriptBoolInt(entry.ContentTruncated), entry.CreatedAt.UnixMilli())
 	if err != nil {
 		return AgentSessionTranscriptEntry{}, err
 	}
@@ -155,7 +156,7 @@ func (s *Service) AgentSessionTranscriptContext(ctx context.Context, agentID str
 	return out.String(), nil
 }
 
-func boolInt(value bool) int {
+func sessionTranscriptBoolInt(value bool) int {
 	if value {
 		return 1
 	}
