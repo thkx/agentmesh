@@ -644,7 +644,9 @@ func parseToolList(value string) []string {
 	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' })
 	tools := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if name := strings.TrimSpace(part); name != "" { tools = append(tools, name) }
+		if name := strings.TrimSpace(part); name != "" {
+			tools = append(tools, name)
+		}
 	}
 	return tools
 }
@@ -938,54 +940,91 @@ func (h *Handler) tasks(c *gin.Context) {
 	data := pageData{Title: "Tasks", Active: "tasks", TaskRows: []taskView{}}
 	if h.collaboration != nil {
 		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
-		if err != nil { data.Error = "Could not load workspaces" } else {
+		if err != nil {
+			data.Error = "Could not load workspaces"
+		} else {
 			for _, workspace := range workspaces {
 				tasks, listErr := h.collaboration.ListTasks(c.Request.Context(), workspace.ID)
-				if listErr != nil { data.Error = "Could not load workspace tasks"; continue }
+				if listErr != nil {
+					data.Error = "Could not load workspace tasks"
+					continue
+				}
 				identities, _ := h.collaboration.ListAgents(c.Request.Context(), workspace.ID)
 				agentOptions := make([]agentOption, 0, len(identities))
-				for _, identity := range identities { agentOptions = append(agentOptions, agentOption{ID: identity.ID, Name: identity.Name, Role: identity.Role, Status: identity.Status, Capabilities: strings.Join(identity.Capabilities, ", ")}) }
+				for _, identity := range identities {
+					agentOptions = append(agentOptions, agentOption{ID: identity.ID, Name: identity.Name, Role: identity.Role, Status: identity.Status, Capabilities: strings.Join(identity.Capabilities, ", ")})
+				}
 				for _, task := range tasks {
-					row := taskView{TaskID:task.ID, WorkspaceID:task.WorkspaceID, ParentTaskID:task.ParentTaskID, Title:task.Title, Type:task.Type, Status:task.Status, Priority:task.Priority, CreatedAt:task.CreatedAt.UTC().Format(time.RFC3339), AgentOptions:agentOptions}
+					row := taskView{TaskID: task.ID, WorkspaceID: task.WorkspaceID, ParentTaskID: task.ParentTaskID, Title: task.Title, Type: task.Type, Status: task.Status, Priority: task.Priority, CreatedAt: task.CreatedAt.UTC().Format(time.RFC3339), AgentOptions: agentOptions}
 					row.ExecutionID = h.executionForAnyTask(c.Request.Context(), task.ID)
-					data.TaskRows = append(data.TaskRows,row)
+					data.TaskRows = append(data.TaskRows, row)
 				}
 			}
-			sort.Slice(data.TaskRows,func(i,j int)bool{return data.TaskRows[i].CreatedAt>data.TaskRows[j].CreatedAt})
-			if len(data.TaskRows)>100 { data.TaskRows=data.TaskRows[:100] }
+			sort.Slice(data.TaskRows, func(i, j int) bool { return data.TaskRows[i].CreatedAt > data.TaskRows[j].CreatedAt })
+			if len(data.TaskRows) > 100 {
+				data.TaskRows = data.TaskRows[:100]
+			}
 		}
 	}
-	h.render(c,data,http.StatusOK)
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) createTask(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
-	priority, err := strconv.Atoi(c.PostForm("priority"))
-	if err != nil { c.Redirect(http.StatusSeeOther,"/dashboard/tasks?error=task"); return }
-	task := collaboration.Task{
-		WorkspaceID:c.PostForm("workspace_id"), ParentTaskID:c.PostForm("parent_task_id"),
-		Title:c.PostForm("title"), Description:c.PostForm("description"), Type:c.PostForm("type"),
-		Priority:priority, CreatedBy:"dashboard", IdempotencyKey:c.PostForm("idempotency_key"),
-		RequiredCapabilities:parseToolList(c.PostForm("required_capabilities")),
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
 	}
-	if _,err=h.collaboration.CreateTask(c.Request.Context(),task);err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/tasks?error=task");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/tasks?message=task-saved")
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	priority, err := strconv.Atoi(c.PostForm("priority"))
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/tasks?error=task")
+		return
+	}
+	task := collaboration.Task{
+		WorkspaceID: c.PostForm("workspace_id"), ParentTaskID: c.PostForm("parent_task_id"),
+		Title: c.PostForm("title"), Description: c.PostForm("description"), Type: c.PostForm("type"),
+		Priority: priority, CreatedBy: "dashboard", IdempotencyKey: c.PostForm("idempotency_key"),
+		RequiredCapabilities: parseToolList(c.PostForm("required_capabilities")),
+	}
+	if _, err = h.collaboration.CreateTask(c.Request.Context(), task); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/tasks?error=task")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/tasks?message=task-saved")
 }
 
 func (h *Handler) assignTask(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.collaboration == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
-	agentID:=c.PostForm("agent_id")
-	if agentID==""{c.Redirect(http.StatusSeeOther,"/dashboard/tasks?error=task-assign");return}
-	if _,err:=h.collaboration.AssignTask(c.Request.Context(),c.Param("id"),agentID,"dashboard");err!=nil{c.Redirect(http.StatusSeeOther,"/dashboard/tasks?error=task-assign");return}
-	c.Redirect(http.StatusSeeOther,"/dashboard/tasks?message=task-assigned")
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	agentID := c.PostForm("agent_id")
+	if agentID == "" {
+		c.Redirect(http.StatusSeeOther, "/dashboard/tasks?error=task-assign")
+		return
+	}
+	if _, err := h.collaboration.AssignTask(c.Request.Context(), c.Param("id"), agentID, "dashboard"); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/tasks?error=task-assign")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/tasks?message=task-assigned")
 }
 
 func (h *Handler) executionForAnyTask(ctx context.Context, taskID string) string {
-	if h.db==nil || taskID=="" { return "" }
+	if h.db == nil || taskID == "" {
+		return ""
+	}
 	var id string
-	if err:=h.db.QueryRowContext(ctx,"SELECT id FROM executions WHERE task_id=? ORDER BY created_at DESC LIMIT 1",taskID).Scan(&id);err!=nil{return ""}
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM executions WHERE task_id=? ORDER BY created_at DESC LIMIT 1", taskID).Scan(&id); err != nil {
+		return ""
+	}
 	return id
 }
 
