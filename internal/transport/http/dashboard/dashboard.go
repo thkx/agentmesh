@@ -101,9 +101,11 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentView struct {
-	ID, Name, ModelID, Description string
-	Enabled                        bool
-	Version                        int
+	ID, Name, ModelID, Description, SystemPrompt string
+	Temperature float64
+	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds int
+	Enabled bool
+	Version int
 }
 type workflowView struct {
 	ID, Name, Description string
@@ -191,6 +193,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/models/:id/delete", h.requireSession(), h.deleteModel)
 	g.GET("/agents", h.requireSession(), h.agents)
 	g.POST("/agents", h.requireSession(), h.createAgent)
+	g.POST("/agents/:id/update", h.requireSession(), h.updateAgent)
 	g.POST("/agents/:id/run", h.requireSession(), h.runAgent)
 	g.POST("/agents/:id/enabled", h.requireSession(), h.setAgentEnabled)
 	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
@@ -679,6 +682,30 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workflow-run-"+string(run.Status))
 }
 
+func (h *Handler) updateAgent(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	d, err := h.agents.Get(c.Request.Context(), c.Param("id"))
+	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+	if value := c.PostForm("name"); value != "" { d.Name = value }
+	if value := c.PostForm("description"); value != "" { d.Description = value }
+	if value := c.PostForm("model_id"); value != "" { d.ModelID = value }
+	if value := c.PostForm("system_prompt"); value != "" { d.SystemPrompt = value }
+	if value := c.PostForm("temperature"); value != "" {
+		d.Temperature, err = strconv.ParseFloat(value, 64)
+		if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+	}
+	for name, target := range map[string]*int{"max_steps": &d.MaxSteps, "max_tool_calls": &d.MaxToolCalls, "max_output_tokens": &d.MaxOutputTokens, "timeout_seconds": &d.TimeoutSeconds} {
+		if value := c.PostForm(name); value != "" {
+			parsed, parseErr := strconv.Atoi(value)
+			if parseErr != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+			*target = parsed
+		}
+	}
+	if err = h.agents.Update(c.Request.Context(), d); err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-saved")
+}
+
 func (h *Handler) setAgentEnabled(c *gin.Context) {
 	if !sameOrigin(c.Request) {
 		c.AbortWithStatus(http.StatusForbidden)
@@ -797,7 +824,7 @@ func (h *Handler) agents(c *gin.Context) {
 			data.Error = "Could not load agent definitions"
 		} else {
 			for _, item := range items {
-				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, Enabled: item.Enabled, Version: item.Version})
+				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, SystemPrompt: item.SystemPrompt, Temperature: item.Temperature, MaxSteps: item.MaxSteps, MaxToolCalls: item.MaxToolCalls, MaxOutputTokens: item.MaxOutputTokens, TimeoutSeconds: item.TimeoutSeconds, Enabled: item.Enabled, Version: item.Version})
 			}
 		}
 	}
