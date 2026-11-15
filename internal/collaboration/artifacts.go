@@ -15,17 +15,17 @@ import (
 const MaxArtifactBytes = 2 << 20
 
 type Artifact struct {
-	ID             string    `json:"id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	SourceTaskID   string    `json:"source_task_id,omitempty"`
-	CreatorAgentID string    `json:"creator_agent_id,omitempty"`
-	Kind           string    `json:"kind"`
-	Title          string    `json:"title"`
-	Status         string    `json:"status"`
+	ID                 string    `json:"id"`
+	WorkspaceID        string    `json:"workspace_id"`
+	SourceTaskID       string    `json:"source_task_id,omitempty"`
+	CreatorAgentID     string    `json:"creator_agent_id,omitempty"`
+	Kind               string    `json:"kind"`
+	Title              string    `json:"title"`
+	Status             string    `json:"status"`
 	CurrentVersion     int       `json:"current_version"`
 	SubmittedVersionID string    `json:"submitted_version_id,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 type ArtifactVersion struct {
