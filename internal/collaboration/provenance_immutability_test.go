@@ -34,10 +34,10 @@ func TestArtifactProvenanceBindingPreservesVersionContentImmutability(t *testing
 	}
 
 	artifact, version, err := service.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
-		WorkspaceID: workspace.ID,
-		Kind: "report",
-		Title: "Immutable report",
-		Content: []byte("original artifact bytes"),
+		WorkspaceID:     workspace.ID,
+		Kind:            "report",
+		Title:           "Immutable report",
+		Content:         []byte("original artifact bytes",
 		SourceExecution: "immutable-exec",
 	})
 	if err != nil {
