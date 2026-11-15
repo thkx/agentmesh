@@ -101,6 +101,10 @@ Gaps to close in M44:
 | Collaboration HTTP | `internal/transport/http/handlers/collaboration.go` | Preserve existing artifact endpoints; add only fields/queries needed for provenance. |
 | Existing tests | `internal/execution/manager/manager_test.go`, `internal/execution/repository/sqlite_test.go`, collaboration integration tests | Add migration-backed ledger ordering/immutability/idempotency and provenance mismatch/immutability coverage. |
 
+### Query-generation configuration
+
+The current `sqlc.yaml` schema list stops at migration `000020`, while P2/P3/P4 migrations extend through at least `000041`. The P2 Execution repository and the new event/provenance paths currently use explicit `database/sql` queries rather than generated sqlc methods. Do not run `sqlc generate` and assume it validates the new ledger/provenance schema: the configuration does not include those migrations. A separate schema-list reconciliation is required before claiming generated-query coverage for these tables; it is not a reason to redesign the existing repository layer in Part 1.
+
 ## 5. Adapter and lifecycle observations
 
 The Manager's Adapter contract is currently `Submit`, `Observe`, `Cancel`. Manager polls `Observe`, creates an Attempt when a runtime reports running or a terminal outcome, then conditionally finishes the Attempt and transitions the Execution.
