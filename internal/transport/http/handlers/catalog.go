@@ -304,10 +304,8 @@ func (h *CatalogHandler) testProvider(c *gin.Context) {
 		apiError(c, 409, "provider_disabled", "Provider is disabled")
 		return
 	}
-	if !h.adapters.Has(id) {
-		apiError(c, 503, "provider_not_ready", "Provider adapter is not initialized; configure credentials first")
-		return
-	}
+	// The shared gateway may satisfy this provider through the dynamic
+	// multi-credential pool even when no legacy single-key adapter exists.
 	var selected *provider.Model
 	for _, item := range h.models.List() {
 		if item.ProviderID == id && item.Enabled {
