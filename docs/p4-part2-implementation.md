@@ -10,7 +10,7 @@ Migration `000043_execution_lifecycle_enforcement` moves lifecycle invariants in
 - Succeeded, Failed, Canceled and TimedOut executions are terminal and cannot be reopened.
 - Running Attempts may be completed once as Succeeded, Failed, Canceled, TimedOut or Unknown. Terminal/Unknown Attempts cannot be reopened.
 - Execution identity, accepted input and creation time are immutable. Attempt identity, input and start time are immutable.
-- Domain `CanTransition` mirrors the persistence rules. Running-to-Queued is forbidden: retries are represented by another Attempt, not by erasing the fact that work already started.
+- Domain `CanTransition` mirrors the persistence rules. Running-to-Queued is forbidden: retries are represented by another Attempt, not by erasing the fact that work already started. Agent scheduler retry-wait and pre-start lease states are projected without regressing the parent Execution; the completed Attempt is closed and the next Attempt is appended only after the worker crosses its execution boundary.
 
 The database triggers are intentional defense in depth. Manager validation provides domain errors; SQLite protects against alternate writers and future code paths.
 
