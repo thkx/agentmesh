@@ -139,12 +139,12 @@ type attemptView struct {
 	FinishedAt          string
 }
 type artifactView struct {
-	ID, ArtifactID  string
-	Version         int
+	ID, ArtifactID, SourceExecutionID, SourceAttemptID string
+	Version int
 	MediaType, Hash string
-	Size            int64
+	Size int64
 }
-type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement string }
+type evidenceView struct { ID, ArtifactID, VersionID, Kind, Statement, ExecutionID, AttemptID string }
 type eventView struct {
 	Stream, Type, Actor, Source, Payload, OccurredAt string
 	Sequence                                         int64
@@ -1071,13 +1071,13 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 	}
 
 	data.Artifacts = []artifactView{}
-	rows, err = h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version,COALESCE(media_type,''),COALESCE(content_sha256,''),COALESCE(size_bytes,0) FROM collaboration_artifact_versions WHERE source_execution_id=? OR source_attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY artifact_id,version`, id, id)
+	rows, err = h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version,COALESCE(media_type,''),COALESCE(content_sha256,''),COALESCE(size_bytes,0),COALESCE(source_execution_id,''),COALESCE(source_attempt_id,'') FROM collaboration_artifact_versions WHERE source_execution_id=? OR source_attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY artifact_id,version`, id, id)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var v artifactView
-		if err = rows.Scan(&v.ID, &v.ArtifactID, &v.Version, &v.MediaType, &v.Hash, &v.Size); err != nil {
+		if err = rows.Scan(&v.ID, &v.ArtifactID, &v.Version, &v.MediaType, &v.Hash, &v.Size, &v.SourceExecutionID, &v.SourceAttemptID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1092,13 +1092,13 @@ func (h *Handler) loadExecutionRelations(c *gin.Context, id string, data *pageDa
 	}
 
 	data.Evidence = []evidenceView{}
-	rows, err = h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version_id,kind,COALESCE(statement,'') FROM collaboration_artifact_evidence WHERE execution_id=? OR attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY created_at,id`, id, id)
+	rows, err = h.db.QueryContext(c.Request.Context(), `SELECT id,artifact_id,version_id,kind,COALESCE(statement,''),COALESCE(execution_id,''),COALESCE(attempt_id,'') FROM collaboration_artifact_evidence WHERE execution_id=? OR attempt_id IN (SELECT id FROM execution_attempts WHERE execution_id=?) ORDER BY created_at,id`, id, id)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var v evidenceView
-		if err = rows.Scan(&v.ID, &v.ArtifactID, &v.VersionID, &v.Kind, &v.Statement); err != nil {
+		if err = rows.Scan(&v.ID, &v.ArtifactID, &v.VersionID, &v.Kind, &v.Statement, &v.ExecutionID, &v.AttemptID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1285,8 +1285,8 @@ const pageTemplate = `{{define "page"}}<section class="panel"><h1>{{.Title}}</h1
 {{if .Execution}}<dl><dt>Kind</dt><dd>{{.Execution.Kind}}</dd><dt>Runtime</dt><dd>{{.Execution.Runtime}}</dd><dt>Status</dt><dd>{{.Execution.Status}}</dd><dt>Task</dt><dd>{{.Execution.TaskID}}</dd><dt>Created</dt><dd>{{.Execution.CreatedAt}}</dd><dt>Updated</dt><dd>{{.Execution.UpdatedAt}}</dd></dl>
 {{if or (eq .Execution.Status "queued") (eq .Execution.Status "running")}}<form method="post" action="/dashboard/executions/{{.Execution.ID}}/cancel" onsubmit="return confirm('Request cancellation for this execution?')"><button class="danger">Request cancellation</button></form>{{end}}
 <h2>Attempts</h2>{{if .Attempts}}<table><tr><th>Attempt</th><th>Runtime</th><th>Status</th><th>Started</th><th>Finished</th></tr>{{range .Attempts}}<tr><td>{{.Number}}</td><td>{{.Runtime}}</td><td>{{.Status}}</td><td>{{.StartedAt}}</td><td>{{.FinishedAt}}</td></tr>{{end}}</table>{{else}}<p>No attempts recorded.</p>{{end}}
-<h2>Artifact versions</h2>{{if .Artifacts}}<table><tr><th>Artifact</th><th>Version</th><th>Media type</th><th>Size</th><th>SHA-256</th></tr>{{range .Artifacts}}<tr><td>{{.ArtifactID}}</td><td>{{.Version}}</td><td>{{.MediaType}}</td><td>{{.Size}}</td><td>{{.Hash}}</td></tr>{{end}}</table>{{else}}<p>No artifact versions linked.</p>{{end}}
-<h2>Evidence</h2>{{if .Evidence}}<table><tr><th>Kind</th><th>Artifact</th><th>Version</th></tr>{{range .Evidence}}<tr><td>{{.Kind}}</td><td>{{.ArtifactID}}</td><td>{{.VersionID}}</td></tr>{{end}}</table>{{else}}<p>No evidence linked.</p>{{end}}
+<h2>Artifact versions</h2>{{if .Artifacts}}<table><tr><th>Artifact</th><th>Version</th><th>Media type</th><th>Size</th><th>SHA-256</th><th>Source attempt</th></tr>{{range .Artifacts}}<tr><td>{{.ArtifactID}}</td><td>{{.Version}}</td><td>{{.MediaType}}</td><td>{{.Size}}</td><td>{{.Hash}}</td><td>{{.SourceAttemptID}}</td></tr>{{end}}</table>{{else}}<p>No artifact versions linked.</p>{{end}}
+<h2>Evidence</h2>{{if .Evidence}}<table><tr><th>Kind</th><th>Artifact</th><th>Version</th><th>Attempt</th></tr>{{range .Evidence}}<tr><td>{{.Kind}}</td><td>{{.ArtifactID}}</td><td>{{.VersionID}}</td><td>{{.AttemptID}}</td></tr>{{end}}</table>{{else}}<p>No evidence linked.</p>{{end}}
 <h2>Timeline</h2>{{if .Events}}<ol>{{range .Events}}<li><time>{{.OccurredAt}}</time> <strong>{{.Stream}} · {{.Type}}</strong> — {{.Actor}} / {{.Source}}</li>{{end}}</ol>{{else}}<p>No execution events recorded.</p>{{end}}{{end}}
 </section>{{end}}`
 
