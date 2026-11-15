@@ -142,9 +142,13 @@ func TestDashboardRejectsTamperedAndExpiredSessions(t *testing.T) {
 	r.ServeHTTP(loginRec, loginReq)
 	var session *http.Cookie
 	for _, cookie := range loginRec.Result().Cookies() {
-		if cookie.Name == sessionCookie { session = cookie }
+		if cookie.Name == sessionCookie {
+			session = cookie
+		}
 	}
-	if session == nil { t.Fatal("login did not issue a session cookie") }
+	if session == nil {
+		t.Fatal("login did not issue a session cookie")
+	}
 
 	tampered := *session
 	tampered.Value = tampered.Value[:len(tampered.Value)-1] + "x"
@@ -152,13 +156,17 @@ func TestDashboardRejectsTamperedAndExpiredSessions(t *testing.T) {
 	tamperedReq.AddCookie(&tampered)
 	tamperedRec := httptest.NewRecorder()
 	r.ServeHTTP(tamperedRec, tamperedReq)
-	if tamperedRec.Code != http.StatusSeeOther { t.Fatalf("tampered session status = %d", tamperedRec.Code) }
+	if tamperedRec.Code != http.StatusSeeOther {
+		t.Fatalf("tampered session status = %d", tamperedRec.Code)
+	}
 
 	expiredReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	expiredReq.AddCookie(&http.Cookie{Name: sessionCookie, Value: "1.invalid"})
 	expiredRec := httptest.NewRecorder()
 	r.ServeHTTP(expiredRec, expiredReq)
-	if expiredRec.Code != http.StatusSeeOther { t.Fatalf("expired session status = %d", expiredRec.Code) }
+	if expiredRec.Code != http.StatusSeeOther {
+		t.Fatalf("expired session status = %d", expiredRec.Code)
+	}
 }
 
 func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
@@ -173,9 +181,13 @@ func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
 	r.ServeHTTP(loginRec, loginReq)
 	var session *http.Cookie
 	for _, cookie := range loginRec.Result().Cookies() {
-		if cookie.Name == sessionCookie { session = cookie }
+		if cookie.Name == sessionCookie {
+			session = cookie
+		}
 	}
-	if session == nil { t.Fatal("login did not issue a session cookie") }
+	if session == nil {
+		t.Fatal("login did not issue a session cookie")
+	}
 
 	logoutReq := httptest.NewRequest(http.MethodPost, "/dashboard/logout", nil)
 	logoutReq.Header.Set("Origin", "https://attacker.example")
@@ -183,7 +195,9 @@ func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
 	logoutReq.AddCookie(session)
 	logoutRec := httptest.NewRecorder()
 	r.ServeHTTP(logoutRec, logoutReq)
-	if logoutRec.Code != http.StatusForbidden { t.Fatalf("cross-origin logout status = %d", logoutRec.Code) }
+	if logoutRec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin logout status = %d", logoutRec.Code)
+	}
 }
 
 func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
@@ -191,6 +205,8 @@ func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
 	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/workflows", "/dashboard/executions"} {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusOK { t.Fatalf("%s returned %d: %s", path, rec.Code, rec.Body.String()) }
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d: %s", path, rec.Code, rec.Body.String())
+		}
 	}
 }

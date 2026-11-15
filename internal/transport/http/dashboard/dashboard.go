@@ -117,11 +117,11 @@ type workflowRunView struct {
 
 type agentView struct {
 	ID, Name, ModelID, Description, SystemPrompt, ApprovedTools string
-	Temperature                                             float64
-	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds int
-	Runs                                                    []agentRunView
-	Enabled                                                 bool
-	Version                                                 int
+	Temperature                                                 float64
+	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds     int
+	Runs                                                        []agentRunView
+	Enabled                                                     bool
+	Version                                                     int
 }
 type workflowView struct {
 	ID, Name, Description string
