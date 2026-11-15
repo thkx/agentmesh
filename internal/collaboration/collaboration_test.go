@@ -83,6 +83,21 @@ func TestWorkspaceConcurrencyLimitIsEnforcedAtClaim(t *testing.T) {
  if _,err=s.ClaimAssignment(ctx,as2.ID,"runner-two",time.Minute);err!=nil{t.Fatalf("claim should succeed after capacity is released: %v",err)}
 }
 
+func TestAgentCannotClaimMultipleConcurrentAssignments(t *testing.T) {
+ ctx:=context.Background()
+ s,db:=testService(t);defer db.Close()
+ w,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Single Agent",Slug:"single-agent",MaxAgentConcurrency:4});if err!=nil{t.Fatal(err)}
+ a,err:=s.CreateAgent(ctx,collaboration.AgentIdentity{WorkspaceID:w.ID,Name:"Serial Worker",Role:"worker"});if err!=nil{t.Fatal(err)}
+ t1,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"First"});if err!=nil{t.Fatal(err)}
+ t2,err:=s.CreateTask(ctx,collaboration.Task{WorkspaceID:w.ID,Title:"Second"});if err!=nil{t.Fatal(err)}
+ as1,err:=s.AssignTask(ctx,t1.ID,a.ID,"human");if err!=nil{t.Fatal(err)}
+ as2,err:=s.AssignTask(ctx,t2.ID,a.ID,"human");if err!=nil{t.Fatal(err)}
+ claimed,err:=s.ClaimAssignment(ctx,as1.ID,"runner-one",time.Minute);if err!=nil{t.Fatal(err)}
+ if _,err=s.ClaimAssignment(ctx,as2.ID,"runner-two",time.Minute);!errors.Is(err,collaboration.ErrAgentBusy){t.Fatalf("expected active agent guard, got %v",err)}
+ if err=s.CompleteAssignment(ctx,claimed.ID,"runner-one",claimed.ClaimVersion);err!=nil{t.Fatal(err)}
+ if _,err=s.ClaimAssignment(ctx,as2.ID,"runner-two",time.Minute);err!=nil{t.Fatalf("agent should be claimable after its active assignment completes: %v",err)}
+}
+
 func TestOutboxDispatchUsesExplicitRecipientsOnly(t *testing.T) {
 	ctx := context.Background()
 	s, db := testService(t)

@@ -63,3 +63,6 @@ The dispatcher processes due Outbox records independently. A malformed or tempor
 
 
 Pending approvals are expired by the Outbox dispatcher. Expiration is an atomic state transition that emits `approval.expired` and routes the notification only to the original requester; expired requests no longer block a fresh decision request.
+
+
+An Agent Identity can hold only one live Assignment lease at a time. This protects its single active Session pointer when multiple application processes consume the same Inbox; workspace concurrency remains an independent upper bound across different agents.
