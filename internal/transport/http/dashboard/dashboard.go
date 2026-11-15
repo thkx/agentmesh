@@ -163,6 +163,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/", h.requireSession(), h.overview)
 	g.GET("/providers", h.requireSession(), h.providers)
 	g.POST("/providers", h.requireSession(), h.createProvider)
+	g.POST("/providers/:id/update", h.requireSession(), h.updateProvider)
 	g.POST("/providers/:id/enabled", h.requireSession(), h.setProviderEnabled)
 	g.POST("/providers/:id/delete", h.requireSession(), h.deleteProvider)
 	g.POST("/providers/:id/test", h.requireSession(), h.testProvider)
@@ -170,6 +171,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/providers/:id/credential/delete", h.requireSession(), h.deleteCredential)
 	g.GET("/models", h.requireSession(), h.models)
 	g.POST("/models", h.requireSession(), h.createModel)
+	g.POST("/models/:id/update", h.requireSession(), h.updateModel)
 	g.POST("/models/:id/enabled", h.requireSession(), h.setModelEnabled)
 	g.POST("/models/:id/delete", h.requireSession(), h.deleteModel)
 	g.GET("/agents", h.requireSession(), h.agents)
@@ -324,6 +326,24 @@ func (h *Handler) createProvider(c *gin.Context) {
 	if !h.callCatalog(c,http.MethodPost,"/api/v1/providers",payload) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider"); return }
 	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-saved")
 }
+func (h *Handler) updateProvider(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	payload := map[string]any{"name":c.PostForm("name"),"type":c.PostForm("type"),"kind":c.PostForm("kind"),"base_url":c.PostForm("base_url")}
+	path := "/api/v1/providers/" + c.Param("id")
+	if !h.callCatalog(c,http.MethodPut,path,payload) { c.Redirect(http.StatusSeeOther,"/dashboard/providers?error=provider"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/providers?message=provider-saved")
+}
+func (h *Handler) updateModel(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	contextWindow, err1 := strconv.Atoi(c.PostForm("context_window"))
+	maxOutput, err2 := strconv.Atoi(c.PostForm("max_output_tokens"))
+	if err1 != nil || err2 != nil || contextWindow < 0 || maxOutput < 0 { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	payload := map[string]any{"provider_id":c.PostForm("provider_id"),"name":c.PostForm("name"),"display_name":c.PostForm("display_name"),"context_window":contextWindow,"max_output_tokens":maxOutput,"supports_streaming":c.PostForm("supports_streaming")=="true"}
+	path := "/api/v1/models/" + c.Param("id")
+	if !h.callCatalog(c,http.MethodPut,path,payload) { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	c.Redirect(http.StatusSeeOther,"/dashboard/models?message=model-saved")
+}
+
 func (h *Handler) setProviderEnabled(c *gin.Context) {
 	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
 	enabled := c.PostForm("enabled") == "true"
