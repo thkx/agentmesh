@@ -316,7 +316,9 @@ func (s *Service) GetAgent(ctx context.Context, id string) (AgentIdentity, error
 	}
 	v.CreatedAt = time.UnixMilli(c).UTC()
 	v.UpdatedAt = time.UnixMilli(u).UTC()
-	if deleted.Valid { value := time.UnixMilli(deleted.Int64).UTC(); v.DeletedAt = &value }
+	if deleted.Valid {
+		value := time.UnixMilli(deleted.Int64).UTC(); v.DeletedAt = &value
+	}
 	return v, nil
 }
 func (s *Service) ListAgents(ctx context.Context, wid string) ([]AgentIdentity, error) {
@@ -350,88 +352,168 @@ func (s *Service) ListAgents(ctx context.Context, wid string) ([]AgentIdentity, 
 // EnableAgent transitions a non-deleted Agent Identity to idle and emits an audit event.
 func (s *Service) EnableAgent(ctx context.Context, id string) (AgentIdentity, error) {
 	id = strings.TrimSpace(id)
-	if id == "" { return AgentIdentity{}, ErrInvalid }
+	if id == "" {
+		return AgentIdentity{}, ErrInvalid
+	}
 	agent, err := s.GetAgent(ctx, id)
-	if err != nil { return AgentIdentity{}, err }
-	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if agent.DeletedAt != nil {
+		return AgentIdentity{}, ErrConflict
+	}
 	now := s.clock().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM agent_identity_lifecycle WHERE agent_id=? AND deleted_at IS NOT NULL)", now.UnixMilli(), id, id)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	n, err := res.RowsAffected()
-	if err != nil { return AgentIdentity{}, err }
-	if n != 1 { return AgentIdentity{}, ErrConflict }
-	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.enabled", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
-	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if n != 1 {
+		return AgentIdentity{}, ErrConflict
+	}
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.enabled", map[string]string{"agent_id": id}); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return AgentIdentity{}, err
+	}
 	return s.GetAgent(ctx, id)
 }
 
 // DisableAgent prevents new assignment claims. Active leases must finish or expire first.
 func (s *Service) DisableAgent(ctx context.Context, id string) (AgentIdentity, error) {
 	id = strings.TrimSpace(id)
-	if id == "" { return AgentIdentity{}, ErrInvalid }
+	if id == "" {
+		return AgentIdentity{}, ErrInvalid
+	}
 	agent, err := s.GetAgent(ctx, id)
-	if err != nil { return AgentIdentity{}, err }
-	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if agent.DeletedAt != nil {
+		return AgentIdentity{}, ErrConflict
+	}
 	now := s.clock().UTC()
 	var active int
-	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil { return AgentIdentity{}, err }
-	if active > 0 { return AgentIdentity{}, ErrAgentBusy }
+	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil {
+		return AgentIdentity{}, err
+	}
+	if active > 0 {
+		return AgentIdentity{}, ErrAgentBusy
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=? AND status<>'disabled'", now.UnixMilli(), id)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	n, err := res.RowsAffected()
-	if err != nil { return AgentIdentity{}, err }
-	if n != 1 { return AgentIdentity{}, ErrConflict }
-	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.disabled", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
-	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if n != 1 {
+		return AgentIdentity{}, ErrConflict
+	}
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.disabled", map[string]string{"agent_id": id}); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return AgentIdentity{}, err
+	}
 	return s.GetAgent(ctx, id)
 }
 
 // DeleteAgent is a recoverable soft-delete. Historical assignments and audit rows are preserved.
 func (s *Service) DeleteAgent(ctx context.Context, id string) (AgentIdentity, error) {
 	id = strings.TrimSpace(id)
-	if id == "" { return AgentIdentity{}, ErrInvalid }
+	if id == "" {
+		return AgentIdentity{}, ErrInvalid
+	}
 	agent, err := s.GetAgent(ctx, id)
-	if err != nil { return AgentIdentity{}, err }
-	if agent.DeletedAt != nil { return AgentIdentity{}, ErrConflict }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if agent.DeletedAt != nil {
+		return AgentIdentity{}, ErrConflict
+	}
 	now := s.clock().UTC()
 	var active int
-	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil { return AgentIdentity{}, err }
-	if active > 0 { return AgentIdentity{}, ErrAgentBusy }
+	if err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?", id, now.UnixMilli()).Scan(&active); err != nil {
+		return AgentIdentity{}, err
+	}
+	if active > 0 {
+		return AgentIdentity{}, ErrAgentBusy
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "INSERT INTO agent_identity_lifecycle(agent_id,deleted_at,recovered_at) VALUES(?,?,NULL) ON CONFLICT(agent_id) DO UPDATE SET deleted_at=excluded.deleted_at,recovered_at=NULL", id, now.UnixMilli()); err != nil { return AgentIdentity{}, err }
-	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil { return AgentIdentity{}, err }
-	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.deleted", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
-	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	if _, err = tx.ExecContext(ctx, "INSERT INTO agent_identity_lifecycle(agent_id,deleted_at,recovered_at) VALUES(?,?,NULL) ON CONFLICT(agent_id) DO UPDATE SET deleted_at=excluded.deleted_at,recovered_at=NULL", id, now.UnixMilli()); err != nil {
+		return AgentIdentity{}, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.deleted", map[string]string{"agent_id": id}); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return AgentIdentity{}, err
+	}
 	return s.GetAgent(ctx, id)
 }
 
 // RecoverAgent restores a soft-deleted Agent Identity without changing its historical records.
 func (s *Service) RecoverAgent(ctx context.Context, id string) (AgentIdentity, error) {
 	id = strings.TrimSpace(id)
-	if id == "" { return AgentIdentity{}, ErrInvalid }
+	if id == "" {
+		return AgentIdentity{}, ErrInvalid
+	}
 	agent, err := s.GetAgent(ctx, id)
-	if err != nil { return AgentIdentity{}, err }
-	if agent.DeletedAt == nil { return AgentIdentity{}, ErrConflict }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if agent.DeletedAt == nil {
+		return AgentIdentity{}, ErrConflict
+	}
 	now := s.clock().UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	defer tx.Rollback()
 	res, err := tx.ExecContext(ctx, "UPDATE agent_identity_lifecycle SET deleted_at=NULL,recovered_at=? WHERE agent_id=? AND deleted_at IS NOT NULL", now.UnixMilli(), id)
-	if err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
 	n, err := res.RowsAffected()
-	if err != nil { return AgentIdentity{}, err }
-	if n != 1 { return AgentIdentity{}, ErrConflict }
-	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil { return AgentIdentity{}, err }
-	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.recovered", map[string]string{"agent_id": id}); err != nil { return AgentIdentity{}, err }
-	if err = tx.Commit(); err != nil { return AgentIdentity{}, err }
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if n != 1 {
+		return AgentIdentity{}, ErrConflict
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='idle',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.recovered", map[string]string{"agent_id": id}); err != nil {
+		return AgentIdentity{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return AgentIdentity{}, err
+	}
 	return s.GetAgent(ctx, id)
 }
 
