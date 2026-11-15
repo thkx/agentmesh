@@ -39,7 +39,7 @@ func TestExecutionEventsHandlerOrdersAndPaginatesBySequence(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	NewExecutionEventsHandler(db).RegisterRoutes(router)
+	NewExecutionEventsHandler(db).RegisterRoutes(router.Group(""))
 
 	first := httptest.NewRecorder()
 	router.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/managed-executions/exec-1/events?limit=1", nil))
@@ -78,7 +78,7 @@ func TestExecutionEventsHandlerReturnsNotFoundForUnknownExecution(t *testing.T) 
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	NewExecutionEventsHandler(db).RegisterRoutes(router)
+	NewExecutionEventsHandler(db).RegisterRoutes(router.Group(""))
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/managed-executions/missing/events", nil))
 	if recorder.Code != http.StatusNotFound {
