@@ -414,7 +414,7 @@ func (s *Service) DisableAgent(ctx context.Context, id string) (AgentIdentity, e
 		return AgentIdentity{}, err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=? AND status<>'disabled'", now.UnixMilli(), id)
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=? AND status<>'disabled' AND NOT EXISTS (SELECT 1 FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?)", now.UnixMilli(), id, id, now.UnixMilli())
 	if err != nil {
 		return AgentIdentity{}, err
 	}
@@ -460,10 +460,18 @@ func (s *Service) DeleteAgent(ctx context.Context, id string) (AgentIdentity, er
 		return AgentIdentity{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "INSERT INTO agent_identity_lifecycle(agent_id,deleted_at,recovered_at) VALUES(?,?,NULL) ON CONFLICT(agent_id) DO UPDATE SET deleted_at=excluded.deleted_at,recovered_at=NULL", id, now.UnixMilli()); err != nil {
+	res, err := tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=? AND NOT EXISTS (SELECT 1 FROM task_assignments WHERE agent_id=? AND status='claimed' AND lease_expires_at>=?)", now.UnixMilli(), id, id, now.UnixMilli())
+	if err != nil {
 		return AgentIdentity{}, err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE agent_identities SET status='disabled',updated_at=? WHERE id=?", now.UnixMilli(), id); err != nil {
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return AgentIdentity{}, err
+	}
+	if affected != 1 {
+		return AgentIdentity{}, ErrAgentBusy
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO agent_identity_lifecycle(agent_id,deleted_at,recovered_at) VALUES(?,?,NULL) ON CONFLICT(agent_id) DO UPDATE SET deleted_at=excluded.deleted_at,recovered_at=NULL", id, now.UnixMilli()); err != nil {
 		return AgentIdentity{}, err
 	}
 	if err = s.writeEventTx(ctx, tx, agent.WorkspaceID, "agent_identity", id, "agent.deleted", map[string]string{"agent_id": id}); err != nil {
