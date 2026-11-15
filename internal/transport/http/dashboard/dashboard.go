@@ -101,11 +101,11 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentView struct {
-	ID, Name, ModelID, Description, SystemPrompt string
-	Temperature float64
+	ID, Name, ModelID, Description, SystemPrompt            string
+	Temperature                                             float64
 	MaxSteps, MaxToolCalls, MaxOutputTokens, TimeoutSeconds int
-	Enabled bool
-	Version int
+	Enabled                                                 bool
+	Version                                                 int
 }
 type workflowView struct {
 	ID, Name, Description string
@@ -683,26 +683,52 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.agents == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.agents == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	d, err := h.agents.Get(c.Request.Context(), c.Param("id"))
-	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
-	if value := c.PostForm("name"); value != "" { d.Name = value }
-	if value := c.PostForm("description"); value != "" { d.Description = value }
-	if value := c.PostForm("model_id"); value != "" { d.ModelID = value }
-	if value := c.PostForm("system_prompt"); value != "" { d.SystemPrompt = value }
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
+		return
+	}
+	if value := c.PostForm("name"); value != "" {
+		d.Name = value
+	}
+	if value := c.PostForm("description"); value != "" {
+		d.Description = value
+	}
+	if value := c.PostForm("model_id"); value != "" {
+		d.ModelID = value
+	}
+	if value := c.PostForm("system_prompt"); value != "" {
+		d.SystemPrompt = value
+	}
 	if value := c.PostForm("temperature"); value != "" {
 		d.Temperature, err = strconv.ParseFloat(value, 64)
-		if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
+			return
+		}
 	}
 	for name, target := range map[string]*int{"max_steps": &d.MaxSteps, "max_tool_calls": &d.MaxToolCalls, "max_output_tokens": &d.MaxOutputTokens, "timeout_seconds": &d.TimeoutSeconds} {
 		if value := c.PostForm(name); value != "" {
 			parsed, parseErr := strconv.Atoi(value)
-			if parseErr != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+			if parseErr != nil {
+				c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
+				return
+			}
 			*target = parsed
 		}
 	}
-	if err = h.agents.Update(c.Request.Context(), d); err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent"); return }
+	if err = h.agents.Update(c.Request.Context(), d); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent")
+		return
+	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-saved")
 }
 
