@@ -265,10 +265,11 @@ func (s *Service) CreateAgent(ctx context.Context, v AgentIdentity) (AgentIdenti
 	if v.WorkspaceID == "" || v.Name == "" || len(v.Name) > 160 || len(v.Capabilities) > 128 {
 		return v, ErrInvalid
 	}
-	v.Capabilities, err = normalizeCapabilityList(v.Capabilities, 128)
-	if err != nil {
-		return v, err
+	normalizedCapabilities, capabilityErr := normalizeCapabilityList(v.Capabilities, 128)
+	if capabilityErr != nil {
+		return v, capabilityErr
 	}
+	v.Capabilities = normalizedCapabilities
 	if _, err := s.GetWorkspace(ctx, v.WorkspaceID); err != nil {
 		return v, err
 	}
@@ -549,10 +550,11 @@ func (s *Service) CreateTask(ctx context.Context, v Task) (Task, error) {
 	if v.WorkspaceID == "" || v.Title == "" || len(v.Title) > 240 || v.Priority < 1 || v.Priority > 5 {
 		return v, ErrInvalid
 	}
-	v.RequiredCapabilities, err = normalizeCapabilityList(v.RequiredCapabilities, 32)
-	if err != nil {
-		return v, err
+	normalizedRequirements, capabilityErr := normalizeCapabilityList(v.RequiredCapabilities, 32)
+	if capabilityErr != nil {
+		return v, capabilityErr
 	}
+	v.RequiredCapabilities = normalizedRequirements
 	w, err := s.GetWorkspace(ctx, v.WorkspaceID)
 	if err != nil {
 		return v, err
