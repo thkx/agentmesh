@@ -647,6 +647,23 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize collaboration wakeup worker: %w", err)
 	}
 	wakeupWorker.SetMemoryRetriever(memoryService)
+	resultEvaluator, evaluatorErr := collaboration.NewLLMTaskResultEvaluator(gateway, func(resolveCtx context.Context, agentID string) (string, error) {
+		binding, bindingErr := collaborationService.GetRuntimeBinding(resolveCtx, agentID)
+		if bindingErr != nil {
+			return "", bindingErr
+		}
+		if !binding.Enabled {
+			return "", errors.New("result reviewer runtime binding is disabled")
+		}
+		return binding.ModelID, nil
+	})
+	if evaluatorErr != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize collaboration result evaluator: %w", evaluatorErr)
+	}
+	wakeupWorker.SetTaskResultEvaluator(resultEvaluator)
 	workerWG.Add(1)
 	go func() {
 		defer workerWG.Done()
