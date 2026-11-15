@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"sort"
 	"strconv"
+	"sync"
 	"strings"
 	"time"
 
@@ -61,6 +62,8 @@ type Handler struct {
 	workflowRepo   *authoring.Repository
 	catalogAPI     http.Handler
 	tmpl           *template.Template
+	loginMu        sync.Mutex
+	loginAttempts  map[string][]time.Time
 }
 
 type pageData struct {
@@ -229,6 +232,30 @@ func (h *Handler) loginPage(c *gin.Context) {
 	h.render(c, pageData{Title: "Sign in"}, http.StatusOK)
 }
 
+func (h *Handler) allowLogin(remoteAddr string) bool {
+	now := time.Now()
+	h.loginMu.Lock()
+	defer h.loginMu.Unlock()
+	cutoff := now.Add(-10 * time.Minute)
+	attempts := h.loginAttempts[remoteAddr]
+	kept := attempts[:0]
+	for _, attempt := range attempts {
+		if attempt.After(cutoff) { kept = append(kept, attempt) }
+	}
+	if len(kept) >= 5 {
+		h.loginAttempts[remoteAddr] = kept
+		return false
+	}
+	h.loginAttempts[remoteAddr] = append(kept, now)
+	return true
+}
+
+func (h *Handler) clearLoginAttempts(remoteAddr string) {
+	h.loginMu.Lock()
+	delete(h.loginAttempts, remoteAddr)
+	h.loginMu.Unlock()
+}
+
 func (h *Handler) login(c *gin.Context) {
 	if h.token == "" {
 		c.Redirect(http.StatusSeeOther, "/dashboard")
@@ -236,6 +263,10 @@ func (h *Handler) login(c *gin.Context) {
 	}
 	if !sameOrigin(c.Request) || (!isLoopbackRequest(c.Request) && c.Request.TLS == nil) {
 		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if !h.allowLogin(c.ClientIP()) {
+		c.AbortWithStatus(http.StatusTooManyRequests)
 		return
 	}
 	provided := c.PostForm("token")
@@ -249,6 +280,7 @@ func (h *Handler) login(c *gin.Context) {
 	mac := hmac.New(sha256.New, []byte(h.token))
 	_, _ = mac.Write([]byte("agentmesh-dashboard-session:v1:" + value))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	h.clearLoginAttempts(c.ClientIP())
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    value + "." + sig,
@@ -1065,6 +1097,10 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 	case "workflow-run-queued":
 		data.Message = "Workflow run queued."
 	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Referrer-Policy", "same-origin")
 	c.Status(status)
 	if err := h.tmpl.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		return
