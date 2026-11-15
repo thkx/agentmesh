@@ -185,6 +185,24 @@ func TestWakeupExecutesAssignedTaskThroughExecutionManager(t *testing.T) {
 		cancel()
 		t.Fatalf("wakeup did not complete task: assignment=%s task=%s", assignmentStatus, taskStatus)
 	}
+
+	var completionPayload string
+	if err = db.DB.QueryRowContext(ctx, "SELECT payload_json FROM collaboration_outbox WHERE event_type='task.completed' AND aggregate_id=? ORDER BY created_at DESC LIMIT 1", task.ID).Scan(&completionPayload); err != nil {
+		cancel()
+		t.Fatalf("task completion result was not persisted to the outbox: %v", err)
+	}
+	var completion struct {
+		ExecutionID string          `json:"execution_id"`
+		Result      json.RawMessage `json:"result"`
+	}
+	if err = json.Unmarshal([]byte(completionPayload), &completion); err != nil {
+		cancel()
+		t.Fatalf("decode task completion payload: %v", err)
+	}
+	if completion.ExecutionID == "" || !strings.Contains(string(completion.Result), "completed by test runtime") {
+		cancel()
+		t.Fatalf("execution result missing from durable completion event: %+v", completion)
+	}
 	select {
 	case submittedExecution := <-submitted:
 		var submittedTask agentdom.Task
