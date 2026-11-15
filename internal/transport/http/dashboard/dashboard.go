@@ -641,7 +641,7 @@ func (h *Handler) models(c *gin.Context) {
 }
 
 func parseToolList(value string) []string {
-	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\\n' })
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == ',' || r == '\n' })
 	tools := make([]string, 0, len(parts))
 	for _, part := range parts {
 		if name := strings.TrimSpace(part); name != "" { tools = append(tools, name) }
