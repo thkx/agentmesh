@@ -15,6 +15,7 @@ import (
 )
 
 type fakeCredentials struct{}
+
 func (fakeCredentials) Set(context.Context, domainprovider.ID, domaincredential.Secret) error {
 	return nil
 }
@@ -22,6 +23,7 @@ func (fakeCredentials) Delete(context.Context, domainprovider.ID) error { return
 func (fakeCredentials) Status(_ context.Context, id domainprovider.ID) (domaincredential.Record, error) {
 	return domaincredential.Record{ProviderID: id, Source: domaincredential.SourceStored, Status: domaincredential.StatusConfigured}, nil
 }
+
 var _ appcredential.Manager = fakeCredentials{}
 
 func TestDashboardResourcePagesUseExistingRegistries(t *testing.T) {
