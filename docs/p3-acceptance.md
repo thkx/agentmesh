@@ -131,3 +131,6 @@ Model-based result assessment also respects Workspace autonomy: `directed` alway
 ### P3-5 Rejected result and reassignment lifecycle
 
 A new, idempotently stored `rejected` Agent assessment moves its Task to `blocked` in the same SQLite transaction as the assessment and `task.result_rejected` Outbox event. The prior Assignment, Runtime result and assessment remain immutable history. The existing task-assignment API can then assign the blocked Task to a different Agent; the new Assignment and `task.assigned` event are committed atomically. Replaying the same assessment does not re-block a subsequently reassigned Task or emit duplicate events. A rejected result cannot be retried in place or overwritten.
+
+
+Artifact rejection is also a rework boundary: rejecting a submitted Artifact linked to a source Task moves that Task to `blocked` and writes a `task.artifact_rejected` Outbox event in the same transaction as the immutable review record. The Task can then be assigned to another Agent without altering the rejected Artifact Version or its review history. An idempotent review replay does not block a later reassignment again.

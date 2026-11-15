@@ -583,9 +583,9 @@ func (s *Service) ReviewArtifact(ctx context.Context, artifactID, reviewerID, ou
 	}
 	defer tx.Rollback()
 
-	var workspaceID, status, versionID string
-	err = tx.QueryRowContext(ctx, `SELECT workspace_id,status,COALESCE(submitted_version_id,'')
-		FROM collaboration_artifacts WHERE id=?`, artifactID).Scan(&workspaceID, &status, &versionID)
+	var workspaceID, status, versionID, sourceTaskID string
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id,status,COALESCE(submitted_version_id,''),COALESCE(source_task_id,'')
+		FROM collaboration_artifacts WHERE id=?`, artifactID).Scan(&workspaceID, &status, &versionID, &sourceTaskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ArtifactReview{}, ErrNotFound
 	}
@@ -640,6 +640,23 @@ func (s *Service) ReviewArtifact(ctx context.Context, artifactID, reviewerID, ou
 	if err = s.writeEventTx(ctx, tx, workspaceID, "artifact", artifactID, "artifact.reviewed",
 		map[string]any{"artifact_id": artifactID, "version_id": versionID, "reviewer_id": reviewerID, "outcome": outcome, "note": note}); err != nil {
 		return ArtifactReview{}, err
+	}
+	if outcome == "rejected" && sourceTaskID != "" {
+		blocked, blockErr := tx.ExecContext(ctx, `UPDATE collaboration_tasks SET status='blocked',updated_at=?
+			WHERE id=? AND status NOT IN ('blocked','canceled')`, now.UnixMilli(), sourceTaskID)
+		if blockErr != nil {
+			return ArtifactReview{}, blockErr
+		}
+		blockedCount, countErr := blocked.RowsAffected()
+		if countErr != nil {
+			return ArtifactReview{}, countErr
+		}
+		if blockedCount == 1 {
+			if err = s.writeEventTx(ctx, tx, workspaceID, "task", sourceTaskID, "task.artifact_rejected",
+				map[string]any{"task_id": sourceTaskID, "artifact_id": artifactID, "version_id": versionID, "reviewer_id": reviewerID, "reason": note}); err != nil {
+				return ArtifactReview{}, err
+			}
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return ArtifactReview{}, err
