@@ -44,6 +44,7 @@ func (h *CollaborationHandler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/artifacts/:id/evidence", h.addArtifactEvidence)
 	g.POST("/artifacts/:id/verify", h.verifyArtifact)
 	g.GET("/artifacts/:id/verifications", h.listArtifactVerifications)
+	g.GET("/artifacts/:id/reviews", h.listArtifactReviews)
 	g.POST("/artifacts/:id/submit", h.submitArtifact)
 	g.POST("/artifacts/:id/review", h.reviewArtifact)
 	g.GET("/agents/:id/task-results", h.agentTaskResults)
@@ -801,6 +802,15 @@ func (h *CollaborationHandler) reviewArtifact(c *gin.Context) {
 func (h *CollaborationHandler) listArtifacts(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	items, err := h.service.ListArtifacts(c, c.Param("id"), limit)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *CollaborationHandler) listArtifactReviews(c *gin.Context) {
+	items, err := h.service.ListArtifactReviews(c, c.Param("id"))
 	if err != nil {
 		h.fail(c, err)
 		return

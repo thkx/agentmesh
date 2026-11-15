@@ -721,3 +721,30 @@ func (s *Service) ListArtifactVerifications(ctx context.Context, artifactID stri
 	}
 	return items, rows.Err()
 }
+
+
+// ListArtifactReviews returns immutable human review decisions for every version.
+func (s *Service) ListArtifactReviews(ctx context.Context, artifactID string) ([]ArtifactReview, error) {
+	if _, err := s.GetArtifact(ctx, artifactID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,reviewer_id,outcome,note,created_at
+		FROM collaboration_artifact_reviews WHERE artifact_id=? ORDER BY created_at DESC,id DESC`, artifactID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]ArtifactReview, 0)
+	for rows.Next() {
+		var item ArtifactReview
+		var created int64
+		if err = rows.Scan(&item.ID, &item.ArtifactID, &item.VersionID, &item.WorkspaceID,
+			&item.ReviewerID, &item.Outcome, &item.Note, &created); err != nil {
+			return nil, err
+		}
+		item.CreatedAt = time.UnixMilli(created).UTC()
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}

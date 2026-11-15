@@ -137,3 +137,6 @@ Artifact rejection is also a rework boundary: rejecting a submitted Artifact lin
 
 
 Decision policy history is queryable per Agent Identity through `GET /api/v1/collaboration/agents/:id/decision-audit`. The endpoint returns bounded, newest-first audit metadata and does not expose approval secrets or mutable state.
+
+
+Immutable Artifact review history is available through `GET /api/v1/collaboration/artifacts/:id/reviews`, ordered newest first across all Artifact Versions. This complements the exact-version verification history endpoint.

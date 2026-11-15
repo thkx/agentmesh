@@ -88,6 +88,13 @@ func TestRejectedArtifactBlocksSourceTaskAndAllowsReassignment(t *testing.T) {
 	if _, err = service.ReviewArtifact(ctx, artifact.ID, parentAgent.ID, "rejected", "The report is missing the rollback procedure."); err != nil {
 		t.Fatalf("identical review replay should be idempotent: %v", err)
 	}
+	reviews, err := service.ListArtifactReviews(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviews) != 1 || reviews[0].Outcome != "rejected" || reviews[0].VersionID != version.ID {
+		t.Fatalf("artifact review history was not preserved: %+v", reviews)
+	}
 	afterReplay, err := service.GetTask(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
