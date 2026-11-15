@@ -729,7 +729,7 @@ func (s *Service) ListArtifactReviews(ctx context.Context, artifactID string) ([
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,reviewer_id,outcome,note,created_at
-		FROM collaboration_artifact_reviews WHERE artifact_id=? ORDER BY created_at DESC,id DESC`, artifactID)
+		FROM collaboration_artifact_reviews WHERE artifact_id=? ORDER BY created_at DESC,id DESC LIMIT 200`, artifactID)
 	if err != nil {
 		return nil, err
 	}
