@@ -1258,11 +1258,11 @@ func (s *Service) HandoffTask(ctx context.Context, parentID string, h Handoff, c
 	if err != nil {
 		return Task{}, Assignment{}, err
 	}
+	if requester.DeletedAt != nil || requester.Status == "disabled" || recipient.DeletedAt != nil || recipient.Status == "disabled" {
+		return Task{}, Assignment{}, ErrConflict
+	}
 	if requester.WorkspaceID != parent.WorkspaceID || recipient.WorkspaceID != parent.WorkspaceID {
 		return Task{}, Assignment{}, ErrInvalid
-	}
-	if recipient.Status == "disabled" {
-		return Task{}, Assignment{}, ErrConflict
 	}
 	h.RequiredCapabilities, err = normalizeCapabilityList(h.RequiredCapabilities, 32)
 	if err != nil {
@@ -1426,6 +1426,9 @@ func (s *Service) EvaluateDecision(ctx context.Context, req DecisionRequest) (De
 	agent, err := s.GetAgent(ctx, req.AgentID)
 	if err != nil {
 		return DecisionResult{}, err
+	}
+	if agent.Status == "disabled" || agent.DeletedAt != nil {
+		return DecisionResult{}, ErrConflict
 	}
 	allowedAction := map[string]bool{"ignore": true, "reply": true, "ask_human": true, "claim": true, "delegate": true}
 	if !allowedAction[req.Action] {
