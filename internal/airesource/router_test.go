@@ -236,3 +236,116 @@ func TestRouterStreamsOpenAICompatibleSSEAndRecordsUsage(t *testing.T) {
 		t.Fatalf("stream accounting mismatch: logs=%d usages=%d", logs, usages)
 	}
 }
+
+
+func TestRouterFailsOverOnUnauthorizedRateLimitAndServerErrors(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var firstCalls atomic.Int32
+			var secondCalls atomic.Int32
+			first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				firstCalls.Add(1)
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte("upstream failure"))
+			}))
+			defer first.Close()
+			second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				secondCalls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"id":"recovered","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"recovered"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+			}))
+			defer second.Close()
+
+			service, db := newRouterTestEnvironment(t)
+			modelID := "retry-model-" + strings.ReplaceAll(http.StatusText(status), " ", "-")
+			modelKey := modelID + "-key"
+			addRouterTestModel(t, service, modelID, modelKey, []struct {
+				id           string
+				url          string
+				priority     int
+				credentialID string
+				key          string
+			}{
+				{id: "retry-first-" + modelID, url: first.URL + "/v1", priority: 1, credentialID: "retry-credential-first-" + modelID, key: "first-secret"},
+				{id: "retry-second-" + modelID, url: second.URL + "/v1", priority: 2, credentialID: "retry-credential-second-" + modelID, key: "second-secret"},
+			})
+			router, err := NewRouter(service)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := router.Generate(context.Background(), GenerateRequest{
+				Model: modelKey, Messages: []Message{{Role: "user", Content: "retry"}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Choices) != 1 || response.Choices[0].Message.Content != "recovered" {
+				t.Fatalf("unexpected recovered response: %+v", response)
+			}
+			if firstCalls.Load() != 1 || secondCalls.Load() != 1 {
+				t.Fatalf("expected failover after HTTP %d, calls first=%d second=%d", status, firstCalls.Load(), secondCalls.Load())
+			}
+			var failedStatus int
+			if err = db.QueryRow("SELECT status_code FROM ai_request_logs WHERE credential_id=?", "retry-credential-first-"+modelID).Scan(&failedStatus); err != nil {
+				t.Fatal(err)
+			}
+			if failedStatus != status {
+				t.Fatalf("failure status was not persisted: got %d want %d", failedStatus, status)
+			}
+		})
+	}
+}
+
+func TestRouterFailsOverAfterEndpointTimeout(t *testing.T) {
+	var firstCalls atomic.Int32
+	var secondCalls atomic.Int32
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		firstCalls.Add(1)
+		<-r.Context().Done()
+	}))
+	defer first.Close()
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		secondCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"timeout-recovered","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"timeout-recovered"},"finish_reason":"stop"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`))
+	}))
+	defer second.Close()
+
+	service, db := newRouterTestEnvironment(t)
+	addRouterTestModel(t, service, "timeout-model", "timeout-model-key", []struct {
+		id           string
+		url          string
+		priority     int
+		credentialID string
+		key          string
+	}{
+		{id: "timeout-first", url: first.URL + "/v1", priority: 1, credentialID: "timeout-credential-first", key: "first-secret"},
+		{id: "timeout-second", url: second.URL + "/v1", priority: 2, credentialID: "timeout-credential-second", key: "second-secret"},
+	})
+	if _, err := db.Exec("UPDATE ai_endpoints SET timeout_ms=25 WHERE id='timeout-first'"); err != nil {
+		t.Fatal(err)
+	}
+	router, err := NewRouter(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := router.Generate(context.Background(), GenerateRequest{
+		Model: "timeout-model-key", Messages: []Message{{Role: "user", Content: "timeout"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Choices) != 1 || response.Choices[0].Message.Content != "timeout-recovered" {
+		t.Fatalf("unexpected timeout recovery response: %+v", response)
+	}
+	if firstCalls.Load() != 1 || secondCalls.Load() != 1 {
+		t.Fatalf("expected timeout failover, calls first=%d second=%d", firstCalls.Load(), secondCalls.Load())
+	}
+	var failures int
+	if err = db.QueryRow("SELECT COUNT(*) FROM ai_request_logs WHERE credential_id='timeout-credential-first' AND status='failure'").Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 1 {
+		t.Fatalf("timed out attempt was not recorded as failure: %d", failures)
+	}
+}
