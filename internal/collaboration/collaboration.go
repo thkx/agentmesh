@@ -843,34 +843,6 @@ func (s *Service) CompleteAssignmentWithResult(ctx context.Context, id, owner st
 
 	return tx.Commit()
 }
-func (s *Service) CompleteAssignmentWithResult(ctx context.Context, id, owner string, version int64, executionID string, result json.RawMessage) error {
-	if len(result) > 4<<20 || (len(result) > 0 && !json.Valid(result)) || len(executionID) > 128 {
-		return ErrInvalid
-	}
-	now := s.clock().UTC()
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return err }
-	defer tx.Rollback()
-
-	var taskID, workspaceID string
-	if err = tx.QueryRowContext(ctx, "SELECT a.task_id,t.workspace_id FROM task_assignments a JOIN collaboration_tasks t ON t.id=a.task_id WHERE a.id=?", id).Scan(&taskID, &workspaceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) { return ErrNotFound }
-		return err
-	}
-	res, err := tx.ExecContext(ctx, "UPDATE task_assignments SET status='completed',lease_owner='',lease_expires_at=NULL,updated_at=? WHERE id=? AND status='claimed' AND lease_owner=? AND claim_version=? AND lease_expires_at>=?", now.UnixMilli(), id, owner, version, now.UnixMilli())
-	if err != nil { return err }
-	affected, err := res.RowsAffected()
-	if err != nil { return err }
-	if affected != 1 { return ErrLeaseLost }
-	if _, err = tx.ExecContext(ctx, "UPDATE collaboration_tasks SET status='completed',updated_at=? WHERE id=?", now.UnixMilli(), taskID); err != nil { return err }
-
-	payload, err := json.Marshal(map[string]any{"task_id": taskID, "assignment_id": id, "execution_id": executionID, "result": result})
-	if err != nil { return err }
-	eventID, err := newID()
-	if err != nil { return err }
-	if _, err = tx.ExecContext(ctx, "INSERT INTO collaboration_outbox(id,workspace_id,aggregate_type,aggregate_id,event_type,payload_json,created_at) VALUES(?,?,?,?,?,?,?)", eventID, workspaceID, "task", taskID, "task.completed", string(payload), now.UnixMilli()); err != nil { return err }
-	return tx.Commit()
-}
 func (s *Service) PendingOutbox(ctx context.Context, limit int) ([]Event, error) {
 	if limit < 1 || limit > 500 {
 		limit = 100
