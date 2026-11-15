@@ -131,3 +131,15 @@ The event ledger must reflect these facts. In particular, a cancellation request
 ## 7. Verification status
 
 This audit was performed against source and migration files on `p4/unified-execution-core`. No Go command, local migration run, race test or CI run was executed as part of this audit. M42 is an implementation audit artifact, not a verification result.
+
+## 8. M44 migration interaction found during implementation
+
+A migration interaction was found while tracing the provenance write path end to end:
+
+- P3 migration 000034 installs collaboration_artifact_versions_no_update, which rejects every UPDATE to an Artifact Version.
+- M44's BindArtifactVersionAttempt must perform a one-time UPDATE to attach source_attempt_id.
+- M44's provenance validation trigger in 000041 cannot override the earlier blanket immutability trigger; the write is rejected before the service can complete.
+
+Migration 000042_artifact_version_provenance_binding resolves this without weakening content immutability. It replaces the blanket trigger with a field-aware guard: artifact identity, version, content, digest, media type, size, metadata, creator and creation time remain immutable; only the provenance columns may be bound once, subject to the existing 000041 execution/attempt validation and immutability triggers. Its down migration restores the original blanket trigger.
+
+A migration-backed regression test verifies that provenance binding succeeds while content and metadata mutation still fail. This is an intentional clarification of the P3 invariant: Artifact Version content remains immutable; provenance can be completed once because it is lineage metadata, not artifact content.
