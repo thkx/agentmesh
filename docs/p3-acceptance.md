@@ -18,7 +18,7 @@ P3 is the collaboration and governed execution foundation layered on top of the 
 | Outbox | Transactional event delivery, explicit recipient allow-list, bounded retry, dead-letter inspection and operator requeue |
 | Inbox | Durable receipt, lease owner/token fencing, renewal, ACK, exponential retry and terminal failure |
 | Runtime binding | Agent Identity pinned to an enabled Definition version/model snapshot and managed filesystem Workspace |
-| Session | Persistent active Session and execution history pointer |
+| Session | Persistent active Session, execution history pointers, immutable input/result/failure transcript and bounded prior-session context |
 | Wakeup | Assigned Task and approved/rejected Assignment events feed the P2 Execution Manager through an idempotency key derived from Assignment ID; promoted global and Agent-scoped memories are injected as untrusted reference context |
 | Recovery | Expired Inbox leases are reclaimable; duplicate wakeups reuse the same Execution; expired Assignment claims can be reclaimed using fencing |
 | Verification | Build, Vet, full Race suite, migration-backed service tests and Wakeup-to-Execution integration test |
@@ -51,7 +51,7 @@ GitHub Actions runs the same build, vet and race verification on every push to `
 These are intentionally not represented as completed P3 behavior:
 
 1. `message.created` is delivered only to channel members as a notification. It does not automatically invoke an LLM or generate a chat reply. Inbox delivery is not equivalent to an Agent decision.
-2. Persistent Session records track execution continuity. Assignment wakeup injects a bounded recent Channel-message snapshot for explicit members, but does not yet maintain full Channel/Thread history as a durable, resumable Agent Session transcript.
+2. Persistent Session records now include immutable execution input/result/failure transcript entries, and later assignments receive a bounded prior-session snapshot. Assignment wakeup separately injects a bounded recent Channel-message snapshot for explicit members. Complete Channel/Thread history is still retained in Conversation storage rather than replayed as one full Agent Session transcript.
 3. The Wakeup integration test uses a deterministic fake Execution adapter. A real provider/model/runtime smoke test must be run with the deployment's actual credentials and configured adapter.
 4. The collaboration API is delivered; a dedicated collaboration UI, multi-computer Runner fleet, artifact review UI and automatic agent-to-agent conversational loop are later work.
 
@@ -81,7 +81,7 @@ A task.completed Inbox event is consumed by the recipient Agent's Wakeup worker 
 
 ### Result decision boundary (P3-2)
 
-Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. A directly constructed Wakeup Worker defaults to conservative `human_review`; the application bootstrap wires an LLM-backed evaluator that uses the receiving Agent's pinned Runtime model. The model output is constrained to `accepted`, `rejected`, or `human_review`, requires confidence of at least 0.85 for an automatic assessment, and must cite exact evidence/verification IDs from the supplied context. Acceptance additionally requires a passed deterministic verification and evidence references from the exact currently submitted or human-accepted Artifact Version; rejected or draft Artifacts cannot justify acceptance. Directed Workspaces always require human review; Hybrid and Autonomous may use evidence-grounded model assessment. This is not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.
+Every durable task result is passed through a pluggable `TaskResultEvaluator` and its assessment is persisted idempotently. A directly constructed Wakeup Worker defaults to conservative `human_review`; the application bootstrap wires an LLM-backed evaluator that uses the receiving Agent's pinned Runtime model. The model output is constrained to `accepted`, `rejected`, or `human_review`, requires confidence of at least 0.85 for an automatic assessment, and must cite exact evidence/verification IDs from the supplied context. For acceptance, only the latest verification record for the exact submitted Artifact Version is authoritative; an older `passed` record cannot override a newer failed or incomplete verification. Acceptance additionally requires a passed deterministic verification and evidence references from the exact currently submitted or human-accepted Artifact Version; rejected or draft Artifacts cannot justify acceptance. Directed Workspaces always require human review; Hybrid and Autonomous may use evidence-grounded model assessment. This is not an automatic parent-task completion: parent aggregation and explicit human resolution remain separate controls.
 
 
 ### P3-2 governance and recovery
