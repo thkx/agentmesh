@@ -111,6 +111,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	api := router.Group("/api/v1")
+	if deps.DB != nil {
+		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
+		handlers.NewUnifiedExecutionHandler(deps.DB).RegisterRoutes(api)
+	}
 	if deps.CodingService != nil {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
 	}
@@ -163,6 +167,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		collaborationHandler := handlers.NewCollaborationHandler(deps.Collaboration)
 		collaborationHandler.SetRuntimeBindingDependencies(deps.AgentDefinitions, deps.Workspaces)
 		collaborationHandler.RegisterRoutes(api)
+		handlers.NewArtifactProvenanceHandler(deps.Collaboration).RegisterRoutes(api)
 	}
 	if deps.DB != nil {
 		if repo, err := conversation.NewSQLiteRepository(deps.DB); err == nil {

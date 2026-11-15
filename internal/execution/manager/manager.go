@@ -19,12 +19,19 @@ var (
 )
 
 type Observation struct {
-	Status  dom.LifecycleStatus
-	Attempt int
-	Result  json.RawMessage
-	Error   string
+	Status            dom.LifecycleStatus
+	Attempt           int
+	CompletedAttempt  int
+	AttemptOutcome    dom.AttemptStatus
+	AttemptError      string
+	AttemptNotStarted bool
+	Result            json.RawMessage
+	Error             string
 }
 
+// Adapter implementations must make Submit idempotent for the same durable
+// Execution/Task identity. Reconciliation may repeat a queued Submit after a
+// process crash between persisting the Execution and binding its runtime ref.
 type Adapter interface {
 	Submit(context.Context, dom.Entity) (string, error)
 	Observe(context.Context, dom.Entity) (Observation, error)
@@ -105,14 +112,28 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 	}
 	ref, err := adapter.Submit(ctx, created)
 	if err != nil {
-		expected := []dom.LifecycleStatus{dom.LifecycleQueued}
-		failed, transitionErr := m.store.Transition(context.Background(), created.ID, expected, dom.LifecycleFailed, err.Error(), nil)
-		return failed, errors.Join(err, transitionErr)
+		// Submit may have been accepted remotely even when the response was
+		// lost. Preserve that uncertainty; never label it failed.
+		reason := "runtime submission outcome uncertain: " + err.Error()
+		pending, transitionErr := m.store.Transition(context.Background(), created.ID,
+			[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleNeedsReconciliation, reason, nil)
+		if transitionErr != nil {
+			latest, readErr := m.store.Get(context.Background(), created.ID)
+			return latest, errors.Join(err, transitionErr, readErr)
+		}
+		return pending, err
 	}
 	if ref != "" {
 		created, err = m.store.BindRuntimeRef(ctx, created.ID, ref)
 		if err != nil {
-			return created, fmt.Errorf("bind runtime reference; runtime may already have accepted the execution: %w", err)
+			reason := "runtime accepted submission but reference binding failed: " + err.Error()
+			pending, transitionErr := m.store.Transition(context.Background(), created.ID,
+				[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning}, dom.LifecycleNeedsReconciliation, reason, nil)
+			if transitionErr != nil {
+				latest, readErr := m.store.Get(context.Background(), created.ID)
+				return latest, errors.Join(err, transitionErr, readErr)
+			}
+			return pending, fmt.Errorf("runtime accepted submission; execution requires reconciliation: %w", err)
 		}
 	}
 	created.Attempts, _ = m.store.ListAttempts(ctx, created.ID)
@@ -142,11 +163,38 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 		return e, attemptErr
 	}
 
-	// A queued observation means the runtime has accepted or retained the work,
-	// but no execution attempt has started. Never synthesize a running attempt
-	// until the runtime reports running or a terminal outcome.
-	needsAttempt := observed.Status == dom.LifecycleRunning ||
-		(observed.Status != dom.LifecycleQueued && isTerminalOrRetry(observed.Status))
+	// A runtime may report a completed retry while the overall Execution
+	// remains active. Close that exact Attempt before considering the current
+	// Execution status; this also repairs a missed observer callback.
+	if observed.AttemptOutcome != "" && observed.CompletedAttempt > 0 {
+		for _, attempt := range attempts {
+			if attempt.Number != observed.CompletedAttempt || attempt.Status != dom.AttemptRunning {
+				continue
+			}
+			message := observed.AttemptError
+			if message == "" {
+				message = observed.Error
+			}
+			if _, finishErr := m.store.FinishAttempt(ctx, attempt.ID, observed.AttemptOutcome,
+				attempt.RuntimeRef, nil, message); finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
+				return e, finishErr
+			}
+			break
+		}
+		attempts, attemptErr = m.store.ListAttempts(ctx, e.ID)
+		if attemptErr != nil {
+			return e, attemptErr
+		}
+	}
+
+	if observed.Status != e.Status && !dom.CanTransition(e.Status, observed.Status) {
+		return e, dom.ErrInvalidTransition
+	}
+
+	// A runtime can be queued between attempts or have a worker claim that has
+	// not crossed its execution boundary yet. Those are not running Attempts.
+	needsAttempt := !observed.AttemptNotStarted && (observed.Status == dom.LifecycleRunning ||
+		(observed.Status != e.Status && observed.Status != dom.LifecycleQueued && isTerminalOrRetry(observed.Status)))
 	if needsAttempt {
 		number := observed.Attempt
 		if number < 1 {
@@ -185,14 +233,20 @@ func (m *Manager) Get(ctx context.Context, id string) (dom.Entity, error) {
 	if !dom.CanTransition(e.Status, observed.Status) {
 		return e, dom.ErrInvalidTransition
 	}
-	if observed.Status != dom.LifecycleRunning && len(attempts) > 0 {
-		last := attempts[len(attempts)-1]
-		if last.Status == dom.AttemptRunning {
+	if observed.Status != dom.LifecycleRunning && !observed.AttemptNotStarted {
+		number := observed.Attempt
+		if number < 1 && len(attempts) > 0 {
+			number = attempts[len(attempts)-1].Number
+		}
+		for _, attempt := range attempts {
+			if attempt.Number != number || attempt.Status != dom.AttemptRunning {
+				continue
+			}
 			attemptStatus := toAttemptStatus(observed.Status)
-			_, finishErr := m.store.FinishAttempt(ctx, last.ID, attemptStatus, e.RuntimeRef, observed.Result, observed.Error)
-			if finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
+			if _, finishErr := m.store.FinishAttempt(ctx, attempt.ID, attemptStatus, e.RuntimeRef, observed.Result, observed.Error); finishErr != nil && !errors.Is(finishErr, dom.ErrInvalidTransition) {
 				return e, finishErr
 			}
+			break
 		}
 	}
 	updated, transitionErr := m.store.Transition(ctx, e.ID, []dom.LifecycleStatus{e.Status}, observed.Status, observed.Error, observed.Result)
@@ -214,6 +268,17 @@ func (m *Manager) Cancel(ctx context.Context, id string) error {
 	adapter, ok := m.adapters[e.Runtime]
 	if !ok {
 		return ErrAdapterNotRegistered
+	}
+	// Persist intent before the external side effect. Adapter success is not
+	// proof that the runtime has stopped; Observe owns the final outcome.
+	controlStore, ok := m.store.(interface {
+		RequestCancel(context.Context, string) error
+	})
+	if !ok {
+		return errors.New("execution store does not support durable cancellation requests")
+	}
+	if err := controlStore.RequestCancel(ctx, id); err != nil {
+		return err
 	}
 	return adapter.Cancel(ctx, e)
 }
@@ -280,9 +345,8 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 		limit = 200
 	}
 
-	// Snapshot both status sets before processing. A queued execution can become
-	// running during this pass; collecting running rows afterward would count
-	// and observe that same execution twice.
+	// Snapshot both status sets before processing so an item is never scanned
+	// twice in one pass after a queued-to-running transition.
 	var queuedItems, runningItems []dom.Entity
 	for _, status := range []dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning} {
 		offset := 0
@@ -308,28 +372,57 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 
 	items := append(queuedItems, runningItems...)
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return report, err
+		}
 		report.Scanned++
 		adapter, ok := m.adapters[item.Runtime]
 		if !ok {
 			report.NeedsAttention++
+			if err := m.markNeedsReconciliation(ctx, item, "runtime adapter is not registered during reconciliation"); err != nil {
+				return report, err
+			}
 			continue
 		}
+
 		if item.Status == dom.LifecycleQueued {
+			// Each adapter must use the durable TaskID/ExecutionID as its
+			// idempotency identity. Repeating Submit after a crash is safe only
+			// because the runtime recognizes that same identity.
 			ref, submitErr := adapter.Submit(ctx, item)
 			if submitErr != nil {
+				if ctx.Err() != nil {
+					return report, ctx.Err()
+				}
 				report.NeedsAttention++
+				if err := m.markNeedsReconciliation(ctx, item,
+					"queued submission could not be confirmed: "+submitErr.Error()); err != nil {
+					return report, err
+				}
 				continue
 			}
 			if ref != "" && item.RuntimeRef == "" {
 				if _, bindErr := m.store.BindRuntimeRef(ctx, item.ID, ref); bindErr != nil {
 					report.NeedsAttention++
+					if err := m.markNeedsReconciliation(ctx, item,
+						"runtime accepted submission but reference binding failed: "+bindErr.Error()); err != nil {
+						return report, err
+					}
 					continue
 				}
 			}
 		}
+
 		updated, getErr := m.Get(ctx, item.ID)
 		if getErr != nil {
+			if ctx.Err() != nil {
+				return report, ctx.Err()
+			}
 			report.NeedsAttention++
+			if err := m.markNeedsReconciliation(ctx, item,
+				"runtime observation could not be reconciled: "+getErr.Error()); err != nil {
+				return report, err
+			}
 			continue
 		}
 		if updated.Status != item.Status {
@@ -339,9 +432,28 @@ func (m *Manager) Reconcile(ctx context.Context, limit int) (ReconcileReport, er
 	return report, nil
 }
 
-// RunReconciler periodically repairs transient submit/observation failures.
-// It never replays a running execution; ambiguous outcomes remain visible for
-// manual reconciliation according to the adapter's observation contract.
+// markNeedsReconciliation persists why automatic recovery stopped. A
+// concurrent worker's accepted terminal fact always wins over this fallback.
+func (m *Manager) markNeedsReconciliation(ctx context.Context, item dom.Entity, reason string) error {
+	_, err := m.store.Transition(ctx, item.ID,
+		[]dom.LifecycleStatus{dom.LifecycleQueued, dom.LifecycleRunning},
+		dom.LifecycleNeedsReconciliation, reason, nil)
+	if !errors.Is(err, dom.ErrInvalidTransition) {
+		return err
+	}
+	latest, readErr := m.store.Get(ctx, item.ID)
+	if readErr != nil {
+		return readErr
+	}
+	switch latest.Status {
+	case dom.LifecycleNeedsReconciliation, dom.LifecycleInterrupted, dom.LifecycleSucceeded,
+		dom.LifecycleFailed, dom.LifecycleCanceled, dom.LifecycleTimedOut:
+		return nil
+	default:
+		return err
+	}
+}
+
 func (m *Manager) RunReconciler(ctx context.Context, interval time.Duration, limit int, onError func(error)) {
 	if interval <= 0 {
 		interval = 15 * time.Second

@@ -3,7 +3,9 @@ package manager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,8 +13,9 @@ import (
 )
 
 type memoryStore struct {
-	values   map[string]dom.Entity
-	attempts map[string]dom.Attempt
+	values         map[string]dom.Entity
+	attempts       map[string]dom.Attempt
+	cancelRequests []string
 }
 
 func newMemoryStore() *memoryStore {
@@ -83,6 +86,11 @@ func (s *memoryStore) List(_ context.Context, f dom.ListFilter) ([]dom.Entity, e
 	return out[start:end], nil
 }
 
+func (s *memoryStore) RequestCancel(_ context.Context, id string) error {
+	s.cancelRequests = append(s.cancelRequests, id)
+	return nil
+}
+
 func (s *memoryStore) BindRuntimeRef(_ context.Context, id, ref string) (dom.Entity, error) {
 	e := s.values[id]
 	e.RuntimeRef = ref
@@ -131,20 +139,33 @@ func (s *memoryStore) FinishAttempt(_ context.Context, id string, status dom.Att
 type fakeAdapter struct {
 	submitted   bool
 	submitCount int
+	cancelCount int
+	submitErr   error
+	cancelErr   error
+	observeErr  error
 	observation Observation
 }
 
 func (a *fakeAdapter) Submit(context.Context, dom.Entity) (string, error) {
 	a.submitted = true
 	a.submitCount++
+	if a.submitErr != nil {
+		return "", a.submitErr
+	}
 	return "runtime-1", nil
 }
 
 func (a *fakeAdapter) Observe(context.Context, dom.Entity) (Observation, error) {
+	if a.observeErr != nil {
+		return Observation{}, a.observeErr
+	}
 	return a.observation, nil
 }
 
-func (a *fakeAdapter) Cancel(context.Context, dom.Entity) error { return nil }
+func (a *fakeAdapter) Cancel(context.Context, dom.Entity) error {
+	a.cancelCount++
+	return a.cancelErr
+}
 
 func TestSubmitAndObserve(t *testing.T) {
 	store := newMemoryStore()
@@ -366,5 +387,263 @@ func TestResolveRejectsUnsafeOrInvalidResolution(t *testing.T) {
 	}
 	if _, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, nil, "confirmed"); err != ErrInvalidRequest {
 		t.Fatalf("missing evidence error=%v, want invalid request", err)
+	}
+}
+
+func TestCancelPersistsIntentBeforeRuntimeCall(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{cancelErr: errors.New("runtime cancel transport failed")}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "cancel-execution", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "cancel-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"cancel-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Cancel(context.Background(), entity.ID); err == nil {
+		t.Fatal("expected runtime cancellation error")
+	}
+	if len(store.cancelRequests) != 1 || store.cancelRequests[0] != entity.ID {
+		t.Fatalf("cancellation intent was not persisted first: %+v", store.cancelRequests)
+	}
+	if adapter.cancelCount != 1 {
+		t.Fatalf("runtime cancel calls=%d, want 1", adapter.cancelCount)
+	}
+	current, err := store.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != dom.LifecycleRunning {
+		t.Fatalf("cancel request must not claim a cancellation outcome: %s", current.Status)
+	}
+}
+
+func TestSubmitErrorPreservesUncertainOutcome(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{submitErr: errors.New("connection lost after request")}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	entity, submitErr := m.Submit(context.Background(), SubmitRequest{
+		Kind: dom.KindAgent, Runtime: dom.RuntimeAgent, TaskID: "uncertain-task",
+		Input: json.RawMessage(`{"id":"uncertain-task"}`),
+	})
+	if submitErr == nil {
+		t.Fatal("expected submit error")
+	}
+	if entity.Status != dom.LifecycleNeedsReconciliation {
+		t.Fatalf("status=%s, want needs_reconciliation", entity.Status)
+	}
+	if entity.Error == "" {
+		t.Fatal("uncertain submission reason was not persisted")
+	}
+}
+
+func TestReconcileSubmitFailureMovesQueuedExecutionToAttention(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{submitErr: errors.New("runtime unavailable")}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "reconcile-uncertain", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "reconcile-task", Status: dom.LifecycleQueued,
+		Input: json.RawMessage(`{"id":"reconcile-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	report, err := m.Reconcile(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Scanned != 1 || report.NeedsAttention != 1 {
+		t.Fatalf("unexpected reconcile report: %+v", report)
+	}
+	updated, err := store.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != dom.LifecycleNeedsReconciliation || updated.Error == "" {
+		t.Fatalf("uncertain queued execution not preserved: %+v", updated)
+	}
+}
+
+func TestReconcileNeverResubmitsRunningExecution(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleRunning, Attempt: 1}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "already-running", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "already-running-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"already-running-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	report, err := m.Reconcile(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Scanned != 1 || adapter.submitCount != 0 {
+		t.Fatalf("running execution was replayed: report=%+v submit_count=%d", report, adapter.submitCount)
+	}
+}
+
+func TestReconcilePersistsObservationFailureReason(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observeErr: errors.New("runtime API unavailable")}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "observation-failed", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "observation-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"observation-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	report, err := m.Reconcile(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.NeedsAttention != 1 {
+		t.Fatalf("needs_attention=%d, want 1", report.NeedsAttention)
+	}
+	updated, err := store.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != dom.LifecycleNeedsReconciliation || !strings.Contains(updated.Error, "runtime API unavailable") {
+		t.Fatalf("observation failure was not persisted: %+v", updated)
+	}
+}
+
+func TestGetTimeoutFinalizesAttemptWithTimedOutStatus(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleTimedOut, Attempt: 1, Error: "deadline exceeded"}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "timed-out-execution", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "timed-out-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"timed-out-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := m.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != dom.LifecycleTimedOut || len(updated.Attempts) != 1 ||
+		updated.Attempts[0].Status != dom.AttemptTimedOut {
+		t.Fatalf("timeout was not projected consistently: %+v", updated)
+	}
+}
+
+func TestGetClosesCompletedAttemptWhileExecutionWaitsForRetry(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "retry-projection-execution", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "retry-projection-task", Status: dom.LifecycleRunning,
+		Input: json.RawMessage(`{"id":"retry-projection-task"}`), CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateAttempt(context.Background(), dom.Attempt{
+		ID: entity.ID + "-a-1", ExecutionID: entity.ID, Number: 1, Runtime: dom.RuntimeAgent,
+		Status: dom.AttemptRunning, Input: entity.Input, StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{
+		Status: dom.LifecycleRunning, CompletedAttempt: 1,
+		AttemptOutcome: dom.AttemptFailed, AttemptError: "safe retryable failure",
+		AttemptNotStarted: true,
+	}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := m.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != dom.LifecycleRunning || len(updated.Attempts) != 1 ||
+		updated.Attempts[0].Status != dom.AttemptFailed ||
+		updated.Attempts[0].Error != "safe retryable failure" {
+		t.Fatalf("retry attempt was not closed independently: %+v", updated)
+	}
+}
+
+func TestGetDoesNotInventAttemptForAlreadyTerminalExecution(t *testing.T) {
+	store := newMemoryStore()
+	m, err := New(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	entity := dom.Entity{
+		ID: "terminal-without-attempt", Kind: dom.KindAgent, Runtime: dom.RuntimeAgent,
+		TaskID: "terminal-task", Status: dom.LifecycleSucceeded,
+		Input: json.RawMessage(`{"id":"terminal-task"}`), CreatedAt: now, UpdatedAt: now,
+		Result: json.RawMessage(`{"ok":true}`),
+	}
+	if _, err := store.Create(context.Background(), entity); err != nil {
+		t.Fatal(err)
+	}
+	adapter := &fakeAdapter{observation: Observation{Status: dom.LifecycleSucceeded, Result: entity.Result}}
+	if err := m.Register(dom.RuntimeAgent, adapter); err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.Get(context.Background(), entity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attempts) != 0 || len(store.attempts) != 0 {
+		t.Fatalf("already-terminal execution gained a synthetic attempt: %+v", got.Attempts)
 	}
 }

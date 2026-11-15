@@ -23,7 +23,7 @@ func TestCanTransition(t *testing.T) {
 		want     bool
 	}{
 		{LifecycleQueued, LifecycleRunning, true},
-		{LifecycleRunning, LifecycleQueued, true},
+		{LifecycleRunning, LifecycleQueued, false},
 		{LifecycleRunning, LifecycleSucceeded, true},
 		{LifecycleSucceeded, LifecycleRunning, false},
 		{LifecycleInterrupted, LifecycleSucceeded, true},
