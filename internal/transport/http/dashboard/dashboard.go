@@ -326,7 +326,10 @@ func (h *Handler) testProvider(c *gin.Context) {
 }
 func (h *Handler) createModel(c *gin.Context) {
 	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	payload := map[string]any{"id":c.PostForm("id"),"provider_id":c.PostForm("provider_id"),"name":c.PostForm("name"),"display_name":c.PostForm("display_name"),"context_window":c.PostForm("context_window"),"max_output_tokens":c.PostForm("max_output_tokens"),"supports_streaming":c.PostForm("supports_streaming")=="true","enabled":true}
+	contextWindow, err1 := strconv.Atoi(c.PostForm("context_window"))
+	maxOutput, err2 := strconv.Atoi(c.PostForm("max_output_tokens"))
+	if err1 != nil || err2 != nil || contextWindow < 0 || maxOutput < 0 { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
+	payload := map[string]any{"id":c.PostForm("id"),"provider_id":c.PostForm("provider_id"),"name":c.PostForm("name"),"display_name":c.PostForm("display_name"),"context_window":contextWindow,"max_output_tokens":maxOutput,"supports_streaming":c.PostForm("supports_streaming")=="true","enabled":true}
 	if !h.callCatalog(c,http.MethodPost,"/api/v1/models",payload) { c.Redirect(http.StatusSeeOther,"/dashboard/models?error=model"); return }
 	c.Redirect(http.StatusSeeOther,"/dashboard/models?message=model-saved")
 }
