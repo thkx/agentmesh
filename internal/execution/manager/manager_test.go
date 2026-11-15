@@ -137,13 +137,13 @@ func (s *memoryStore) FinishAttempt(_ context.Context, id string, status dom.Att
 }
 
 type fakeAdapter struct {
-	submitted    bool
-	submitCount  int
-	cancelCount  int
-	submitErr    error
-	cancelErr    error
-	observeErr   error
-	observation  Observation
+	submitted   bool
+	submitCount int
+	cancelCount int
+	submitErr   error
+	cancelErr   error
+	observeErr  error
+	observation Observation
 }
 
 func (a *fakeAdapter) Submit(context.Context, dom.Entity) (string, error) {
@@ -390,7 +390,6 @@ func TestResolveRejectsUnsafeOrInvalidResolution(t *testing.T) {
 	}
 }
 
-
 func TestCancelPersistsIntentBeforeRuntimeCall(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
@@ -488,7 +487,6 @@ func TestReconcileSubmitFailureMovesQueuedExecutionToAttention(t *testing.T) {
 	}
 }
 
-
 func TestReconcileNeverResubmitsRunningExecution(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
@@ -581,7 +579,6 @@ func TestGetTimeoutFinalizesAttemptWithTimedOutStatus(t *testing.T) {
 	}
 }
 
-
 func TestGetClosesCompletedAttemptWhileExecutionWaitsForRetry(t *testing.T) {
 	store := newMemoryStore()
 	m, err := New(store)
@@ -621,7 +618,6 @@ func TestGetClosesCompletedAttemptWhileExecutionWaitsForRetry(t *testing.T) {
 		t.Fatalf("retry attempt was not closed independently: %+v", updated)
 	}
 }
-
 
 func TestGetDoesNotInventAttemptForAlreadyTerminalExecution(t *testing.T) {
 	store := newMemoryStore()
