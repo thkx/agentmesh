@@ -60,14 +60,15 @@ func TestGatewayObserverPersistsExplicitExecutionProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := modelgateway.WithExecutionProvenance(context.Background(), "execution-1", "execution-1-a-2")
+	ctx = modelgateway.WithRequestID(ctx, "http-request-123")
 	observer := GatewayObserver{Ledger: ledger}
 	observer.ObserveModelUsage(ctx, provider.ID("openai"), "gpt-test", modelgateway.Usage{InputTokens: 7, OutputTokens: 3, TotalTokens: 10}, time.Now().UTC(), "request-1")
-	var executionID, attemptID string
-	if err = db.QueryRow("SELECT execution_id,attempt_id FROM model_usage_events WHERE idempotency_key='request-1'").Scan(&executionID, &attemptID); err != nil {
+	var executionID, attemptID, requestID string
+	if err = db.QueryRow("SELECT execution_id,attempt_id,request_id FROM model_usage_events WHERE idempotency_key='request-1'").Scan(&executionID, &attemptID, &requestID); err != nil {
 		t.Fatal(err)
 	}
-	if executionID != "execution-1" || attemptID != "execution-1-a-2" {
-		t.Fatalf("provenance=%q/%q", executionID, attemptID)
+	if executionID != "execution-1" || attemptID != "execution-1-a-2" || requestID != "http-request-123" {
+		t.Fatalf("provenance=%q/%q request_id=%q", executionID, attemptID, requestID)
 	}
 }
 
