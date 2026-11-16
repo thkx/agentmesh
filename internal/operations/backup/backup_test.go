@@ -16,7 +16,7 @@ func TestEncryptedBackupVerifyAndExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if _, err = db.Exec("CREATE TABLE sample(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO sample(value) VALUES('preserved')"); err != nil {
+	if _, err = db.Exec("CREATE TABLE sample(id INTEGER PRIMARY KEY,value TEXT); CREATE TABLE schema_migrations(version INTEGER,dirty BOOLEAN); INSERT INTO schema_migrations(version,dirty) VALUES(44,0); INSERT INTO sample(value) VALUES('preserved')"); err != nil {
 		t.Fatal(err)
 	}
 	key := filepath.Join(t.TempDir(), "credential.key")
