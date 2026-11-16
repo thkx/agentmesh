@@ -17,12 +17,12 @@ const (
 // AlertSnapshot contains only operational facts. It must never contain secrets,
 // prompts, arbitrary error strings, request IDs or user-controlled labels.
 type AlertSnapshot struct {
-	DatabaseAvailable       bool
-	WorkerRunning           bool
-	ProviderRequests        uint64
-	ProviderFailures        uint64
-	ReconciliationBacklog   int64
-	ObservedAt              time.Time
+	DatabaseAvailable     bool
+	WorkerRunning         bool
+	ProviderRequests      uint64
+	ProviderFailures      uint64
+	ReconciliationBacklog int64
+	ObservedAt            time.Time
 }
 
 // Alert is a stable, redacted operational alert.
@@ -65,7 +65,9 @@ func NewAlertEvaluator(historyLimit int) *AlertEvaluator {
 		rules: []alertRule{
 			{id: "database_unavailable", severity: AlertCritical, title: "Database unavailable", description: "The application cannot reach its SQLite database.", matches: func(s AlertSnapshot) bool { return !s.DatabaseAvailable }},
 			{id: "worker_stopped", severity: AlertCritical, title: "Runtime worker stopped", description: "A required runtime worker is not running.", matches: func(s AlertSnapshot) bool { return !s.WorkerRunning }},
-			{id: "provider_failures", severity: AlertWarning, title: "Repeated provider failures", description: "At least five provider requests were observed and the failure ratio is at least 50%.", matches: func(s AlertSnapshot) bool { return s.ProviderRequests >= 5 && s.ProviderFailures*2 >= s.ProviderRequests }},
+			{id: "provider_failures", severity: AlertWarning, title: "Repeated provider failures", description: "At least five provider requests were observed and the failure ratio is at least 50%.", matches: func(s AlertSnapshot) bool {
+				return s.ProviderRequests >= 5 && s.ProviderFailures*2 >= s.ProviderRequests
+			}},
 			{id: "reconciliation_backlog", severity: AlertWarning, title: "Execution reconciliation backlog", description: "The execution reconciliation backlog exceeds the operational threshold.", matches: func(s AlertSnapshot) bool { return s.ReconciliationBacklog > 10 }},
 		},
 	}
