@@ -75,10 +75,11 @@ func TestOTLPHeadersValidation(t *testing.T) {
 	}
 
 	for _, raw := range []string{
-		"Authorization=Bearer\\r\\nInjected: yes",
+		"Authorization=Bearer\r\nInjected: yes",
 		"Bad Header=value",
 		"=value",
-		"Authorization=value\\nInjected=yes",
+		"Authorization=value\nInjected=yes",
+		"authorization=one,Authorization=two",
 	} {
 		if _, err := ParseOTLPHeaders(raw); err == nil {
 			t.Errorf("invalid header accepted: %q", raw)
