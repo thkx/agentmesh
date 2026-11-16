@@ -91,6 +91,7 @@ func (w *Worker) runOne(ctx context.Context) error {
 	}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if observer, ok := w.cfg.Observer.(ExecutionContextObserver); ok { workCtx = observer.Context(workCtx, job) }
 	heartbeatDone := make(chan struct{})
 	go w.heartbeat(workCtx, cancel, job.ID, heartbeatDone)
 	defer func() { cancel(); <-heartbeatDone }()
