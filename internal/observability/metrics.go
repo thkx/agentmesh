@@ -153,8 +153,12 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	if seconds < 0 {
 		seconds = 0
 	}
-	if operation == "generate" || operation == "stream_open" { m.providerRequests.Add(1) }
-	if outcome == "error" { m.providerFailures.Add(1) }
+	if operation == "generate" || operation == "stream_open" {
+		m.providerRequests.Add(1)
+	}
+	if outcome == "error" {
+		m.providerFailures.Add(1)
+	}
 	key := modelRequestKey{operation: operation, outcome: outcome}
 	m.mu.Lock()
 	defer m.mu.Unlock()
