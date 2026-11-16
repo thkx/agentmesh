@@ -99,23 +99,49 @@ func (l *Ledger) Record(ctx context.Context, r Record) error {
 			return err
 		}
 	}
-	_, err := l.db.ExecContext(ctx, `INSERT OR IGNORE INTO model_usage_events(id,idempotency_key,provider_id,model_id,occurred_at,input_tokens,output_tokens,total_tokens,cached_input_tokens,reasoning_tokens,usage_source,currency,input_rate_micros_per_million,output_rate_micros_per_million,estimated_cost_micros,request_id,trace_id,execution_id,attempt_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	_, err := l.db.ExecContext(ctx, `INSERT INTO model_usage_events(id,idempotency_key,provider_id,model_id,occurred_at,input_tokens,output_tokens,total_tokens,cached_input_tokens,reasoning_tokens,usage_source,currency,input_rate_micros_per_million,output_rate_micros_per_million,estimated_cost_micros,request_id,trace_id,execution_id,attempt_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(idempotency_key) DO NOTHING`,
 		randomID(), r.IdempotencyKey, r.ProviderID, r.ModelID, r.OccurredAt.UTC().Format(time.RFC3339Nano), nullableTokens(r.Source, r.Usage.InputTokens), nullableTokens(r.Source, r.Usage.OutputTokens), nullableTokens(r.Source, r.Usage.TotalTokens), nullableTokens(r.Source, r.Usage.CachedInputTokens), nullableTokens(r.Source, r.Usage.ReasoningTokens), r.Source, currency, inputRate, outputRate, cost, nullString(r.RequestID), nullString(r.TraceID), nullString(r.ExecutionID), nullString(r.AttemptID), time.Now().UTC().Format(time.RFC3339Nano))
-	return err
+	if err != nil {
+		return err
+	}
+	return nil
 }
 func (l *Ledger) Summary(ctx context.Context, since time.Time) (Summary, error) {
-	var s Summary
-	err := l.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(total_tokens),0),COALESCE(SUM(estimated_cost_micros),0),SUM(CASE WHEN usage_source='unavailable' THEN 1 ELSE 0 END) FROM model_usage_events WHERE occurred_at>=?`, since.UTC().Format(time.RFC3339Nano)).Scan(&s.Requests, &s.InputTokens, &s.OutputTokens, &s.TotalTokens, &s.EstimatedCostMicros, &s.UnavailableUsage)
-	return s, err
+	var summary Summary
+	err := l.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(total_tokens),0),COALESCE(SUM(CASE WHEN usage_source='unavailable' THEN 1 ELSE 0 END),0) FROM model_usage_events WHERE occurred_at>=?`, since.UTC().Format(time.RFC3339Nano)).Scan(&summary.Requests, &summary.InputTokens, &summary.OutputTokens, &summary.TotalTokens, &summary.UnavailableUsage)
+	if err != nil {
+		return Summary{}, err
+	}
+	rows, err := l.db.QueryContext(ctx, `SELECT currency,COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND currency IS NOT NULL GROUP BY currency ORDER BY currency`, since.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return Summary{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cost CurrencyCost
+		if err = rows.Scan(&cost.Currency, &cost.EstimatedCostMicros); err != nil {
+			return Summary{}, err
+		}
+		summary.CostsByCurrency = append(summary.CostsByCurrency, cost)
+	}
+	if err = rows.Err(); err != nil {
+		return Summary{}, err
+	}
+	return summary, nil
+}
+
+type CurrencyCost struct {
+	Currency            string
+	EstimatedCostMicros int64
 }
 
 type Summary struct {
-	Requests            int64
-	InputTokens         int64
-	OutputTokens        int64
-	TotalTokens         int64
-	EstimatedCostMicros int64
-	UnavailableUsage    int64
+	Requests         int64
+	InputTokens      int64
+	OutputTokens     int64
+	TotalTokens      int64
+	UnavailableUsage int64
+	CostsByCurrency  []CurrencyCost
 }
 
 func validCurrencyCode(value string) bool {
