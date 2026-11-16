@@ -39,16 +39,16 @@ type requestStats struct {
 // Metrics is an in-memory collector. It never stores request IDs, query strings,
 // request bodies, model prompts, credentials, or arbitrary error messages.
 type Metrics struct {
-	started       time.Time
-	inFlight      atomic.Int64
-	mu            sync.RWMutex
-	requests      map[requestKey]*requestStats
-	modelRequests map[modelRequestKey]*modelRequestStats
-	runtimeWorkers atomic.Int64
-	activeExecutions atomic.Int64
-	executionBacklog atomic.Int64
+	started            time.Time
+	inFlight           atomic.Int64
+	mu                 sync.RWMutex
+	requests           map[requestKey]*requestStats
+	modelRequests      map[modelRequestKey]*modelRequestStats
+	runtimeWorkers     atomic.Int64
+	activeExecutions   atomic.Int64
+	executionBacklog   atomic.Int64
 	usageWriteFailures atomic.Uint64
-	providerFailures atomic.Uint64
+	providerFailures   atomic.Uint64
 }
 
 func NewMetrics() *Metrics {
@@ -120,9 +120,22 @@ func normalizeRoute(route string) string {
 	return route
 }
 
-func (m *Metrics) AddRuntimeWorkers(delta int64) { if m != nil { m.runtimeWorkers.Add(delta) } }
-func (m *Metrics) SetExecutionState(active, backlog int64) { if m != nil { m.activeExecutions.Store(max(0, active)); m.executionBacklog.Store(max(0, backlog)) } }
-func (m *Metrics) ObserveUsageWriteFailure() { if m != nil { m.usageWriteFailures.Add(1) } }
+func (m *Metrics) AddRuntimeWorkers(delta int64) {
+	if m != nil {
+		m.runtimeWorkers.Add(delta)
+	}
+}
+func (m *Metrics) SetExecutionState(active, backlog int64) {
+	if m != nil {
+		m.activeExecutions.Store(max(0, active))
+		m.executionBacklog.Store(max(0, backlog))
+	}
+}
+func (m *Metrics) ObserveUsageWriteFailure() {
+	if m != nil {
+		m.usageWriteFailures.Add(1)
+	}
+}
 
 func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Duration) {
 	if m == nil {
@@ -140,7 +153,9 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	if seconds < 0 {
 		seconds = 0
 	}
-	if outcome == "error" { m.providerFailures.Add(1) }
+	if outcome == "error" {
+		m.providerFailures.Add(1)
+	}
 	key := modelRequestKey{operation: operation, outcome: outcome}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -158,11 +173,11 @@ type Snapshot struct {
 	ModelGatewayCount    uint64
 	HTTPRequestsInFlight int64
 	ProcessUptimeSeconds float64
-	RuntimeWorkers int64
-	ActiveExecutions int64
-	ExecutionBacklog int64
-	ProviderFailures uint64
-	UsageWriteFailures uint64
+	RuntimeWorkers       int64
+	ActiveExecutions     int64
+	ExecutionBacklog     int64
+	ProviderFailures     uint64
+	UsageWriteFailures   uint64
 }
 
 func (m *Metrics) Snapshot() Snapshot {
@@ -172,7 +187,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	result := Snapshot{
 		HTTPRequestsInFlight: m.inFlight.Load(),
 		ProcessUptimeSeconds: time.Since(m.started).Seconds(),
-		RuntimeWorkers: m.runtimeWorkers.Load(), ActiveExecutions: m.activeExecutions.Load(), ExecutionBacklog: m.executionBacklog.Load(), ProviderFailures: m.providerFailures.Load(), UsageWriteFailures: m.usageWriteFailures.Load(),
+		RuntimeWorkers:       m.runtimeWorkers.Load(), ActiveExecutions: m.activeExecutions.Load(), ExecutionBacklog: m.executionBacklog.Load(), ProviderFailures: m.providerFailures.Load(), UsageWriteFailures: m.usageWriteFailures.Load(),
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
