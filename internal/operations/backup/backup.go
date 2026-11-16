@@ -2,100 +2,249 @@
 package backup
 
 import (
-    "archive/zip"
-    "bytes"
-    "context"
-    "crypto/aes"
-    "crypto/cipher"
-    "crypto/rand"
-    "crypto/sha256"
-    "database/sql"
-    "encoding/hex"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "io"
-    "os"
-    "path/filepath"
-    "time"
+	"archive/zip"
+	"bytes"
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
 
-    "golang.org/x/crypto/scrypt"
+	"golang.org/x/crypto/scrypt"
 )
 
-var magic=[]byte("AGENTMESH-BACKUP-1\n")
-var ErrInvalidArchive=errors.New("invalid or corrupted AgentMesh backup")
+var magic = []byte("AGENTMESH-BACKUP-1\n")
+var ErrInvalidArchive = errors.New("invalid or corrupted AgentMesh backup")
 
 type Manifest struct {
-    FormatVersion int `json:"format_version"`
-    CreatedAt time.Time `json:"created_at"`
-    ApplicationVersion string `json:"application_version"`
-    SchemaVersion uint `json:"schema_version"`
-    DatabaseSHA256 string `json:"database_sha256"`
-    CredentialKeySHA256 string `json:"credential_key_sha256"`
+	FormatVersion       int       `json:"format_version"`
+	CreatedAt           time.Time `json:"created_at"`
+	ApplicationVersion  string    `json:"application_version"`
+	SchemaVersion       uint      `json:"schema_version"`
+	DatabaseSHA256      string    `json:"database_sha256"`
+	CredentialKeySHA256 string    `json:"credential_key_sha256"`
 }
-type CreateOptions struct { Database *sql.DB; CredentialKeyPath string; ApplicationVersion string; SchemaVersion uint }
+type CreateOptions struct {
+	Database           *sql.DB
+	CredentialKeyPath  string
+	ApplicationVersion string
+	SchemaVersion      uint
+}
+
 func Create(ctx context.Context, opts CreateOptions, passphrase []byte, destination string) error {
-    if opts.Database==nil||len(passphrase)<12||destination=="" { return errors.New("database, destination and a passphrase of at least 12 bytes are required") }
-    dir:=filepath.Dir(destination); if err:=os.MkdirAll(dir,0o700);err!=nil{return err}
-    tmpDir,err:=os.MkdirTemp(dir,".agentmesh-backup-*");if err!=nil{return err};defer os.RemoveAll(tmpDir)
-    snapshot:=filepath.Join(tmpDir,"database.sqlite")
-    if _,err=opts.Database.ExecContext(ctx,"VACUUM INTO ?",snapshot);err!=nil{return fmt.Errorf("create consistent sqlite snapshot: %w",err)}
-    dbBytes,err:=os.ReadFile(snapshot);if err!=nil{return err}
-    keyBytes,err:=os.ReadFile(opts.CredentialKeyPath);if err!=nil{return fmt.Errorf("read credential encryption key: %w",err)}
-    if len(keyBytes)==0{return errors.New("credential encryption key is empty")}
-    manifest:=Manifest{FormatVersion:1,CreatedAt:time.Now().UTC(),ApplicationVersion:opts.ApplicationVersion,SchemaVersion:opts.SchemaVersion,DatabaseSHA256:digest(dbBytes),CredentialKeySHA256:digest(keyBytes)}
-    var archive bytes.Buffer
-    zw:=zip.NewWriter(&archive)
-    for name,data:=range map[string][]byte{"database.sqlite":dbBytes,"credential.key":keyBytes} { w,e:=zw.Create(name);if e!=nil{return e};if _,e=w.Write(data);e!=nil{return e} }
-    mw,e:=zw.Create("manifest.json");if e!=nil{return e};if e=json.NewEncoder(mw).Encode(manifest);e!=nil{return e};if e=zw.Close();e!=nil{return e}
-    encrypted,err:=seal(archive.Bytes(),passphrase);if err!=nil{return err}
-    out:=append(append([]byte{},magic...),encrypted...)
-    temp:=destination+".tmp"
-    if err=os.WriteFile(temp,out,0o600);err!=nil{return err}
-    if err=os.Rename(temp,destination);err!=nil{_ = os.Remove(temp);return err}
-    return nil
+	if opts.Database == nil || len(passphrase) < 12 || destination == "" {
+		return errors.New("database, destination and a passphrase of at least 12 bytes are required")
+	}
+	dir := filepath.Dir(destination)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmpDir, err := os.MkdirTemp(dir, ".agentmesh-backup-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	snapshot := filepath.Join(tmpDir, "database.sqlite")
+	if _, err = opts.Database.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
+		return fmt.Errorf("create consistent sqlite snapshot: %w", err)
+	}
+	dbBytes, err := os.ReadFile(snapshot)
+	if err != nil {
+		return err
+	}
+	keyBytes, err := os.ReadFile(opts.CredentialKeyPath)
+	if err != nil {
+		return fmt.Errorf("read credential encryption key: %w", err)
+	}
+	if len(keyBytes) == 0 {
+		return errors.New("credential encryption key is empty")
+	}
+	manifest := Manifest{FormatVersion: 1, CreatedAt: time.Now().UTC(), ApplicationVersion: opts.ApplicationVersion, SchemaVersion: opts.SchemaVersion, DatabaseSHA256: digest(dbBytes), CredentialKeySHA256: digest(keyBytes)}
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for name, data := range map[string][]byte{"database.sqlite": dbBytes, "credential.key": keyBytes} {
+		w, e := zw.Create(name)
+		if e != nil {
+			return e
+		}
+		if _, e = w.Write(data); e != nil {
+			return e
+		}
+	}
+	mw, e := zw.Create("manifest.json")
+	if e != nil {
+		return e
+	}
+	if e = json.NewEncoder(mw).Encode(manifest); e != nil {
+		return e
+	}
+	if e = zw.Close(); e != nil {
+		return e
+	}
+	encrypted, err := seal(archive.Bytes(), passphrase)
+	if err != nil {
+		return err
+	}
+	out := append(append([]byte{}, magic...), encrypted...)
+	temp := destination + ".tmp"
+	if err = os.WriteFile(temp, out, 0o600); err != nil {
+		return err
+	}
+	if err = os.Rename(temp, destination); err != nil {
+		_ = os.Remove(temp)
+		return err
+	}
+	return nil
 }
 
 // Verify decrypts and validates every archive member without modifying active files.
-func Verify(path string,passphrase []byte)(Manifest,error){
-    raw,err:=os.ReadFile(path);if err!=nil{return Manifest{},err}
-    if !bytes.HasPrefix(raw,magic){return Manifest{},ErrInvalidArchive}
-    plain,err:=open(raw[len(magic):],passphrase);if err!=nil{return Manifest{},ErrInvalidArchive}
-    zr,err:=zip.NewReader(bytes.NewReader(plain),int64(len(plain)));if err!=nil{return Manifest{},ErrInvalidArchive}
-    members:=map[string][]byte{}
-    for _,f:=range zr.File { if f.Name!="database.sqlite"&&f.Name!="credential.key"&&f.Name!="manifest.json"{return Manifest{},ErrInvalidArchive};r,e:=f.Open();if e!=nil{return Manifest{},ErrInvalidArchive};b,e:=io.ReadAll(io.LimitReader(r,1<<30));_ = r.Close();if e!=nil{return Manifest{},ErrInvalidArchive};members[f.Name]=b }
-    var m Manifest
-    if json.Unmarshal(members["manifest.json"],&m)!=nil||m.FormatVersion!=1||len(members["database.sqlite"])==0||len(members["credential.key"])==0{return Manifest{},ErrInvalidArchive}
-    if digest(members["database.sqlite"])!=m.DatabaseSHA256||digest(members["credential.key"])!=m.CredentialKeySHA256{return Manifest{},ErrInvalidArchive}
-    return m,nil
+func Verify(path string, passphrase []byte) (Manifest, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if !bytes.HasPrefix(raw, magic) {
+		return Manifest{}, ErrInvalidArchive
+	}
+	plain, err := open(raw[len(magic):], passphrase)
+	if err != nil {
+		return Manifest{}, ErrInvalidArchive
+	}
+	zr, err := zip.NewReader(bytes.NewReader(plain), int64(len(plain)))
+	if err != nil {
+		return Manifest{}, ErrInvalidArchive
+	}
+	members := map[string][]byte{}
+	for _, f := range zr.File {
+		if f.Name != "database.sqlite" && f.Name != "credential.key" && f.Name != "manifest.json" {
+			return Manifest{}, ErrInvalidArchive
+		}
+		r, e := f.Open()
+		if e != nil {
+			return Manifest{}, ErrInvalidArchive
+		}
+		b, e := io.ReadAll(io.LimitReader(r, 1<<30))
+		_ = r.Close()
+		if e != nil {
+			return Manifest{}, ErrInvalidArchive
+		}
+		members[f.Name] = b
+	}
+	var m Manifest
+	if json.Unmarshal(members["manifest.json"], &m) != nil || m.FormatVersion != 1 || len(members["database.sqlite"]) == 0 || len(members["credential.key"]) == 0 {
+		return Manifest{}, ErrInvalidArchive
+	}
+	if digest(members["database.sqlite"]) != m.DatabaseSHA256 || digest(members["credential.key"]) != m.CredentialKeySHA256 {
+		return Manifest{}, ErrInvalidArchive
+	}
+	return m, nil
 }
 
 // ExtractVerified writes verified payloads to a new directory. It never replaces
 // an active database; the caller must run this only from an offline restore command.
-func ExtractVerified(path string,passphrase []byte,destinationDir string)(Manifest,error){
-    raw,err:=os.ReadFile(path);if err!=nil{return Manifest{},err}
-    if !bytes.HasPrefix(raw,magic){return Manifest{},ErrInvalidArchive}
-    plain,err:=open(raw[len(magic):],passphrase);if err!=nil{return Manifest{},ErrInvalidArchive}
-    zr,err:=zip.NewReader(bytes.NewReader(plain),int64(len(plain)));if err!=nil{return Manifest{},ErrInvalidArchive}
-    members:=map[string][]byte{}
-    for _,f:=range zr.File { if f.Name!="database.sqlite"&&f.Name!="credential.key"&&f.Name!="manifest.json"{return Manifest{},ErrInvalidArchive};r,e:=f.Open();if e!=nil{return Manifest{},ErrInvalidArchive};b,e:=io.ReadAll(io.LimitReader(r,1<<30));_ = r.Close();if e!=nil{return Manifest{},ErrInvalidArchive};members[f.Name]=b }
-    var m Manifest
-    if json.Unmarshal(members["manifest.json"],&m)!=nil||m.FormatVersion!=1||digest(members["database.sqlite"])!=m.DatabaseSHA256||digest(members["credential.key"])!=m.CredentialKeySHA256{return Manifest{},ErrInvalidArchive}
-    if err=os.MkdirAll(destinationDir,0o700);err!=nil{return Manifest{},err}
-    for name,data:=range map[string][]byte{"database.sqlite":members["database.sqlite"],"credential.key":members["credential.key"]} { target:=filepath.Join(destinationDir,name);if _,e:=os.Stat(target);e==nil{return Manifest{},fmt.Errorf("refusing to overwrite existing restore file %s",name)};if e:=os.WriteFile(target,data,0o600);e!=nil{return Manifest{},e} }
-    return m,nil
+func ExtractVerified(path string, passphrase []byte, destinationDir string) (Manifest, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Manifest{}, err
+	}
+	if !bytes.HasPrefix(raw, magic) {
+		return Manifest{}, ErrInvalidArchive
+	}
+	plain, err := open(raw[len(magic):], passphrase)
+	if err != nil {
+		return Manifest{}, ErrInvalidArchive
+	}
+	zr, err := zip.NewReader(bytes.NewReader(plain), int64(len(plain)))
+	if err != nil {
+		return Manifest{}, ErrInvalidArchive
+	}
+	members := map[string][]byte{}
+	for _, f := range zr.File {
+		if f.Name != "database.sqlite" && f.Name != "credential.key" && f.Name != "manifest.json" {
+			return Manifest{}, ErrInvalidArchive
+		}
+		r, e := f.Open()
+		if e != nil {
+			return Manifest{}, ErrInvalidArchive
+		}
+		b, e := io.ReadAll(io.LimitReader(r, 1<<30))
+		_ = r.Close()
+		if e != nil {
+			return Manifest{}, ErrInvalidArchive
+		}
+		members[f.Name] = b
+	}
+	var m Manifest
+	if json.Unmarshal(members["manifest.json"], &m) != nil || m.FormatVersion != 1 || digest(members["database.sqlite"]) != m.DatabaseSHA256 || digest(members["credential.key"]) != m.CredentialKeySHA256 {
+		return Manifest{}, ErrInvalidArchive
+	}
+	if err = os.MkdirAll(destinationDir, 0o700); err != nil {
+		return Manifest{}, err
+	}
+	for name, data := range map[string][]byte{"database.sqlite": members["database.sqlite"], "credential.key": members["credential.key"]} {
+		target := filepath.Join(destinationDir, name)
+		if _, e := os.Stat(target); e == nil {
+			return Manifest{}, fmt.Errorf("refusing to overwrite existing restore file %s", name)
+		}
+		if e := os.WriteFile(target, data, 0o600); e != nil {
+			return Manifest{}, e
+		}
+	}
+	return m, nil
 }
-func seal(plain,pass []byte)([]byte,error){
-    salt:=make([]byte,16);if _,err:=rand.Read(salt);err!=nil{return nil,err}
-    key,err:=scrypt.Key(pass,salt,1<<15,8,1,32);if err!=nil{return nil,err}
-    block,err:=aes.NewCipher(key);if err!=nil{return nil,err};gcm,err:=cipher.NewGCM(block);if err!=nil{return nil,err}
-    nonce:=make([]byte,gcm.NonceSize());if _,err=rand.Read(nonce);err!=nil{return nil,err}
-    out:=append([]byte{},salt...);out=append(out,nonce...);out=gcm.Seal(out,nonce,plain,magic);return out,nil
+func seal(plain, pass []byte) ([]byte, error) {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, err
+	}
+	key, err := scrypt.Key(pass, salt, 1<<15, 8, 1, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	out := append([]byte{}, salt...)
+	out = append(out, nonce...)
+	out = gcm.Seal(out, nonce, plain, magic)
+	return out, nil
 }
-func open(data,pass []byte)([]byte,error){
-    if len(data)<16+12+16{return nil,ErrInvalidArchive};salt:=data[:16]
-    key,err:=scrypt.Key(pass,salt,1<<15,8,1,32);if err!=nil{return nil,err}
-    block,err:=aes.NewCipher(key);if err!=nil{return nil,err};gcm,err:=cipher.NewGCM(block);if err!=nil{return nil,err}
-    nonce:=data[16:16+gcm.NonceSize()];return gcm.Open(nil,nonce,data[16+gcm.NonceSize():],magic)
+func open(data, pass []byte) ([]byte, error) {
+	if len(data) < 16+12+16 {
+		return nil, ErrInvalidArchive
+	}
+	salt := data[:16]
+	key, err := scrypt.Key(pass, salt, 1<<15, 8, 1, 32)
+	if err != nil {
+		return nil, err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := data[16 : 16+gcm.NonceSize()]
+	return gcm.Open(nil, nonce, data[16+gcm.NonceSize():], magic)
 }
-func digest(data []byte)string{sum:=sha256.Sum256(data);return hex.EncodeToString(sum[:])}
+func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
