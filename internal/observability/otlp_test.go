@@ -74,6 +74,9 @@ func TestOTLPHeadersValidation(t *testing.T) {
 		t.Fatalf("unexpected parsed headers: %#v", headers)
 	}
 
+	if _, err := NewOTLPTraceProvider("https://collector.example:4318", map[string]string{"Bad Header": "value"}); err == nil {
+		t.Fatal("invalid direct exporter header accepted")
+	}
 	for _, raw := range []string{
 		"Authorization=Bearer\r\nInjected: yes",
 		"Bad Header=value",
