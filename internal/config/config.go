@@ -104,7 +104,7 @@ type SchedulerConfig struct {
 }
 
 type TracingConfig struct {
-	Enabled bool `koanf:"enabled"`
+	Enabled      bool   `koanf:"enabled"`
 	OTLPEndpoint string `koanf:"otlp_endpoint"`
-	HeadersEnv string `koanf:"headers_env"`
+	HeadersEnv   string `koanf:"headers_env"`
 }
