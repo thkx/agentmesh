@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"golang.org/x/crypto/scrypt"
 )
 
@@ -146,6 +148,7 @@ func Verify(path string, passphrase []byte) (Manifest, error) {
 	if digest(members["database.sqlite"]) != m.DatabaseSHA256 || digest(members["credential.key"]) != m.CredentialKeySHA256 {
 		return Manifest{}, ErrInvalidArchive
 	}
+	if err := verifySQLiteBytes(members["database.sqlite"], m.SchemaVersion); err != nil { return Manifest{}, ErrInvalidArchive }
 	return m, nil
 }
 
@@ -187,6 +190,7 @@ func ExtractVerified(path string, passphrase []byte, destinationDir string) (Man
 	if json.Unmarshal(members["manifest.json"], &m) != nil || m.FormatVersion != 1 || digest(members["database.sqlite"]) != m.DatabaseSHA256 || digest(members["credential.key"]) != m.CredentialKeySHA256 {
 		return Manifest{}, ErrInvalidArchive
 	}
+	if err := verifySQLiteBytes(members["database.sqlite"], m.SchemaVersion); err != nil { return Manifest{}, ErrInvalidArchive }
 	if err = os.MkdirAll(destinationDir, 0o700); err != nil {
 		return Manifest{}, err
 	}
@@ -248,3 +252,25 @@ func open(data, pass []byte) ([]byte, error) {
 	return gcm.Open(nil, nonce, data[16+gcm.NonceSize():], magic)
 }
 func digest(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:]) }
+
+func verifySQLiteBytes(data []byte, expectedSchema uint) error {
+    file, err := os.CreateTemp("", "agentmesh-verify-*.sqlite")
+    if err != nil { return err }
+    path := file.Name()
+    defer os.Remove(path)
+    if _, err = file.Write(data); err != nil { _ = file.Close(); return err }
+    if err = file.Close(); err != nil { return err }
+    db, err := sql.Open("sqlite", path)
+    if err != nil { return err }
+    defer db.Close()
+    var integrity string
+    if err = db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil { return err }
+    if integrity != "ok" { return fmt.Errorf("sqlite integrity check failed") }
+    if expectedSchema > 0 {
+        var version uint
+        var dirty bool
+        if err = db.QueryRow("SELECT version, dirty FROM schema_migrations LIMIT 1").Scan(&version, &dirty); err != nil { return err }
+        if dirty || version != expectedSchema { return fmt.Errorf("sqlite schema version mismatch") }
+    }
+    return nil
+}
