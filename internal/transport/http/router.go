@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"github.com/thkx/agentmesh/internal/agent/contextmanager"
 	"github.com/thkx/agentmesh/internal/agent/executor"
 	agentruntime "github.com/thkx/agentmesh/internal/agent/runtime"
@@ -27,6 +26,7 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"log/slog"
 
 	"github.com/thkx/agentmesh/internal/observability"
@@ -133,15 +133,21 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	api := router.Group("/api/v1")
-    api.GET("/diagnostics/report", func(c *gin.Context) {
-        dbReady := false
-        if deps.DB != nil { ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second); defer cancel(); dbReady = deps.DB.PingContext(ctx) == nil }
-        version := "development"
-        if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" { version = info.Main.Version }
-        snap := metrics.Snapshot()
-        report := diagnostics.Build(diagnostics.Input{Version:version,StartedAt:time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds*float64(time.Second))),DatabaseReady:dbReady,Metrics:map[string]int64{"http_requests":int64(snap.HTTPRequestCount),"model_requests":int64(snap.ModelGatewayCount),"http_in_flight":snap.HTTPRequestsInFlight}},time.Now().UTC())
-        c.JSON(http.StatusOK, report)
-    })
+	api.GET("/diagnostics/report", func(c *gin.Context) {
+		dbReady := false
+		if deps.DB != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+			defer cancel()
+			dbReady = deps.DB.PingContext(ctx) == nil
+		}
+		version := "development"
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+			version = info.Main.Version
+		}
+		snap := metrics.Snapshot()
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbReady, Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
+		c.JSON(http.StatusOK, report)
+	})
 	if deps.DB != nil {
 		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
 		handlers.NewUnifiedExecutionHandler(deps.DB).RegisterRoutes(api)
