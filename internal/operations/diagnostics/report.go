@@ -49,7 +49,7 @@ func Build(in Input, now time.Time) Report {
 	if !in.StartedAt.IsZero() && now.After(in.StartedAt) {
 		uptime = int64(now.Sub(in.StartedAt).Seconds())
 	}
-	allowed := map[string]bool{"http_requests": true, "model_requests": true, "http_in_flight": true, "execution_backlog": true}
+	allowed := map[string]bool{"http_requests": true, "model_requests": true, "http_in_flight": true, "execution_backlog": true, "runtime_workers": true, "active_executions": true, "usage_write_failures": true}
 	metrics := make(map[string]int64)
 	for k, v := range in.Metrics {
 		if allowed[k] {
