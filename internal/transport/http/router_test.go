@@ -20,6 +20,9 @@ import (
 	ollamaadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/ollama"
 	"github.com/thkx/agentmesh/internal/platform/database"
 	httptransport "github.com/thkx/agentmesh/internal/transport/http"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestCatalogHTTPProviderModelLifecycle(t *testing.T) {
@@ -298,5 +301,30 @@ func TestAPITokenProtectsWorkflowEditorNonStaticPaths(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.want, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestHTTPTraceparentUsesSameTraceIDForCorrelationAndServerSpan(t *testing.T) {
+	oldProvider := otel.GetTracerProvider()
+	oldPropagator := otel.GetTextMapPropagator()
+	provider := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(oldProvider)
+		otel.SetTextMapPropagator(oldPropagator)
+	}()
+
+	handler := httptransport.NewRouter(httptransport.Dependencies{})
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("health request status=%d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Trace-ID"); got != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("correlation trace ID=%q does not match incoming W3C traceparent", got)
 	}
 }
