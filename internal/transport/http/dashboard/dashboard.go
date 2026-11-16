@@ -3,6 +3,7 @@ package dashboard
 import (
 	"bytes"
 	"context"
+	"runtime/debug"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -15,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"net/url"
 	"sort"
 	"strconv"
