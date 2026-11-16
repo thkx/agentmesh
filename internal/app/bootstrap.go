@@ -48,6 +48,7 @@ import (
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	"github.com/thkx/agentmesh/internal/tools/builtin"
 	toolpolicy "github.com/thkx/agentmesh/internal/tools/policy"
+	"github.com/thkx/agentmesh/internal/usage"
 	httptransport "github.com/thkx/agentmesh/internal/transport/http"
 	workflowcheckpoint "github.com/thkx/agentmesh/internal/workflow/checkpoint"
 	workflowpolicy "github.com/thkx/agentmesh/internal/workflow/policy"
@@ -275,6 +276,12 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize provider runtime: %w", err)
 	}
 	gateway.SetObserver(metrics)
+	usageLedger, err := usage.NewLedger(sqliteDB.DB)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize model usage ledger: %w", err)
+	}
+	gateway.SetUsageObserver(usage.GatewayObserver{Ledger: usageLedger})
 	// Agent Runtime, Workflow, Planner and Evaluator all share this gateway.
 	// Matching AI resource model keys are routed through the persisted
 	// multi-credential pool before any legacy single-key provider adapter.
