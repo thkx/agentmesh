@@ -1,6 +1,6 @@
 # P5 Part 1 — Product Control Plane (M49–M52)
 
-**Status:** Implementation in progress; see [Part 1 implementation record](p5-part1-implementation.md) and [delivery checklist](p5-part1-checklist.md). Acceptance is not declared until the exact final commit passes verification.  
+**Status:** P5 Part 1 (M49–M52) accepted. The exact Part 1 commit passed GitHub Actions and the user's local Go 1.27.3 darwin/arm64 verification. See the [Part 1 implementation record](p5-part1-implementation.md), [delivery checklist](p5-part1-checklist.md), and [P5 Part 2 architecture](p5-part2-operations.md).  
 **Base:** `p4/unified-execution-core` at `46986d56828214e078515ab4dba664ba3ad49273`  
 **Implementation branch:** `p5/control-plane`  
 **Product decision:** Control Center first; Go `html/template` + HTMX + small amounts of vanilla JavaScript.
@@ -59,29 +59,20 @@ Existing repositories, SQLite, Runtime adapters and workers
 
 ### Package and asset layout
 
-Proposed additive layout (final names may follow existing repository conventions, but do not move existing packages):
+The repository-root `web/` directory is the mandatory home for all browser-facing source assets. Go HTTP handlers remain under `internal/transport/http/`. The Part 2 migration is specified in [P5 Part 2 Operations & Observability](p5-part2-operations.md).
 
 ```text
-internal/transport/http/dashboard/
-  handler.go
-  routes.go
-  auth.go
-  viewmodels.go
-  queries.go
-  commands.go
-  templates/
-    layout.html
-    components/
-    pages/
-    partials/
-  static/
-    css/
-    js/
-    vendor/htmx.min.js
-web/dashboard/                 # optional design/source assets only if needed
+web/
+  embed.go
+  dashboard/templates/{layouts,components,pages,partials}/
+  dashboard/static/{css,js,vendor}/
+  workflow-editor/{index.html,app.js}
+
+internal/transport/http/dashboard/  # handlers, routes, view models, query/command adapters
+internal/transport/http/editor.go   # Workflow Editor HTTP adapter only
 ```
 
-Prefer `go:embed` for templates and static assets so a normal Go binary contains the Dashboard. Avoid a separate frontend build step.
+`web/embed.go` owns the shared `embed.FS`. No HTML templates, CSS, JavaScript or vendored browser libraries belong under `internal/`. Prefer `go:embed`; no frontend build step is required.
 
 ### Route namespace
 
@@ -222,7 +213,11 @@ The script must check:
 
 The final report must identify the exact branch and commit SHA, exact commands run, pass/fail output, any skipped checks and why, and whether GitHub Actions completed for that exact commit. A local code write or GitHub commit is not evidence of a successful build/test.
 
-## 9. Deferred beyond P5 Part 1
+## 9. Part 2 and later
+
+P5 Part 2 scope and its M53–M56 acceptance gates are defined in [p5-part2-operations.md](p5-part2-operations.md).
+
+## 10. Deferred beyond P5 Part 2
 
 - System-wide metrics, token/cost accounting, tracing and alerting (P5 Part 2).
 - Backup/restore, upgrade workflows, diagnostics and service lifecycle UX (P5 Part 2).
