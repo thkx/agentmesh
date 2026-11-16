@@ -127,6 +127,32 @@ func TestCatalogHTTPProviderModelLifecycle(t *testing.T) {
 	}
 }
 
+func TestMetricsEndpointUsesBearerTokenAndRequestCorrelation(t *testing.T) {
+	token := strings.Repeat("m", 40)
+	router := httptransport.NewRouter(httptransport.Dependencies{APIToken: token})
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized metrics status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Request-ID", "metrics-test-1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorized metrics status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-Request-ID") != "metrics-test-1" || rec.Header().Get("X-Trace-ID") == "" {
+		t.Fatalf("correlation response headers missing: %#v", rec.Header())
+	}
+	if !strings.Contains(rec.Body.String(), "agentmesh_http_requests_total") {
+		t.Fatalf("metrics response missing exposition: %s", rec.Body.String())
+	}
+}
+
 func TestHealthEndpoints(t *testing.T) {
 	router := httptransport.NewRouter(httptransport.Dependencies{})
 	rr := httptest.NewRecorder()
