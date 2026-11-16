@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"strings"
@@ -25,5 +24,4 @@ func TestRingBufferIsBoundedAndExcludesAttributes(t *testing.T){
 	if strings.Contains(strings.Join(lines," "),"do-not-retain"){t.Fatal("log attributes were retained")}
 	buffer.Add(strings.Repeat("x",600))
 	if got:=len(buffer.Snapshot()[1]);got>512{t.Fatalf("line length=%d",got)}
-	_ = bytes.MinRead
 }
