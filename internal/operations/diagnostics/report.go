@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	assignmentSecret = regexp.MustCompile(`(?i)(api[_-]?key|token|password|secret|authorization)(\\s*[:=]\\s*)([^\\s,;]+)`)
-	bearerSecret = regexp.MustCompile(`(?i)bearer\\s+[a-z0-9._~+/-]+=*`)
+	assignmentSecret = regexp.MustCompile(`(?i)(api[_-]?key|token|password|secret|authorization)(\s*[:=]\s*)([^\s,;]+)`)
+	bearerSecret = regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/-]+=*`)
 )
 
 // Input contains only explicitly selected operational metadata. Callers must
