@@ -260,8 +260,12 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 							return
 						}
 						normalizeStreamEvent(&event, model)
-						if event.Type == StreamEventError { g.observe("stream", streamStarted, errors.New("provider stream failed")) }
-						if event.Type == StreamEventCompleted { g.observe("stream", streamStarted, nil) }
+						if event.Type == StreamEventError {
+							g.observe("stream", streamStarted, errors.New("provider stream failed"))
+						}
+						if event.Type == StreamEventCompleted {
+							g.observe("stream", streamStarted, nil)
+						}
 						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
 							g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
 							usageRecorded = true
@@ -332,8 +336,12 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 				}
 
 				normalizeStreamEvent(&event, model)
-				if event.Type == StreamEventError { g.observe("stream", streamStarted, errors.New("provider stream failed")) }
-				if event.Type == StreamEventCompleted { g.observe("stream", streamStarted, nil) }
+				if event.Type == StreamEventError {
+					g.observe("stream", streamStarted, errors.New("provider stream failed"))
+				}
+				if event.Type == StreamEventCompleted {
+					g.observe("stream", streamStarted, nil)
+				}
 				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
 					g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
 					usageRecorded = true
