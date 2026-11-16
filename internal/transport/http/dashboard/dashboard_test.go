@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/observability"
-	"time"
 )
 
 func testRouter(token string) *gin.Engine {
