@@ -14,6 +14,8 @@ func (o GatewayObserver) ObserveModelUsage(ctx context.Context, providerID provi
 		return
 	}
 	source := "provider_reported"
-	if tokens.InputTokens == 0 && tokens.OutputTokens == 0 && tokens.TotalTokens == 0 { source = "unavailable" }
+	if tokens.InputTokens == 0 && tokens.OutputTokens == 0 && tokens.TotalTokens == 0 {
+		source = "unavailable"
+	}
 	_ = o.Ledger.Record(ctx, Record{IdempotencyKey: requestKey, ProviderID: providerID, ModelID: modelID, OccurredAt: occurredAt, Usage: tokens, Source: source, RequestID: requestKey})
 }
