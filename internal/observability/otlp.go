@@ -57,7 +57,7 @@ func ParseOTLPHeaders(raw string) (map[string]string, error) {
 		}
 		name, value, ok := strings.Cut(part, "=")
 		name = strings.TrimSpace(name)
-		if !ok || !validOTLPHeaderName(name) || strings.ContainsAny(value, "\\r\\n") {
+		if !ok || !validOTLPHeaderName(name) || strings.ContainsAny(value, "\r\n") {
 			return nil, errors.New("invalid OTLP headers environment value")
 		}
 		canonical := textproto.CanonicalMIMEHeaderKey(name)
