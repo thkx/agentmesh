@@ -402,7 +402,6 @@ func (h *Handler) logout(c *gin.Context) {
 	c.Redirect(http.StatusSeeOther, "/dashboard/login")
 }
 
-
 func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot := h.metrics.Snapshot()
 	h.render(c, pageData{
