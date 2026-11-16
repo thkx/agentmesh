@@ -210,55 +210,121 @@ func ExtractVerified(path string, passphrase []byte, destinationDir string) (Man
 	return m, nil
 }
 
-type RestoreResult struct { DatabaseBackup string; CredentialKeyBackup string }
+type RestoreResult struct {
+	DatabaseBackup      string
+	CredentialKeyBackup string
+}
 
 // ApplyRestoreOffline replaces the database and credential key only after the operator
 // confirms the service is stopped. It verifies the staged manifest and keeps rollback copies.
 func ApplyRestoreOffline(stagingDir, databasePath, credentialKeyPath, backupDir string, confirmStopped bool) (RestoreResult, error) {
 	var result RestoreResult
-	if !confirmStopped { return result, errors.New("refusing restore apply without --confirm-stopped") }
-	if stagingDir=="" || databasePath=="" || credentialKeyPath=="" || backupDir=="" { return result, errors.New("staging, database, credential key and backup paths are required") }
-	manifestBytes,err:=os.ReadFile(filepath.Join(stagingDir,"manifest.json"));if err!=nil{return result,err}
-	dbBytes,err:=os.ReadFile(filepath.Join(stagingDir,"database.sqlite"));if err!=nil{return result,err}
-	keyBytes,err:=os.ReadFile(filepath.Join(stagingDir,"credential.key"));if err!=nil{return result,err}
+	if !confirmStopped {
+		return result, errors.New("refusing restore apply without --confirm-stopped")
+	}
+	if stagingDir == "" || databasePath == "" || credentialKeyPath == "" || backupDir == "" {
+		return result, errors.New("staging, database, credential key and backup paths are required")
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join(stagingDir, "manifest.json"))
+	if err != nil {
+		return result, err
+	}
+	dbBytes, err := os.ReadFile(filepath.Join(stagingDir, "database.sqlite"))
+	if err != nil {
+		return result, err
+	}
+	keyBytes, err := os.ReadFile(filepath.Join(stagingDir, "credential.key"))
+	if err != nil {
+		return result, err
+	}
 	var manifest Manifest
-	if json.Unmarshal(manifestBytes,&manifest)!=nil || manifest.FormatVersion!=1 || digest(dbBytes)!=manifest.DatabaseSHA256 || digest(keyBytes)!=manifest.CredentialKeySHA256 { return result,ErrInvalidArchive }
-	if err=verifySQLiteBytes(dbBytes,manifest.SchemaVersion);err!=nil{return result,ErrInvalidArchive}
-	dbTarget,err:=filepath.Abs(databasePath);if err!=nil{return result,err}
-	keyTarget,err:=filepath.Abs(credentialKeyPath);if err!=nil{return result,err}
-	for _,target:=range []string{dbTarget,keyTarget} {
-		info,e:=os.Lstat(target);if e!=nil{return result,e}
-		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink!=0 { return result,fmt.Errorf("restore target %s must be a regular non-symlink file",filepath.Base(target)) }
+	if json.Unmarshal(manifestBytes, &manifest) != nil || manifest.FormatVersion != 1 || digest(dbBytes) != manifest.DatabaseSHA256 || digest(keyBytes) != manifest.CredentialKeySHA256 {
+		return result, ErrInvalidArchive
 	}
-	if err=os.MkdirAll(backupDir,0o700);err!=nil{return result,err}
-	stamp:=time.Now().UTC().Format("20060102T150405.000000000Z")
-	result.DatabaseBackup=filepath.Join(backupDir,"database."+stamp+".sqlite.bak")
-	result.CredentialKeyBackup=filepath.Join(backupDir,"credential."+stamp+".key.bak")
-	if err=copyFile(dbTarget,result.DatabaseBackup,0o600);err!=nil{return RestoreResult{},err}
-	if err=copyFile(keyTarget,result.CredentialKeyBackup,0o600);err!=nil{return RestoreResult{},err}
-	dbTemp,err:=writeRestoreTemp(dbTarget,dbBytes);if err!=nil{return RestoreResult{},err}
+	if err = verifySQLiteBytes(dbBytes, manifest.SchemaVersion); err != nil {
+		return result, ErrInvalidArchive
+	}
+	dbTarget, err := filepath.Abs(databasePath)
+	if err != nil {
+		return result, err
+	}
+	keyTarget, err := filepath.Abs(credentialKeyPath)
+	if err != nil {
+		return result, err
+	}
+	for _, target := range []string{dbTarget, keyTarget} {
+		info, e := os.Lstat(target)
+		if e != nil {
+			return result, e
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return result, fmt.Errorf("restore target %s must be a regular non-symlink file", filepath.Base(target))
+		}
+	}
+	if err = os.MkdirAll(backupDir, 0o700); err != nil {
+		return result, err
+	}
+	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
+	result.DatabaseBackup = filepath.Join(backupDir, "database."+stamp+".sqlite.bak")
+	result.CredentialKeyBackup = filepath.Join(backupDir, "credential."+stamp+".key.bak")
+	if err = copyFile(dbTarget, result.DatabaseBackup, 0o600); err != nil {
+		return RestoreResult{}, err
+	}
+	if err = copyFile(keyTarget, result.CredentialKeyBackup, 0o600); err != nil {
+		return RestoreResult{}, err
+	}
+	dbTemp, err := writeRestoreTemp(dbTarget, dbBytes)
+	if err != nil {
+		return RestoreResult{}, err
+	}
 	defer os.Remove(dbTemp)
-	keyTemp,err:=writeRestoreTemp(keyTarget,keyBytes);if err!=nil{return RestoreResult{},err}
-	defer os.Remove(keyTemp)
-	if err=os.Rename(dbTemp,dbTarget);err!=nil{return RestoreResult{},err}
-	if err=os.Rename(keyTemp,keyTarget);err!=nil {
-		rollbackTemp,e:=writeRestoreTemp(dbTarget,readFileOrEmpty(result.DatabaseBackup))
-		if e==nil { e=os.Rename(rollbackTemp,dbTarget);_ = os.Remove(rollbackTemp) }
-		return RestoreResult{},errors.Join(err,e)
+	keyTemp, err := writeRestoreTemp(keyTarget, keyBytes)
+	if err != nil {
+		return RestoreResult{}, err
 	}
-	return result,nil
+	defer os.Remove(keyTemp)
+	if err = os.Rename(dbTemp, dbTarget); err != nil {
+		return RestoreResult{}, err
+	}
+	if err = os.Rename(keyTemp, keyTarget); err != nil {
+		rollbackTemp, e := writeRestoreTemp(dbTarget, readFileOrEmpty(result.DatabaseBackup))
+		if e == nil {
+			e = os.Rename(rollbackTemp, dbTarget)
+			_ = os.Remove(rollbackTemp)
+		}
+		return RestoreResult{}, errors.Join(err, e)
+	}
+	return result, nil
 }
 
-func writeRestoreTemp(target string,data []byte)(string,error){
-	file,err:=os.CreateTemp(filepath.Dir(target),".agentmesh-restore-*");if err!=nil{return "",err}
-	name:=file.Name()
-	if _,err=file.Write(data);err!=nil{_ = file.Close();_ = os.Remove(name);return "",err}
-	if err=file.Chmod(0o600);err!=nil{_ = file.Close();_ = os.Remove(name);return "",err}
-	if err=file.Sync();err!=nil{_ = file.Close();_ = os.Remove(name);return "",err}
-	if err=file.Close();err!=nil{_ = os.Remove(name);return "",err}
-	return name,nil
+func writeRestoreTemp(target string, data []byte) (string, error) {
+	file, err := os.CreateTemp(filepath.Dir(target), ".agentmesh-restore-*")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if _, err = file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err = file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err = file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err = file.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	return name, nil
 }
-func readFileOrEmpty(path string)[]byte{data,_:=os.ReadFile(path);return data}
+func readFileOrEmpty(path string) []byte { data, _ := os.ReadFile(path); return data }
 
 func seal(plain, pass []byte) ([]byte, error) {
 	salt := make([]byte, 16)
