@@ -80,3 +80,17 @@ func TestRuntimeAndLedgerMetricsAreExported(t *testing.T) {
 		}
 	}
 }
+
+func TestSnapshotCountsEachStreamAsOneGatewayRequest(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.ObserveModelGateway("stream_open", "success", 5*time.Millisecond)
+	metrics.ObserveModelGateway("stream", "success", 250*time.Millisecond)
+
+	snapshot := metrics.Snapshot()
+	if snapshot.ModelGatewayCount != 1 {
+		t.Fatalf("stream open and completion must count as one request, got %d", snapshot.ModelGatewayCount)
+	}
+	if snapshot.ProviderRequests != 1 {
+		t.Fatalf("provider request count=%d, want 1", snapshot.ProviderRequests)
+	}
+}
