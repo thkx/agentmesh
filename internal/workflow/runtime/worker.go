@@ -18,10 +18,10 @@ var workerSeq atomic.Uint64
 
 type WorkerConfig struct {
 	ExecutionContext func(context.Context, string) context.Context
-	ID            string
-	PollInterval  time.Duration
-	LeaseDuration time.Duration
-	Logger        *slog.Logger
+	ID               string
+	PollInterval     time.Duration
+	LeaseDuration    time.Duration
+	Logger           *slog.Logger
 }
 type Worker struct {
 	store  QueueStore
@@ -78,7 +78,9 @@ func (w *Worker) runOne(ctx context.Context) error {
 		return err
 	}
 	workCtx, cancel := context.WithCancel(ctx)
-	if w.cfg.ExecutionContext != nil { workCtx = w.cfg.ExecutionContext(workCtx, job.RunID) }
+	if w.cfg.ExecutionContext != nil {
+		workCtx = w.cfg.ExecutionContext(workCtx, job.RunID)
+	}
 	heartbeatDone := make(chan struct{})
 	go func() {
 		defer close(heartbeatDone)
