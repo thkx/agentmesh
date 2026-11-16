@@ -54,7 +54,12 @@ type Gateway struct {
 	dynamicRouter DynamicRouter
 }
 
-// SetObserver installs an optional bounded-cardinality operational observer.\nfunc (g *Gateway) SetObserver(observer Observer) {\n\tg.observer = observer\n}\n\n// SetDynamicRouter installs the optional database-backed credential router.
+// SetObserver installs an optional bounded-cardinality operational observer.
+func (g *Gateway) SetObserver(observer Observer) {
+	g.observer = observer
+}
+
+// SetDynamicRouter installs the optional database-backed credential router.
 // Bootstrap must call this before the gateway starts serving requests.
 func (g *Gateway) SetDynamicRouter(router DynamicRouter) {
 	g.dynamicRouter = router
@@ -89,7 +94,9 @@ func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *p
 }
 
 // Generate executes a non-streaming model request.
-func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {\n\tstarted := time.Now()\n\tdefer func() { g.observe("generate", started, resultErr) }()
+func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {
+	started := time.Now()
+	defer func() { g.observe("generate", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
@@ -151,7 +158,9 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 //
 // The returned channel is closed when the provider stream ends
 // or the request context is canceled.
-func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {\n\tstarted := time.Now()\n\tdefer func() { g.observe("stream_open", started, resultErr) }()
+func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {
+	started := time.Now()
+	defer func() { g.observe("stream_open", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
