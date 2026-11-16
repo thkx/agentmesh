@@ -98,3 +98,9 @@ scheduler:
   poll_interval: 500ms
   lease_duration: 30s
   max_attempts: 3
+
+# Distributed tracing is disabled by default. Enable only with an operator-managed collector.
+tracing:
+  enabled: false
+  otlp_endpoint: "" # e.g. http://127.0.0.1:4318 or https://collector.example:4318
+  headers_env: AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS
