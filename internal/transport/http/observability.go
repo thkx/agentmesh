@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/observability"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -56,6 +57,7 @@ func requestCorrelationMiddleware(logger *slog.Logger) gin.HandlerFunc {
 
 		ctx = context.WithValue(ctx, requestIDKey, requestID)
 		ctx = context.WithValue(ctx, traceIDKey, traceID)
+		ctx = modelgateway.WithRequestID(ctx, requestID)
 		c.Request = c.Request.WithContext(ctx)
 		c.Header("X-Request-ID", requestID)
 		c.Header("X-Trace-ID", TraceIDFromContext(ctx))
