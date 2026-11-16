@@ -2,8 +2,8 @@ package handlers
 
 import (
 	"database/sql"
-	"strconv"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -159,49 +159,122 @@ func (h *UsageHandler) setRate(c *gin.Context) {
 func (h *UsageHandler) events(c *gin.Context) {
 	parseTime := func(name string) (time.Time, bool) {
 		raw := strings.TrimSpace(c.Query(name))
-		if raw == "" { return time.Time{}, true }
+		if raw == "" {
+			return time.Time{}, true
+		}
 		value, err := time.Parse(time.RFC3339, raw)
 		return value.UTC(), err == nil
 	}
 	since, ok := parseTime("since")
-	if !ok { c.JSON(http.StatusBadRequest, gin.H{"error":"since must be RFC3339"}); return }
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "since must be RFC3339"})
+		return
+	}
 	until, ok := parseTime("until")
-	if !ok { c.JSON(http.StatusBadRequest, gin.H{"error":"until must be RFC3339"}); return }
-	if since.IsZero() { since = time.Now().UTC().Add(-30*24*time.Hour) }
-	if !until.IsZero() && !until.After(since) { c.JSON(http.StatusBadRequest, gin.H{"error":"until must be later than since"}); return }
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "until must be RFC3339"})
+		return
+	}
+	if since.IsZero() {
+		since = time.Now().UTC().Add(-30 * 24 * time.Hour)
+	}
+	if !until.IsZero() && !until.After(since) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "until must be later than since"})
+		return
+	}
 	limit := 50
-	if raw := c.Query("limit"); raw != "" { n, err := strconv.Atoi(raw); if err != nil || n < 1 || n > 200 { c.JSON(http.StatusBadRequest, gin.H{"error":"limit must be between 1 and 200"}); return }; limit = n }
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be between 1 and 200"})
+			return
+		}
+		limit = n
+	}
 	offset := 0
-	if raw := c.Query("offset"); raw != "" { n, err := strconv.Atoi(raw); if err != nil || n < 0 || n > 1000000 { c.JSON(http.StatusBadRequest, gin.H{"error":"offset must be between 0 and 1000000"}); return }; offset = n }
+	if raw := c.Query("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 1000000 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "offset must be between 0 and 1000000"})
+			return
+		}
+		offset = n
+	}
 	where := []string{"occurred_at>=?"}
 	args := []any{since.Format(time.RFC3339Nano)}
-	if !until.IsZero() { where=append(where,"occurred_at<?"); args=append(args,until.Format(time.RFC3339Nano)) }
-	for _, filter := range []struct{name,column string}{{"provider_id","provider_id"},{"model_id","model_id"},{"execution_id","execution_id"},{"attempt_id","attempt_id"}} {
-		if value := strings.TrimSpace(c.Query(filter.name)); value != "" { if len(value)>128 { c.JSON(http.StatusBadRequest,gin.H{"error":filter.name+" is too long"}); return }; where=append(where,filter.column+"=?"); args=append(args,value) }
+	if !until.IsZero() {
+		where = append(where, "occurred_at<?")
+		args = append(args, until.Format(time.RFC3339Nano))
 	}
-	query := `SELECT id,occurred_at,provider_id,model_id,input_tokens,output_tokens,total_tokens,usage_source,currency,estimated_cost_micros,execution_id,attempt_id,request_id,trace_id FROM model_usage_events WHERE `+strings.Join(where," AND ")+` ORDER BY occurred_at DESC,id DESC LIMIT ? OFFSET ?`
-	args=append(args,limit+1,offset)
-	rows, err := h.db.QueryContext(c.Request.Context(),query,args...)
-	if err != nil { c.JSON(http.StatusInternalServerError,gin.H{"error":"usage events unavailable"}); return }
+	for _, filter := range []struct{ name, column string }{{"provider_id", "provider_id"}, {"model_id", "model_id"}, {"execution_id", "execution_id"}, {"attempt_id", "attempt_id"}} {
+		if value := strings.TrimSpace(c.Query(filter.name)); value != "" {
+			if len(value) > 128 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": filter.name + " is too long"})
+				return
+			}
+			where = append(where, filter.column+"=?")
+			args = append(args, value)
+		}
+	}
+	query := `SELECT id,occurred_at,provider_id,model_id,input_tokens,output_tokens,total_tokens,usage_source,currency,estimated_cost_micros,execution_id,attempt_id,request_id,trace_id FROM model_usage_events WHERE ` + strings.Join(where, " AND ") + ` ORDER BY occurred_at DESC,id DESC LIMIT ? OFFSET ?`
+	args = append(args, limit+1, offset)
+	rows, err := h.db.QueryContext(c.Request.Context(), query, args...)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage events unavailable"})
+		return
+	}
 	defer rows.Close()
 	type event struct {
-		ID string `json:"id"`; OccurredAt string `json:"occurred_at"`; ProviderID string `json:"provider_id"`; ModelID string `json:"model_id"`
-		InputTokens *int64 `json:"input_tokens,omitempty"`; OutputTokens *int64 `json:"output_tokens,omitempty"`; TotalTokens *int64 `json:"total_tokens,omitempty"`
-		Source string `json:"usage_source"`; Currency string `json:"currency,omitempty"`; CostMicros *int64 `json:"estimated_cost_micros,omitempty"`
-		ExecutionID string `json:"execution_id,omitempty"`; AttemptID string `json:"attempt_id,omitempty"`; RequestID string `json:"request_id,omitempty"`; TraceID string `json:"trace_id,omitempty"`
+		ID           string `json:"id"`
+		OccurredAt   string `json:"occurred_at"`
+		ProviderID   string `json:"provider_id"`
+		ModelID      string `json:"model_id"`
+		InputTokens  *int64 `json:"input_tokens,omitempty"`
+		OutputTokens *int64 `json:"output_tokens,omitempty"`
+		TotalTokens  *int64 `json:"total_tokens,omitempty"`
+		Source       string `json:"usage_source"`
+		Currency     string `json:"currency,omitempty"`
+		CostMicros   *int64 `json:"estimated_cost_micros,omitempty"`
+		ExecutionID  string `json:"execution_id,omitempty"`
+		AttemptID    string `json:"attempt_id,omitempty"`
+		RequestID    string `json:"request_id,omitempty"`
+		TraceID      string `json:"trace_id,omitempty"`
 	}
-	items:=make([]event,0,limit+1)
+	items := make([]event, 0, limit+1)
 	for rows.Next() {
 		var item event
-		var in,out,total,cost sql.NullInt64
-		var currency,execution,attempt,request,trace sql.NullString
-		if err=rows.Scan(&item.ID,&item.OccurredAt,&item.ProviderID,&item.ModelID,&in,&out,&total,&item.Source,&currency,&cost,&execution,&attempt,&request,&trace);err!=nil { c.JSON(http.StatusInternalServerError,gin.H{"error":"usage events unavailable"});return }
-		if in.Valid { item.InputTokens=&in.Int64 }; if out.Valid { item.OutputTokens=&out.Int64 }; if total.Valid { item.TotalTokens=&total.Int64 }; if cost.Valid { item.CostMicros=&cost.Int64 }
-		item.Currency=currency.String;item.ExecutionID=execution.String;item.AttemptID=attempt.String;item.RequestID=request.String;item.TraceID=trace.String
-		items=append(items,item)
+		var in, out, total, cost sql.NullInt64
+		var currency, execution, attempt, request, trace sql.NullString
+		if err = rows.Scan(&item.ID, &item.OccurredAt, &item.ProviderID, &item.ModelID, &in, &out, &total, &item.Source, &currency, &cost, &execution, &attempt, &request, &trace); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "usage events unavailable"})
+			return
+		}
+		if in.Valid {
+			item.InputTokens = &in.Int64
+		}
+		if out.Valid {
+			item.OutputTokens = &out.Int64
+		}
+		if total.Valid {
+			item.TotalTokens = &total.Int64
+		}
+		if cost.Valid {
+			item.CostMicros = &cost.Int64
+		}
+		item.Currency = currency.String
+		item.ExecutionID = execution.String
+		item.AttemptID = attempt.String
+		item.RequestID = request.String
+		item.TraceID = trace.String
+		items = append(items, item)
 	}
-	if err=rows.Err();err!=nil { c.JSON(http.StatusInternalServerError,gin.H{"error":"usage events unavailable"});return }
-	hasMore:=len(items)>limit
-	if hasMore { items=items[:limit] }
-	c.JSON(http.StatusOK,gin.H{"items":items,"limit":limit,"offset":offset,"has_more":hasMore,"next_offset":offset+limit,"since":since,"until":until})
+	if err = rows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage events unavailable"})
+		return
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "limit": limit, "offset": offset, "has_more": hasMore, "next_offset": offset + limit, "since": since, "until": until})
 }
