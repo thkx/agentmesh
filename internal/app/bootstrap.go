@@ -631,7 +631,9 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	workflowExecutionContext := func(workCtx context.Context, runID string) context.Context {
 		var executionID, attemptID string
 		err := sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM executions WHERE runtime='workflow' AND (runtime_ref=? OR task_id=?) ORDER BY created_at DESC LIMIT 1`, runID, runID).Scan(&executionID)
-		if err != nil { return workCtx }
+		if err != nil {
+			return workCtx
+		}
 		_ = sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM execution_attempts WHERE execution_id=? AND status='running' ORDER BY attempt_number DESC LIMIT 1`, executionID).Scan(&attemptID)
 		return modelgateway.WithExecutionProvenance(workCtx, executionID, attemptID)
 	}
