@@ -3,12 +3,14 @@ package dashboard
 import (
 	"net/http"
 	"net/http/httptest"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/observability"
+	_ "modernc.org/sqlite"
 )
 
 func testRouter(token string) *gin.Engine {
@@ -312,5 +314,30 @@ func TestDashboardGracefulShutdownRequiresSameOriginAndConfirmation(t *testing.T
 	case <-requests:
 	default:
 		t.Fatal("graceful shutdown request was not sent")
+	}
+}
+
+func TestOperationsDashboardShowsSQLiteAndWorkerHealth(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec("CREATE TABLE schema_migrations(version INTEGER,dirty BOOLEAN); INSERT INTO schema_migrations(version,dirty) VALUES(44,0); CREATE TABLE executions(id TEXT,status TEXT);"); err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.NewMetrics()
+	metrics.AddRuntimeWorkers(1)
+	router := gin.New()
+	New(Dependencies{DB: db, Metrics: metrics}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operations status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"System health", "SQLite integrity", "Schema version", "44", "running", "Gracefully stop AgentMesh"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("operations dashboard missing %q", want)
+		}
 	}
 }
