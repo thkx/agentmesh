@@ -13,31 +13,57 @@ import (
 )
 
 func TestOTLPExporterSendsBatchAndAuthHeader(t *testing.T) {
-	received:=make(chan []byte,1)
-	server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-		if r.URL.Path!="/v1/traces"{t.Errorf("path=%s",r.URL.Path)}
-		if r.Header.Get("Authorization")!="Bearer test-token"{t.Errorf("authorization header missing")}
+	received := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/traces" {
+			t.Errorf("path=%s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "***" {
+			t.Errorf("authorization header missing")
+		}
 		var body map[string]any
-		if err:=json.NewDecoder(r.Body).Decode(&body);err!=nil{t.Errorf("decode: %v",err)}else{raw,_:=json.Marshal(body);received<-raw}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		} else {
+			raw, _ := json.Marshal(body)
+			received <- raw
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	provider,err:=NewOTLPTraceProvider(server.URL,map[string]string{"Authorization":"Bearer test-token"});if err!=nil{t.Fatal(err)}
-	ctx,cancel:=context.WithTimeout(context.Background(),5*time.Second);defer cancel()
-	_,span:=provider.Tracer("agentmesh/test").Start(ctx,"test.operation")
-	span.SetAttributes(attribute.String("agentmesh.model_id","model-safe"))
-	span.End()
-	if err=provider.ForceFlush(ctx);err!=nil{t.Fatal(err)}
-	select{
-	case body:=<-received:
-		if !strings.Contains(string(body),"test.operation")||!strings.Contains(string(body),"model-safe"){t.Fatalf("span payload missing fields: %s",body)}
-	case <-ctx.Done():t.Fatal("OTLP exporter did not send spans")
+	provider, err := NewOTLPTraceProvider(server.URL, map[string]string{"Authorization": "***"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err=provider.Shutdown(ctx);err!=nil{t.Fatal(err)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, span := provider.Tracer("agentmesh/test").Start(ctx, "test.operation")
+	span.SetAttributes(attribute.String("agentmesh.model_id", "model-safe"))
+	span.End()
+	if err = provider.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		if !strings.Contains(string(body), "test.operation") || !strings.Contains(string(body), "model-safe") {
+			t.Fatalf("span payload missing fields: %s", body)
+		}
+	case <-ctx.Done():
+		t.Fatal("OTLP exporter did not send spans")
+	}
+	if err = provider.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestOTLPEndpointRequiresTLSOutsideLoopback(t *testing.T) {
-	if _,err:=NewOTLPTraceProvider("http://collector.example:4318",nil);err==nil{t.Fatal("unencrypted remote endpoint accepted")}
-	if _,err:=NewOTLPTraceProvider("https://collector.example:4318",nil);err!=nil{t.Fatal(err)}
-	if _,err:=ParseOTLPHeaders("Authorization=Bearer secret\r\nInjected=yes");err==nil{t.Fatal("header injection accepted")}
+	if _, err := NewOTLPTraceProvider("http://collector.example:4318", nil); err == nil {
+		t.Fatal("unencrypted remote endpoint accepted")
+	}
+	if _, err := NewOTLPTraceProvider("https://collector.example:4318", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseOTLPHeaders("Authorization=***"); err == nil {
+		t.Fatal("header injection accepted")
+	}
 }
