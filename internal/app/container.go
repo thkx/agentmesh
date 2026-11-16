@@ -24,16 +24,16 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
-	"github.com/thkx/agentmesh/internal/platform/logger"
-	"go.opentelemetry.io/otel/sdk/trace"
 	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/planning"
 	planworkflow "github.com/thkx/agentmesh/internal/planworkflow"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Container struct {
@@ -109,8 +109,12 @@ func (c *Container) Close() error {
 		}
 	}
 	if c.TraceProvider != nil {
-		if err := c.TraceProvider.ForceFlush(shutdownCtx); err != nil { shutdownErr = errors.Join(shutdownErr, fmt.Errorf("flush tracing provider: %w", err)) }
-		if err := c.TraceProvider.Shutdown(shutdownCtx); err != nil { shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown tracing provider: %w", err)) }
+		if err := c.TraceProvider.ForceFlush(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("flush tracing provider: %w", err))
+		}
+		if err := c.TraceProvider.Shutdown(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown tracing provider: %w", err))
+		}
 	}
 	if shutdownErr != nil {
 		return shutdownErr
