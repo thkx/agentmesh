@@ -1,6 +1,9 @@
 package http
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
 	"context"
 	"crypto/subtle"
 	"database/sql"
@@ -168,6 +171,28 @@ func NewRouter(deps Dependencies) http.Handler {
 		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbReady, Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
 		c.JSON(http.StatusOK, report)
 	})
+	api.GET("/diagnostics/bundle", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		m := metrics.Snapshot()
+		version := "development"
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" { version = info.Main.Version }
+		report := diagnostics.Build(diagnostics.Input{Version:version,StartedAt:time.Now().Add(-time.Duration(m.ProcessUptimeSeconds*float64(time.Second))),DatabaseReady:snapshot.DatabaseAvailable,WorkerCount:int(m.RuntimeWorkers),Metrics:map[string]int64{"http_requests":int64(m.HTTPRequestCount),"model_requests":int64(m.ModelGatewayCount),"http_in_flight":m.HTTPRequestsInFlight,"execution_backlog":m.ExecutionBacklog}},time.Now().UTC())
+		reportJSON,_:=json.MarshalIndent(report,"","  ")
+		var metricsBuffer bytes.Buffer
+		metrics.Handler().ServeHTTP(&metricsResponseWriter{header:make(http.Header),body:&metricsBuffer},c.Request)
+		healthJSON,_:=json.MarshalIndent(gin.H{"database_available":snapshot.DatabaseAvailable,"worker_running":snapshot.WorkerRunning,"runtime_workers":m.RuntimeWorkers,"active_executions":m.ActiveExecutions,"execution_backlog":m.ExecutionBacklog,"provider_failures":m.ProviderFailures,"usage_write_failures":m.UsageWriteFailures},"","  ")
+		var bundle bytes.Buffer
+		zw:=zip.NewWriter(&bundle)
+		for name,data:=range map[string][]byte{"diagnostics.json":reportJSON,"metrics.prom":metricsBuffer.Bytes(),"health.json":healthJSON} {
+			entry,err:=zw.Create(name);if err!=nil{c.Status(http.StatusInternalServerError);return}
+			if _,err=entry.Write(data);err!=nil{c.Status(http.StatusInternalServerError);return}
+		}
+		if err:=zw.Close();err!=nil{c.Status(http.StatusInternalServerError);return}
+		c.Header("Content-Type","application/zip")
+		c.Header("Content-Disposition",`attachment; filename="agentmesh-support.zip"`)
+		c.Header("Cache-Control","no-store")
+		c.Data(http.StatusOK,"application/zip",bundle.Bytes())
+	})
 	if deps.DB != nil {
 		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
 		handlers.NewUnifiedExecutionHandler(deps.DB).RegisterRoutes(api)
@@ -274,3 +299,8 @@ func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observab
 	}
 	return s
 }
+
+type metricsResponseWriter struct { header http.Header; body *bytes.Buffer; status int }
+func (w *metricsResponseWriter) Header() http.Header { return w.header }
+func (w *metricsResponseWriter) WriteHeader(status int) { w.status=status }
+func (w *metricsResponseWriter) Write(data []byte) (int,error) { return w.body.Write(data) }
