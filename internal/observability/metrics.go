@@ -199,8 +199,12 @@ func (m *Metrics) Snapshot() Snapshot {
 	for _, stats := range m.requests {
 		result.HTTPRequestCount += stats.count
 	}
-	for _, stats := range m.modelRequests {
-		result.ModelGatewayCount += stats.count
+	for key, stats := range m.modelRequests {
+		// A stream has separate open and terminal observations. Count only the
+		// open event as a request so dashboard totals do not double-count it.
+		if key.operation != "stream" {
+			result.ModelGatewayCount += stats.count
+		}
 	}
 	return result
 }
