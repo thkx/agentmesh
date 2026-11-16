@@ -35,15 +35,19 @@ func (h *UsageHandler) summary(c *gin.Context) {
 		InputTokens         int64 `json:"input_tokens"`
 		OutputTokens        int64 `json:"output_tokens"`
 		TotalTokens         int64 `json:"total_tokens"`
-		EstimatedCostMicros int64 `json:"estimated_cost_micros"`
 		UnavailableUsage    int64 `json:"unavailable_usage"`
 	}
-	err := h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(total_tokens),0),COALESCE(SUM(estimated_cost_micros),0),COALESCE(SUM(CASE WHEN usage_source='unavailable' THEN 1 ELSE 0 END),0) FROM model_usage_events WHERE occurred_at>=?`, since.UTC().Format(time.RFC3339Nano)).Scan(&out.Requests, &out.InputTokens, &out.OutputTokens, &out.TotalTokens, &out.EstimatedCostMicros, &out.UnavailableUsage)
+	err := h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(total_tokens),0),COALESCE(SUM(CASE WHEN usage_source='unavailable' THEN 1 ELSE 0 END),0) FROM model_usage_events WHERE occurred_at>=?`, since.UTC().Format(time.RFC3339Nano)).Scan(&out.Requests, &out.InputTokens, &out.OutputTokens, &out.TotalTokens, &out.UnavailableUsage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage summary unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"since": since.UTC(), "summary": out})
+	costRows, costErr := h.db.QueryContext(c.Request.Context(), "SELECT currency,COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND currency IS NOT NULL GROUP BY currency ORDER BY currency", since.UTC().Format(time.RFC3339Nano))
+	if costErr != nil { c.JSON(http.StatusInternalServerError, gin.H{"error":"usage cost summary unavailable"}); return }
+	defer costRows.Close()
+	costs := make([]gin.H,0)
+	for costRows.Next() { var currency string; var amount int64; if costRows.Scan(&currency,&amount)==nil { costs=append(costs,gin.H{"currency":currency,"estimated_cost_micros":amount}) } }
+	c.JSON(http.StatusOK, gin.H{"since": since.UTC(), "summary": out, "costs_by_currency":costs})
 }
 func (h *UsageHandler) byModel(c *gin.Context) {
 	since := time.Now().UTC().Add(-30 * 24 * time.Hour)
@@ -55,7 +59,7 @@ func (h *UsageHandler) byModel(c *gin.Context) {
 		}
 		since = parsed
 	}
-	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT provider_id,model_id,COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? GROUP BY provider_id,model_id ORDER BY SUM(total_tokens) DESC LIMIT 200`, since.UTC().Format(time.RFC3339Nano))
+	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT provider_id,model_id,COALESCE(currency,''),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? GROUP BY provider_id,model_id,currency ORDER BY SUM(total_tokens) DESC LIMIT 200`, since.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage breakdown unavailable"})
 		return
@@ -63,13 +67,13 @@ func (h *UsageHandler) byModel(c *gin.Context) {
 	defer rows.Close()
 	items := make([]gin.H, 0)
 	for rows.Next() {
-		var p, m string
+		var p, m, currency string
 		var n, in, out, cost int64
-		if err = rows.Scan(&p, &m, &n, &in, &out, &cost); err != nil {
+		if err = rows.Scan(&p, &m, &currency, &n, &in, &out, &cost); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "usage breakdown unavailable"})
 			return
 		}
-		items = append(items, gin.H{"provider_id": p, "model_id": m, "requests": n, "input_tokens": in, "output_tokens": out, "estimated_cost_micros": cost})
+		items = append(items, gin.H{"provider_id": p, "model_id": m, "currency": currency, "requests": n, "input_tokens": in, "output_tokens": out, "estimated_cost_micros": cost})
 	}
 	if err = rows.Err(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage breakdown unavailable"})
