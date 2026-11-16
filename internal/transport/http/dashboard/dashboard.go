@@ -126,6 +126,13 @@ type pageData struct {
 	RunResult        string
 	ActiveAlerts     []observability.Alert
 	AlertHistory     []observability.Alert
+	OperationsVersion string
+	DatabaseReady     bool
+	DatabaseIntegrity string
+	SchemaVersion     uint
+	MigrationDirty    bool
+	DatabaseSizeBytes int64
+	WorkerStatus      string
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -452,15 +459,53 @@ func (h *Handler) requestGracefulShutdown(c *gin.Context) {
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
+	data := pageData{Title: "Operations Metrics", Active: "operations", DatabaseIntegrity: "unknown"}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+		data.OperationsVersion = info.Main.Version
+	} else {
+		data.OperationsVersion = "development"
+	}
 	if h.db != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		snapshot.DatabaseAvailable = h.db.PingContext(ctx) == nil
+		data.DatabaseReady = snapshot.DatabaseAvailable
+		var version uint
+		var dirty bool
+		if err := h.db.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version, &dirty); err == nil {
+			data.SchemaVersion = version
+			data.MigrationDirty = dirty
+		}
+		var integrity string
+		if err := h.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&integrity); err == nil {
+			if strings.EqualFold(strings.TrimSpace(integrity), "ok") {
+				data.DatabaseIntegrity = "ok"
+			} else {
+				data.DatabaseIntegrity = "failed"
+			}
+		}
+		if rows, err := h.db.QueryContext(ctx, "PRAGMA database_list"); err == nil {
+			for rows.Next() {
+				var sequence int
+				var name, file string
+				if rows.Scan(&sequence, &name, &file) == nil && name == "main" && file != "" {
+					if info, statErr := os.Stat(file); statErr == nil && info.Mode().IsRegular() {
+						data.DatabaseSizeBytes = info.Size()
+					}
+				}
+			}
+			_ = rows.Close()
+		}
 		cancel()
 		var active, backlog int64
 		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&active, &backlog)
 		h.metrics.SetExecutionState(active, backlog)
 	}
 	m := h.metrics.Snapshot()
+	if m.RuntimeWorkers > 0 {
+		data.WorkerStatus = "running"
+	} else {
+		data.WorkerStatus = "stopped"
+	}
 	snapshot.WorkerRunning = m.RuntimeWorkers > 0
 	snapshot.ProviderRequests = m.ProviderRequests
 	snapshot.ProviderFailures = m.ProviderFailures
@@ -472,9 +517,7 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 		activeAlerts = h.alerts.Evaluate(snapshot)
 		alertHistory = h.alerts.History()
 	}
-	h.render(c, pageData{
-		Title: "Operations Metrics", Active: "operations",
-		Counts: map[string]int64{
+	data.Counts = map[string]int64{
 			"HTTP requests":          int64(m.HTTPRequestCount),
 			"Model Gateway requests": int64(m.ModelGatewayCount),
 			"HTTP in flight":         m.HTTPRequestsInFlight,
@@ -483,9 +526,10 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 			"Execution backlog":      m.ExecutionBacklog,
 			"Usage write failures":   int64(m.UsageWriteFailures),
 			"Process uptime seconds": int64(m.ProcessUptimeSeconds),
-		},
-		ActiveAlerts: activeAlerts, AlertHistory: alertHistory,
-	}, http.StatusOK)
+		}
+	data.ActiveAlerts = activeAlerts
+	data.AlertHistory = alertHistory
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) usage(c *gin.Context) {
