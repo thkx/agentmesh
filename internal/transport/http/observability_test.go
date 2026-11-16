@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/observability"
 )
 
@@ -19,7 +19,7 @@ func TestRequestCorrelationMiddlewarePropagatesAndLogsIDs(t *testing.T) {
 	router := gin.New()
 	router.Use(requestCorrelationMiddleware(logger))
 	router.GET("/items/:id", func(c *gin.Context) {
-		if RequestIDFromContext(c.Request.Context()) == "" || TraceIDFromContext(c.Request.Context()) == "" {
+		if RequestIDFromContext(c.Request.Context()) == "" || TraceIDFromContext(c.Request.Context()) == "" || modelgateway.RequestIDFromContext(c.Request.Context()) != "client-request-1" {
 			t.Fatal("correlation IDs missing from request context")
 		}
 		c.Status(http.StatusNoContent)
@@ -38,7 +38,6 @@ func TestRequestCorrelationMiddlewarePropagatesAndLogsIDs(t *testing.T) {
 	if strings.Contains(logs.String(), "secret-value") {
 		t.Fatalf("concrete route parameter leaked into log: %s", logs.String())
 	}
-	_ = context.Background()
 }
 
 func TestRequestMetricsMiddlewareRecordsRegisteredRoute(t *testing.T) {
