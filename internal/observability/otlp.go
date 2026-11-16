@@ -37,11 +37,15 @@ func NewOTLPTraceProvider(endpoint string, headers map[string]string) (*sdktrace
 	}
 	copied := make(map[string]string, len(headers))
 	for name, value := range headers {
-		canonical := textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(name))
-		if canonical == "" || strings.ContainsAny(value, "\r\n") {
+		name = strings.TrimSpace(name)
+		if !validOTLPHeaderName(name) || strings.ContainsAny(value, "\r\n") {
 			return nil, errors.New("invalid OTLP header")
 		}
-		copied[canonical] = value
+		canonical := textproto.CanonicalMIMEHeaderKey(name)
+		if _, exists := copied[canonical]; exists {
+			return nil, errors.New("duplicate OTLP header")
+		}
+		copied[canonical] = strings.TrimSpace(value)
 	}
 	exporter := &otlpExporter{endpoint: normalized, headers: copied, client: &http.Client{Timeout: 8 * time.Second}}
 	res := resource.NewSchemaless(attribute.String("service.name", "agentmesh"))
