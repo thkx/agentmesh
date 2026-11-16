@@ -54,9 +54,15 @@ func (h *UsageHandler) summary(c *gin.Context) {
 	for costRows.Next() {
 		var currency string
 		var amount int64
-		if costRows.Scan(&currency, &amount) == nil {
-			costs = append(costs, gin.H{"currency": currency, "estimated_cost_micros": amount})
+		if scanErr := costRows.Scan(&currency, &amount); scanErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "usage cost summary unavailable"})
+			return
 		}
+		costs = append(costs, gin.H{"currency": currency, "estimated_cost_micros": amount})
+	}
+	if err = costRows.Err(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage cost summary unavailable"})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{"since": since.UTC(), "summary": out, "costs_by_currency": costs})
 }
