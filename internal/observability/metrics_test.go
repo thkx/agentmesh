@@ -63,16 +63,20 @@ func TestMetricsRecordsModelGatewayOperationsWithBoundedLabels(t *testing.T) {
 }
 
 func TestRuntimeAndLedgerMetricsAreExported(t *testing.T) {
-	metrics:=NewMetrics()
+	metrics := NewMetrics()
 	metrics.AddRuntimeWorkers(3)
-	metrics.SetExecutionState(4,12)
+	metrics.SetExecutionState(4, 12)
 	metrics.ObserveUsageWriteFailure()
-	metrics.ObserveModelGateway("generate","error",time.Second)
-	snapshot:=metrics.Snapshot()
-	if snapshot.RuntimeWorkers!=3||snapshot.ActiveExecutions!=4||snapshot.ExecutionBacklog!=12||snapshot.UsageWriteFailures!=1||snapshot.ProviderFailures!=1 { t.Fatalf("unexpected snapshot: %#v",snapshot) }
-	rec:=httptest.NewRecorder()
-	metrics.Handler().ServeHTTP(rec,httptest.NewRequest("GET","/metrics",nil))
-	for _,want:=range []string{"agentmesh_runtime_workers 3","agentmesh_active_executions 4","agentmesh_execution_backlog 12","agentmesh_usage_write_failures_total 1"} {
-		if !strings.Contains(rec.Body.String(),want){t.Fatalf("metrics output missing %q",want)}
+	metrics.ObserveModelGateway("generate", "error", time.Second)
+	snapshot := metrics.Snapshot()
+	if snapshot.RuntimeWorkers != 3 || snapshot.ActiveExecutions != 4 || snapshot.ExecutionBacklog != 12 || snapshot.UsageWriteFailures != 1 || snapshot.ProviderFailures != 1 {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	for _, want := range []string{"agentmesh_runtime_workers 3", "agentmesh_active_executions 4", "agentmesh_execution_backlog 12", "agentmesh_usage_write_failures_total 1"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics output missing %q", want)
+		}
 	}
 }
