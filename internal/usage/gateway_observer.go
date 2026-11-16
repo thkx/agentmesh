@@ -31,15 +31,15 @@ func (o GatewayObserver) ObserveModelUsage(ctx context.Context, providerID provi
 	}
 	err := o.Ledger.Record(ctx, Record{
 		IdempotencyKey: requestKey,
-		ProviderID: providerID,
-		ModelID: modelID,
-		OccurredAt: occurredAt,
-		Usage: tokens,
-		Source: source,
-		RequestID: requestKey,
-		TraceID: traceID,
-		ExecutionID: provenance.ExecutionID,
-		AttemptID: provenance.AttemptID,
+		ProviderID:     providerID,
+		ModelID:        modelID,
+		OccurredAt:     occurredAt,
+		Usage:          tokens,
+		Source:         source,
+		RequestID:      requestKey,
+		TraceID:        traceID,
+		ExecutionID:    provenance.ExecutionID,
+		AttemptID:      provenance.AttemptID,
 	})
 	if err != nil && o.OnError != nil {
 		o.OnError()
