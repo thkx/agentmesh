@@ -144,10 +144,10 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 }
 
 type Snapshot struct {
-	HTTPRequestCount       uint64
-	ModelGatewayCount      uint64
-	HTTPRequestsInFlight   int64
-	ProcessUptimeSeconds   float64
+	HTTPRequestCount     uint64
+	ModelGatewayCount    uint64
+	HTTPRequestsInFlight int64
+	ProcessUptimeSeconds float64
 }
 
 func (m *Metrics) Snapshot() Snapshot {
