@@ -5,10 +5,10 @@ import (
 	"context"
 	"crypto/ed25519"
 	"flag"
-	"time"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/thkx/agentmesh/internal/operations/upgrade"
 )
@@ -25,9 +25,17 @@ func main() {
 		signatureURL := fs.String("signature-url", "", "HTTPS URL for Ed25519 signature")
 		key := fs.String("public-key", "", "trusted Ed25519 public key (32 raw bytes)")
 		_ = fs.Parse(os.Args[2:])
-		if *manifestURL == "" || *signatureURL == "" || *key == "" { fatal("manifest-url, signature-url and public-key are required") }
-		pub, err := os.ReadFile(*key); if err != nil { fatal(err.Error()) }
-		m, err := upgrade.CheckRelease(context.Background(), *manifestURL, *signatureURL, ed25519.PublicKey(pub)); if err != nil { fatal(err.Error()) }
+		if *manifestURL == "" || *signatureURL == "" || *key == "" {
+			fatal("manifest-url, signature-url and public-key are required")
+		}
+		pub, err := os.ReadFile(*key)
+		if err != nil {
+			fatal(err.Error())
+		}
+		m, err := upgrade.CheckRelease(context.Background(), *manifestURL, *signatureURL, ed25519.PublicKey(pub))
+		if err != nil {
+			fatal(err.Error())
+		}
 		fmt.Printf("Signed release available: %s (%s/%s), published %s\n", m.Version, m.OS, m.Arch, m.PublishedAt.UTC().Format(time.RFC3339))
 	case "stage":
 		fs := flag.NewFlagSet("stage", flag.ExitOnError)
