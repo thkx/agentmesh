@@ -50,12 +50,12 @@ import (
 	toolpolicy "github.com/thkx/agentmesh/internal/tools/policy"
 	httptransport "github.com/thkx/agentmesh/internal/transport/http"
 	"github.com/thkx/agentmesh/internal/usage"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/sdk/trace"
 	workflowcheckpoint "github.com/thkx/agentmesh/internal/workflow/checkpoint"
 	workflowpolicy "github.com/thkx/agentmesh/internal/workflow/policy"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 // buildRuntime constructs isolated provider instances and the model registry from the persisted catalog.
@@ -288,13 +288,27 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	traceConfigured := false
 	if cfg.Tracing.Enabled {
 		headersEnv := cfg.Tracing.HeadersEnv
-		if headersEnv == "" { headersEnv = "AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS" }
+		if headersEnv == "" {
+			headersEnv = "AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS"
+		}
 		headers, headerErr := observability.OTLPHeadersFromEnv(headersEnv)
-		if headerErr != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("parse OTLP headers: %w", headerErr) }
+		if headerErr != nil {
+			_ = sqliteDB.Close()
+			return nil, fmt.Errorf("parse OTLP headers: %w", headerErr)
+		}
 		traceProvider, err = observability.NewOTLPTraceProvider(cfg.Tracing.OTLPEndpoint, headers)
-		if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize OTLP tracing: %w", err) }
+		if err != nil {
+			_ = sqliteDB.Close()
+			return nil, fmt.Errorf("initialize OTLP tracing: %w", err)
+		}
 		otel.SetTracerProvider(traceProvider)
-		defer func() { if !traceConfigured && traceProvider != nil { shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second); defer cancel(); _ = traceProvider.Shutdown(shutdownCtx) } }()
+		defer func() {
+			if !traceConfigured && traceProvider != nil {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = traceProvider.Shutdown(shutdownCtx)
+			}
+		}()
 	}
 	// Agent Runtime, Workflow, Planner and Evaluator all share this gateway.
 	// Matching AI resource model keys are routed through the persisted
