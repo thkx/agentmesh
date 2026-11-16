@@ -141,7 +141,7 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	if m == nil {
 		return
 	}
-	if operation != "generate" && operation != "stream_open" {
+	if operation != "generate" && operation != "stream_open" && operation != "stream" {
 		operation = "other"
 	}
 	switch outcome {
