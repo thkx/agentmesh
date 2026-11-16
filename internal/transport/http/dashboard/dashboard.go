@@ -126,7 +126,11 @@ type pageData struct {
 	RunResult        string
 	ActiveAlerts     []observability.Alert
 	AlertHistory     []observability.Alert
-	OperationsVersion string
+	OperationsHealth operationsHealthView
+}
+
+type operationsHealthView struct {
+	Version           string
 	DatabaseReady     bool
 	DatabaseIntegrity string
 	SchemaVersion     uint
@@ -461,26 +465,26 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
 	data := pageData{Title: "Operations Metrics", Active: "operations", DatabaseIntegrity: "unknown"}
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
-		data.OperationsVersion = info.Main.Version
+		data.OperationsHealth.Version = info.Main.Version
 	} else {
-		data.OperationsVersion = "development"
+		data.OperationsHealth.Version = "development"
 	}
 	if h.db != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		snapshot.DatabaseAvailable = h.db.PingContext(ctx) == nil
-		data.DatabaseReady = snapshot.DatabaseAvailable
+		data.OperationsHealth.DatabaseReady = snapshot.DatabaseAvailable
 		var version uint
 		var dirty bool
 		if err := h.db.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version, &dirty); err == nil {
-			data.SchemaVersion = version
-			data.MigrationDirty = dirty
+			data.OperationsHealth.SchemaVersion = version
+			data.OperationsHealth.MigrationDirty = dirty
 		}
 		var integrity string
 		if err := h.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&integrity); err == nil {
 			if strings.EqualFold(strings.TrimSpace(integrity), "ok") {
-				data.DatabaseIntegrity = "ok"
+				data.OperationsHealth.DatabaseIntegrity = "ok"
 			} else {
-				data.DatabaseIntegrity = "failed"
+				data.OperationsHealth.DatabaseIntegrity = "failed"
 			}
 		}
 		if rows, err := h.db.QueryContext(ctx, "PRAGMA database_list"); err == nil {
@@ -489,7 +493,7 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 				var name, file string
 				if rows.Scan(&sequence, &name, &file) == nil && name == "main" && file != "" {
 					if info, statErr := os.Stat(file); statErr == nil && info.Mode().IsRegular() {
-						data.DatabaseSizeBytes = info.Size()
+						data.OperationsHealth.DatabaseSizeBytes = info.Size()
 					}
 				}
 			}
@@ -502,9 +506,9 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	}
 	m := h.metrics.Snapshot()
 	if m.RuntimeWorkers > 0 {
-		data.WorkerStatus = "running"
+		data.OperationsHealth.WorkerStatus = "running"
 	} else {
-		data.WorkerStatus = "stopped"
+		data.OperationsHealth.WorkerStatus = "stopped"
 	}
 	snapshot.WorkerRunning = m.RuntimeWorkers > 0
 	snapshot.ProviderRequests = m.ProviderRequests
