@@ -93,7 +93,7 @@ func (h *UsageHandler) byModel(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 func (h *UsageHandler) listRates(c *gin.Context) {
-	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT id,provider_id,model_id,currency,input_rate_micros_per_million,output_rate_micros_per_million,effective_at FROM model_pricing_rates ORDER BY provider_id,model_id,effective_at DESC LIMIT 500`)
+	rows, err := h.db.QueryContext(c.Request.Context(), `SELECT id,provider_id,model_id,currency,input_rate_micros_per_million,output_rate_micros_per_million,effective_at FROM model_pricing_rates ORDER BY provider_id,model_id,effective_at DESC,created_at DESC,id DESC LIMIT 500`)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "pricing rates unavailable"})
 		return
@@ -135,8 +135,15 @@ func (h *UsageHandler) setRate(c *gin.Context) {
 	in.ProviderID = strings.TrimSpace(in.ProviderID)
 	in.ModelID = strings.TrimSpace(in.ModelID)
 	in.Currency = strings.ToUpper(strings.TrimSpace(in.Currency))
-	if in.ProviderID == "" || in.ModelID == "" || len(in.Currency) != 3 || in.InputRate < 0 || in.OutputRate < 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "provider, model, three-letter currency and non-negative rates are required"})
+	validCurrency := len(in.Currency) == 3
+	for _, r := range in.Currency {
+		if r < 'A' || r > 'Z' {
+			validCurrency = false
+			break
+		}
+	}
+	if in.ProviderID == "" || in.ModelID == "" || !validCurrency || in.InputRate < 0 || in.OutputRate < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "provider, model, three-letter ISO currency code and non-negative rates are required"})
 		return
 	}
 	effective := time.Now().UTC()
