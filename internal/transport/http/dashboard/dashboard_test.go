@@ -165,11 +165,16 @@ func TestDashboardRejectsTamperedAndExpiredSessions(t *testing.T) {
 	}
 
 	tampered := *session
-	last := byte('x')
-	if tampered.Value[len(tampered.Value)-1] == last {
-		last = 'y'
+	parts := strings.Split(tampered.Value, ".")
+	if len(parts) != 2 || len(parts[1]) == 0 {
+		t.Fatalf("unexpected session cookie format: %q", tampered.Value)
 	}
-	tampered.Value = tampered.Value[:len(tampered.Value)-1] + string(last)
+	replacement := byte('A')
+	if parts[1][0] == replacement {
+		replacement = 'B'
+	}
+	parts[1] = string(replacement) + parts[1][1:]
+	tampered.Value = strings.Join(parts, ".")
 	tamperedReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
 	tamperedReq.AddCookie(&tampered)
 	tamperedRec := httptest.NewRecorder()
