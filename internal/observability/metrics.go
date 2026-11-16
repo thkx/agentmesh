@@ -184,9 +184,9 @@ func (m *Metrics) Handler() http.Handler {
 		for _, key := range modelKeys {
 			stats := modelSnapshot[key]
 			labels := fmt.Sprintf("operation=%s,outcome=%s", strconv.Quote(key.operation), strconv.Quote(key.outcome))
-			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_requests_total{%s} %d\\n", labels, stats.count)
-			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_sum{%s} %s\\n", labels, strconv.FormatFloat(stats.sum, 'f', -1, 64))
-			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_count{%s} %d\\n", labels, stats.count)
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_requests_total{%s} %d\n", labels, stats.count)
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_sum{%s} %s\n", labels, strconv.FormatFloat(stats.sum, 'f', -1, 64))
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_count{%s} %d\n", labels, stats.count)
 		}
 		_, _ = fmt.Fprintln(w, "# HELP agentmesh_http_requests_in_flight Current number of HTTP requests being handled.")
 		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_http_requests_in_flight gauge")
