@@ -2,6 +2,8 @@ package modelgateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -46,8 +48,13 @@ type Observer interface {
 	ObserveModelGateway(operation, outcome string, elapsed time.Duration)
 }
 
+type UsageObserver interface {
+	ObserveModelUsage(context.Context, provider.ID, string, Usage, time.Time, string)
+}
+
 type Gateway struct {
 	observer      Observer
+	usageObserver UsageObserver
 	registry      *Registry
 	resolver      Resolver
 	providers     *provider.ProviderRegistry
@@ -58,6 +65,9 @@ type Gateway struct {
 func (g *Gateway) SetObserver(observer Observer) {
 	g.observer = observer
 }
+
+// SetUsageObserver installs the durable usage ledger observer before serving requests.
+func (g *Gateway) SetUsageObserver(observer UsageObserver) { g.usageObserver = observer }
 
 // SetDynamicRouter installs the optional database-backed credential router.
 // Bootstrap must call this before the gateway starts serving requests.
@@ -123,6 +133,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 				return nil, ErrNilResponse
 			}
 			normalizeResponse(resp, model)
+			g.observeUsage(ctx, resp, usageKey(resp.ID))
 			return resp, nil
 		}
 	}
@@ -146,6 +157,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 	}
 
 	normalizeResponse(resp, model)
+	g.observeUsage(ctx, resp, usageKey(resp.ID))
 
 	return resp, nil
 }
@@ -194,7 +206,9 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 				return nil, ErrNilStream
 			}
 			output := make(chan StreamEvent)
+			requestKey := usageKey("")
 			go func() {
+				usageRecorded := false
 				defer close(output)
 				for {
 					select {
@@ -205,6 +219,8 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 							return
 						}
 						normalizeStreamEvent(&event, model)
+						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil { g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey); usageRecorded = true }
+						if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil { g.observeUsage(ctx, event.Response, requestKey); usageRecorded = true }
 						select {
 						case output <- event:
 						case <-ctx.Done():
@@ -247,8 +263,10 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 	}
 
 	output := make(chan StreamEvent)
+	requestKey := usageKey("")
 
 	go func() {
+		usageRecorded := false
 		defer close(output)
 
 		for {
@@ -262,6 +280,8 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 				}
 
 				normalizeStreamEvent(&event, model)
+				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil { g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey); usageRecorded = true }
+				if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil { g.observeUsage(ctx, event.Response, requestKey); usageRecorded = true }
 
 				select {
 				case output <- event:
@@ -277,6 +297,23 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 	}()
 
 	return output, nil
+}
+
+func (g *Gateway) observeUsage(ctx context.Context, response *GenerateResponse, key string) {
+    if response == nil { return }
+    g.observeUsageValues(ctx, response.ProviderID, response.ModelID, response.Usage, response.CreatedAt, key)
+}
+func (g *Gateway) observeUsageValues(ctx context.Context, providerID provider.ID, modelID string, usage Usage, occurredAt time.Time, key string) {
+    if g == nil || g.usageObserver == nil || providerID == "" || modelID == "" { return }
+    usage.Normalize()
+    if occurredAt.IsZero() { occurredAt = time.Now().UTC() }
+    g.usageObserver.ObserveModelUsage(ctx, providerID, modelID, usage, occurredAt, key)
+}
+func usageKey(existing string) string {
+    if existing != "" { return existing }
+    var b [16]byte
+    if _, err := rand.Read(b[:]); err == nil { return hex.EncodeToString(b[:]) }
+    return fmt.Sprintf("usage-%d", time.Now().UnixNano())
 }
 
 func (g *Gateway) observe(operation string, started time.Time, err error) {
