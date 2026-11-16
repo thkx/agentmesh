@@ -22,7 +22,7 @@ type AlertSnapshot struct {
 	ProviderRequests      uint64
 	ProviderFailures      uint64
 	ReconciliationBacklog int64
-	UsageWriteFailures uint64
+	UsageWriteFailures    uint64
 	ObservedAt            time.Time
 }
 
