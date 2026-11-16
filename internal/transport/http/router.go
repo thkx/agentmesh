@@ -133,6 +133,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.DB != nil {
 		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
 		handlers.NewUnifiedExecutionHandler(deps.DB).RegisterRoutes(api)
+		handlers.NewUsageHandler(deps.DB).RegisterRoutes(api)
 	}
 	if deps.CodingService != nil {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
