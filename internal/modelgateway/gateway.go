@@ -47,7 +47,7 @@ type Observer interface {
 }
 
 type Gateway struct {
-	observer Observer
+	observer      Observer
 	registry      *Registry
 	resolver      Resolver
 	providers     *provider.ProviderRegistry
@@ -278,7 +278,6 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 
 	return output, nil
 }
-
 
 func (g *Gateway) observe(operation string, started time.Time, err error) {
 	if g == nil || g.observer == nil {
