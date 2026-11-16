@@ -117,6 +117,7 @@ type pageData struct {
 	UsageLimit       int
 	UsageOffset      int
 	UsageNextOffset  int
+	UsagePrevOffset  int
 	UsageHasMore     bool
 	TimelineHasMore  bool
 	TimelineNextURL  string
@@ -470,7 +471,7 @@ func (h *Handler) usage(c *gin.Context) {
 	if raw:=c.Query("limit");raw!="" { if n,err:=strconv.Atoi(raw);err==nil&&n>=1&&n<=200 { limit=n } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"limit must be between 1 and 200"},http.StatusBadRequest);return } }
 	offset:=0
 	if raw:=c.Query("offset");raw!="" { if n,err:=strconv.Atoi(raw);err==nil&&n>=0&&n<=1000000 { offset=n } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"offset must be between 0 and 1000000"},http.StatusBadRequest);return } }
-	data:=pageData{Title:"Model Usage & Cost",Active:"usage",Counts:map[string]int64{},UsageSince:since.Format(time.RFC3339),UsageUntil:until.Format(time.RFC3339),UsageLimit:limit,UsageOffset:offset,UsageNextOffset:offset+limit}
+	data:=pageData{Title:"Model Usage & Cost",Active:"usage",Counts:map[string]int64{},UsageSince:since.Format(time.RFC3339),UsageUntil:until.Format(time.RFC3339),UsageLimit:limit,UsageOffset:offset,UsagePrevOffset:max(0,offset-limit),UsageNextOffset:offset+limit}
 	if h.db!=nil {
 		var requestCount, inputTokens, outputTokens int64
 		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<?`, since.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano)).Scan(&requestCount, &inputTokens, &outputTokens)
