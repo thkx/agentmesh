@@ -20,6 +20,16 @@ type requestKey struct {
 	status int
 }
 
+type modelRequestKey struct {
+	operation string
+	outcome string
+}
+
+type modelRequestStats struct {
+	count uint64
+	sum float64
+}
+
 type requestStats struct {
 	count   uint64
 	sum     float64
@@ -33,10 +43,11 @@ type Metrics struct {
 	inFlight atomic.Int64
 	mu       sync.RWMutex
 	requests map[requestKey]*requestStats
+	modelRequests map[modelRequestKey]*modelRequestStats
 }
 
 func NewMetrics() *Metrics {
-	return &Metrics{started: time.Now().UTC(), requests: make(map[requestKey]*requestStats)}
+	return &Metrics{started: time.Now().UTC(), requests: make(map[requestKey]*requestStats), modelRequests: make(map[modelRequestKey]*modelRequestStats)}
 }
 
 func (m *Metrics) BeginRequest() {
@@ -104,6 +115,16 @@ func normalizeRoute(route string) string {
 	return route
 }
 
+func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Duration) {
+	if m == nil { return }
+	if operation != "generate" && operation != "stream_open" { operation = "other" }
+	switch outcome { case "success", "error", "canceled": default: outcome = "error" }
+	seconds := elapsed.Seconds(); if seconds < 0 { seconds = 0 }
+	key := modelRequestKey{operation: operation, outcome: outcome}
+	m.mu.Lock(); defer m.mu.Unlock()
+	stats := m.modelRequests[key]; if stats == nil { stats = &modelRequestStats{}; m.modelRequests[key] = stats }
+	stats.count++; stats.sum += seconds
+}
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -150,6 +171,23 @@ func (m *Metrics) Handler() http.Handler {
 			_, _ = fmt.Fprintf(w, "agentmesh_http_request_duration_seconds_count{%s} %d\n", labels, stats.count)
 		}
 
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_model_gateway_requests_total Model Gateway requests by operation and outcome.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_model_gateway_requests_total counter")
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_model_gateway_request_duration_seconds Model Gateway operation setup duration in seconds.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_model_gateway_request_duration_seconds summary")
+		m.mu.RLock()
+		modelKeys := make([]modelRequestKey, 0, len(m.modelRequests))
+		modelSnapshot := make(map[modelRequestKey]modelRequestStats, len(m.modelRequests))
+		for key, value := range m.modelRequests { modelKeys = append(modelKeys, key); modelSnapshot[key] = *value }
+		m.mu.RUnlock()
+		sort.Slice(modelKeys, func(i, j int) bool { if modelKeys[i].operation != modelKeys[j].operation { return modelKeys[i].operation < modelKeys[j].operation }; return modelKeys[i].outcome < modelKeys[j].outcome })
+		for _, key := range modelKeys {
+			stats := modelSnapshot[key]
+			labels := fmt.Sprintf("operation=%s,outcome=%s", strconv.Quote(key.operation), strconv.Quote(key.outcome))
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_requests_total{%s} %d\\n", labels, stats.count)
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_sum{%s} %s\\n", labels, strconv.FormatFloat(stats.sum, 'f', -1, 64))
+			_, _ = fmt.Fprintf(w, "agentmesh_model_gateway_request_duration_seconds_count{%s} %d\\n", labels, stats.count)
+		}
 		_, _ = fmt.Fprintln(w, "# HELP agentmesh_http_requests_in_flight Current number of HTTP requests being handled.")
 		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_http_requests_in_flight gauge")
 		_, _ = fmt.Fprintf(w, "agentmesh_http_requests_in_flight %d\n", m.inFlight.Load())
