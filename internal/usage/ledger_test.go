@@ -118,3 +118,42 @@ func TestLedgerNormalizesAndValidatesCurrencyCodes(t *testing.T) {
 		t.Fatal("invalid currency code accepted")
 	}
 }
+
+func TestLedgerSummaryDoesNotCombineCurrencies(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`CREATE TABLE model_usage_events (
+		id TEXT PRIMARY KEY, idempotency_key TEXT UNIQUE, provider_id TEXT, model_id TEXT,
+		occurred_at TEXT, input_tokens INTEGER, output_tokens INTEGER, total_tokens INTEGER,
+		cached_input_tokens INTEGER, reasoning_tokens INTEGER, usage_source TEXT,
+		currency TEXT, input_rate_micros_per_million INTEGER, output_rate_micros_per_million INTEGER,
+		estimated_cost_micros INTEGER, request_id TEXT, trace_id TEXT, execution_id TEXT,
+		attempt_id TEXT, created_at TEXT
+	);
+	INSERT INTO model_usage_events(id,idempotency_key,provider_id,model_id,occurred_at,input_tokens,output_tokens,total_tokens,usage_source,currency,estimated_cost_micros)
+	VALUES
+	('1','1','openai','model-a','2026-11-15T10:00:00Z',10,2,12,'provider_reported','USD',100),
+	('2','2','openai','model-a','2026-11-15T11:00:00Z',20,3,23,'provider_reported','EUR',250),
+	('3','3','other','model-b','2026-11-15T12:00:00Z',NULL,NULL,NULL,'unavailable',NULL,NULL);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := NewLedger(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := ledger.Summary(context.Background(), time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Requests != 3 || summary.UnavailableUsage != 1 || len(summary.CostsByCurrency) != 2 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	if summary.CostsByCurrency[0] != (CurrencyCost{Currency: "EUR", EstimatedCostMicros: 250}) ||
+		summary.CostsByCurrency[1] != (CurrencyCost{Currency: "USD", EstimatedCostMicros: 100}) {
+		t.Fatalf("currency totals were not kept separate: %#v", summary.CostsByCurrency)
+	}
+}
