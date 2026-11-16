@@ -39,3 +39,24 @@ func TestDashboardBrowserSessionDoesNotAuthorizeAPI(t *testing.T) {
 		t.Fatalf("Dashboard cookie unexpectedly authorized API request: status=%d body=%s", apiResponse.Code, apiResponse.Body.String())
 	}
 }
+
+func TestWorkflowEditorAssetsAreServedFromWebDirectory(t *testing.T) {
+	handler := NewRouter(Dependencies{})
+	for _, tc := range []struct {
+		path        string
+		contentType string
+		want        string
+	}{
+		{path: "/workflow-editor", contentType: "text/html", want: "AgentMesh Workflow Editor"},
+		{path: "/workflow-editor/app.js", contentType: "javascript", want: "workflowId"},
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d: %s", tc.path, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), tc.contentType) || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Fatalf("%s did not serve the expected embedded asset", tc.path)
+		}
+	}
+}
