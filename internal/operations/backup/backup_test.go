@@ -117,6 +117,16 @@ func TestListAndPruneOnlyVerifiedArchives(t *testing.T) {
 	if len(items) != 3 {
 		t.Fatalf("listed %d backups, want 3", len(items))
 	}
+	corrupt := filepath.Join(directory, "corrupt.backup")
+	if err = os.WriteFile(corrupt, []byte("not an encrypted archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Prune(directory, passphrase, 1); err == nil {
+		t.Fatal("prune ignored an unverifiable archive")
+	}
+	if err = os.Remove(corrupt); err != nil {
+		t.Fatal(err)
+	}
 	removed, err := Prune(directory, passphrase, 1)
 	if err != nil {
 		t.Fatal(err)
