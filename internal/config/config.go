@@ -11,6 +11,7 @@ type Config struct {
 	Models    []ModelConfig    `koanf:"models"`
 	Agent     AgentConfig      `koanf:"agent"`
 	Scheduler SchedulerConfig  `koanf:"scheduler"`
+	Tracing   TracingConfig    `koanf:"tracing"`
 }
 
 type AppConfig struct {
@@ -100,4 +101,10 @@ type SchedulerConfig struct {
 	PollInterval  time.Duration `koanf:"poll_interval"`
 	LeaseDuration time.Duration `koanf:"lease_duration"`
 	MaxAttempts   int           `koanf:"max_attempts"`
+}
+
+type TracingConfig struct {
+	Enabled bool `koanf:"enabled"`
+	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	HeadersEnv string `koanf:"headers_env"`
 }
