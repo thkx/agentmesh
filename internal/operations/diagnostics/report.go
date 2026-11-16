@@ -21,8 +21,12 @@ var (
 type Input struct {
 	Version       string
 	StartedAt     time.Time
-	DatabaseReady bool
-	WorkerCount   int
+	DatabaseReady       bool
+	SchemaVersion       uint
+	MigrationDirty      bool
+	DatabaseIntegrity   string
+	DatabaseSizeBytes   int64
+	WorkerCount         int
 	Metrics       map[string]int64
 	RecentLogs    []string
 }
@@ -32,8 +36,12 @@ type Report struct {
 	GeneratedAt   time.Time        `json:"generated_at"`
 	Version       string           `json:"version"`
 	UptimeSeconds int64            `json:"uptime_seconds"`
-	DatabaseReady bool             `json:"database_ready"`
-	WorkerCount   int              `json:"worker_count"`
+	DatabaseReady     bool             `json:"database_ready"`
+	SchemaVersion     uint             `json:"schema_version"`
+	MigrationDirty    bool             `json:"migration_dirty"`
+	DatabaseIntegrity string           `json:"database_integrity"`
+	DatabaseSizeBytes int64            `json:"database_size_bytes"`
+	WorkerCount       int              `json:"worker_count"`
 	Metrics       map[string]int64 `json:"metrics"`
 	RecentLogs    []string         `json:"recent_logs"`
 	ReportID      string           `json:"report_id"`
@@ -70,7 +78,14 @@ func Build(in Input, now time.Time) Report {
 	}
 	seed := now.UTC().Format(time.RFC3339Nano) + in.Version
 	sum := sha256.Sum256([]byte(seed))
-	return Report{GeneratedAt: now.UTC(), Version: safeVersion(in.Version), UptimeSeconds: uptime, DatabaseReady: in.DatabaseReady, WorkerCount: max(0, in.WorkerCount), Metrics: metrics, RecentLogs: logs, ReportID: hex.EncodeToString(sum[:8])}
+	integrity := "unknown"
+	switch strings.ToLower(strings.TrimSpace(in.DatabaseIntegrity)) {
+	case "ok":
+		integrity = "ok"
+	case "failed":
+		integrity = "failed"
+	}
+	return Report{GeneratedAt: now.UTC(), Version: safeVersion(in.Version), UptimeSeconds: uptime, DatabaseReady: in.DatabaseReady, SchemaVersion: in.SchemaVersion, MigrationDirty: in.MigrationDirty, DatabaseIntegrity: integrity, DatabaseSizeBytes: max(0, in.DatabaseSizeBytes), WorkerCount: max(0, in.WorkerCount), Metrics: metrics, RecentLogs: logs, ReportID: hex.EncodeToString(sum[:8])}
 }
 
 // Redact removes common secret forms, URL credentials/query strings, and
