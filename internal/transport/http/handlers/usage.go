@@ -31,11 +31,11 @@ func (h *UsageHandler) summary(c *gin.Context) {
 		since = parsed
 	}
 	var out struct {
-		Requests            int64 `json:"requests"`
-		InputTokens         int64 `json:"input_tokens"`
-		OutputTokens        int64 `json:"output_tokens"`
-		TotalTokens         int64 `json:"total_tokens"`
-		UnavailableUsage    int64 `json:"unavailable_usage"`
+		Requests         int64 `json:"requests"`
+		InputTokens      int64 `json:"input_tokens"`
+		OutputTokens     int64 `json:"output_tokens"`
+		TotalTokens      int64 `json:"total_tokens"`
+		UnavailableUsage int64 `json:"unavailable_usage"`
 	}
 	err := h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(total_tokens),0),COALESCE(SUM(CASE WHEN usage_source='unavailable' THEN 1 ELSE 0 END),0) FROM model_usage_events WHERE occurred_at>=?`, since.UTC().Format(time.RFC3339Nano)).Scan(&out.Requests, &out.InputTokens, &out.OutputTokens, &out.TotalTokens, &out.UnavailableUsage)
 	if err != nil {
@@ -43,11 +43,20 @@ func (h *UsageHandler) summary(c *gin.Context) {
 		return
 	}
 	costRows, costErr := h.db.QueryContext(c.Request.Context(), "SELECT currency,COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND currency IS NOT NULL GROUP BY currency ORDER BY currency", since.UTC().Format(time.RFC3339Nano))
-	if costErr != nil { c.JSON(http.StatusInternalServerError, gin.H{"error":"usage cost summary unavailable"}); return }
+	if costErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "usage cost summary unavailable"})
+		return
+	}
 	defer costRows.Close()
-	costs := make([]gin.H,0)
-	for costRows.Next() { var currency string; var amount int64; if costRows.Scan(&currency,&amount)==nil { costs=append(costs,gin.H{"currency":currency,"estimated_cost_micros":amount}) } }
-	c.JSON(http.StatusOK, gin.H{"since": since.UTC(), "summary": out, "costs_by_currency":costs})
+	costs := make([]gin.H, 0)
+	for costRows.Next() {
+		var currency string
+		var amount int64
+		if costRows.Scan(&currency, &amount) == nil {
+			costs = append(costs, gin.H{"currency": currency, "estimated_cost_micros": amount})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"since": since.UTC(), "summary": out, "costs_by_currency": costs})
 }
 func (h *UsageHandler) byModel(c *gin.Context) {
 	since := time.Now().UTC().Add(-30 * 24 * time.Hour)
