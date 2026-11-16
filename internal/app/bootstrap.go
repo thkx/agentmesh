@@ -628,13 +628,20 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize memory service: %w", err)
 	}
 	planExecutionService.SetMemoryRetriever(memoryService)
+	workflowExecutionContext := func(workCtx context.Context, runID string) context.Context {
+		var executionID, attemptID string
+		err := sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM executions WHERE runtime='workflow' AND (runtime_ref=? OR task_id=?) ORDER BY created_at DESC LIMIT 1`, runID, runID).Scan(&executionID)
+		if err != nil { return workCtx }
+		_ = sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM execution_attempts WHERE execution_id=? AND status='running' ORDER BY attempt_number DESC LIMIT 1`, executionID).Scan(&attemptID)
+		return modelgateway.WithExecutionProvenance(workCtx, executionID, attemptID)
+	}
 	workflowWorkers := make([]*wfruntime.Worker, 0, workerCount)
 	for i := 0; i < workerCount; i++ {
 		workerID := cfg.Scheduler.WorkerID
 		if workerID != "" {
 			workerID = fmt.Sprintf("%s-workflow-%d", workerID, i+1)
 		}
-		workflowWorker, workerErr := wfruntime.NewWorker(workflowStore, workflowEngine, wfruntime.WorkerConfig{ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration, Logger: log})
+		workflowWorker, workerErr := wfruntime.NewWorker(workflowStore, workflowEngine, wfruntime.WorkerConfig{ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration, Logger: log, ExecutionContext: workflowExecutionContext})
 		if workerErr != nil {
 			workerCancel()
 			workerWG.Wait()
