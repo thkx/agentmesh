@@ -122,8 +122,8 @@ type pageData struct {
 	TimelineHasMore  bool
 	TimelineNextURL  string
 	RunResult        string
-	ActiveAlerts      []observability.Alert
-	AlertHistory      []observability.Alert
+	ActiveAlerts     []observability.Alert
+	AlertHistory     []observability.Alert
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -180,7 +180,10 @@ type usageView struct {
 	ProviderID, ModelID, Currency                   string
 	Requests, InputTokens, OutputTokens, CostMicros int64
 }
-type usageEventView struct { ID, OccurredAt, ProviderID, ModelID, Source, Currency, ExecutionID, AttemptID string; InputTokens, OutputTokens, CostMicros int64 }
+type usageEventView struct {
+	ID, OccurredAt, ProviderID, ModelID, Source, Currency, ExecutionID, AttemptID string
+	InputTokens, OutputTokens, CostMicros                                         int64
+}
 type eventView struct {
 	Stream, Type, Actor, Source, Payload, OccurredAt string
 	Sequence                                         int64
@@ -199,7 +202,9 @@ type executionDetail struct {
 
 func New(d Dependencies) *Handler {
 	metrics := d.Metrics
-	if metrics == nil { metrics = observability.NewMetrics() }
+	if metrics == nil {
+		metrics = observability.NewMetrics()
+	}
 	t := template.Must(template.ParseFS(webassets.Assets, "dashboard/templates/*.html"))
 	h := &Handler{
 		db:                  d.DB,
@@ -448,13 +453,13 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	h.render(c, pageData{
 		Title: "Operations Metrics", Active: "operations",
 		Counts: map[string]int64{
-			"HTTP requests": int64(m.HTTPRequestCount),
+			"HTTP requests":          int64(m.HTTPRequestCount),
 			"Model Gateway requests": int64(m.ModelGatewayCount),
-			"HTTP in flight": m.HTTPRequestsInFlight,
-			"Runtime workers": m.RuntimeWorkers,
-			"Active executions": m.ActiveExecutions,
-			"Execution backlog": m.ExecutionBacklog,
-			"Usage write failures": int64(m.UsageWriteFailures),
+			"HTTP in flight":         m.HTTPRequestsInFlight,
+			"Runtime workers":        m.RuntimeWorkers,
+			"Active executions":      m.ActiveExecutions,
+			"Execution backlog":      m.ExecutionBacklog,
+			"Usage write failures":   int64(m.UsageWriteFailures),
 			"Process uptime seconds": int64(m.ProcessUptimeSeconds),
 		},
 		ActiveAlerts: activeAlerts, AlertHistory: alertHistory,
@@ -463,28 +468,79 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 
 func (h *Handler) usage(c *gin.Context) {
 	now := time.Now().UTC()
-	since := now.Add(-30*24*time.Hour)
-	if raw:=c.Query("since");raw!="" { if parsed,err:=time.Parse(time.RFC3339,raw);err==nil { since=parsed.UTC() } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"since must be RFC3339"},http.StatusBadRequest);return } }
-	until:=now
-	if raw:=c.Query("until");raw!="" { if parsed,err:=time.Parse(time.RFC3339,raw);err==nil { until=parsed.UTC() } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"until must be RFC3339"},http.StatusBadRequest);return } }
-	if !until.After(since) { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"until must be later than since"},http.StatusBadRequest);return }
-	limit:=50
-	if raw:=c.Query("limit");raw!="" { if n,err:=strconv.Atoi(raw);err==nil&&n>=1&&n<=200 { limit=n } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"limit must be between 1 and 200"},http.StatusBadRequest);return } }
-	offset:=0
-	if raw:=c.Query("offset");raw!="" { if n,err:=strconv.Atoi(raw);err==nil&&n>=0&&n<=1000000 { offset=n } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"offset must be between 0 and 1000000"},http.StatusBadRequest);return } }
-	data:=pageData{Title:"Model Usage & Cost",Active:"usage",Counts:map[string]int64{},UsageSince:since.Format(time.RFC3339),UsageUntil:until.Format(time.RFC3339),UsageLimit:limit,UsageOffset:offset,UsagePrevOffset:max(0,offset-limit),UsageNextOffset:offset+limit}
-	if h.db!=nil {
+	since := now.Add(-30 * 24 * time.Hour)
+	if raw := c.Query("since"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			since = parsed.UTC()
+		} else {
+			h.render(c, pageData{Title: "Model Usage & Cost", Active: "usage", Error: "since must be RFC3339"}, http.StatusBadRequest)
+			return
+		}
+	}
+	until := now
+	if raw := c.Query("until"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			until = parsed.UTC()
+		} else {
+			h.render(c, pageData{Title: "Model Usage & Cost", Active: "usage", Error: "until must be RFC3339"}, http.StatusBadRequest)
+			return
+		}
+	}
+	if !until.After(since) {
+		h.render(c, pageData{Title: "Model Usage & Cost", Active: "usage", Error: "until must be later than since"}, http.StatusBadRequest)
+		return
+	}
+	limit := 50
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 200 {
+			limit = n
+		} else {
+			h.render(c, pageData{Title: "Model Usage & Cost", Active: "usage", Error: "limit must be between 1 and 200"}, http.StatusBadRequest)
+			return
+		}
+	}
+	offset := 0
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n >= 0 && n <= 1000000 {
+			offset = n
+		} else {
+			h.render(c, pageData{Title: "Model Usage & Cost", Active: "usage", Error: "offset must be between 0 and 1000000"}, http.StatusBadRequest)
+			return
+		}
+	}
+	data := pageData{Title: "Model Usage & Cost", Active: "usage", Counts: map[string]int64{}, UsageSince: since.Format(time.RFC3339), UsageUntil: until.Format(time.RFC3339), UsageLimit: limit, UsageOffset: offset, UsagePrevOffset: max(0, offset-limit), UsageNextOffset: offset + limit}
+	if h.db != nil {
 		var requestCount, inputTokens, outputTokens int64
 		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<?`, since.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano)).Scan(&requestCount, &inputTokens, &outputTokens)
 		data.Counts["Requests"] = requestCount
 		data.Counts["Input tokens"] = inputTokens
 		data.Counts["Output tokens"] = outputTokens
-		rows,err:=h.db.QueryContext(c.Request.Context(),`SELECT provider_id,model_id,COALESCE(currency,''),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? GROUP BY provider_id,model_id,currency ORDER BY SUM(total_tokens) DESC LIMIT 100`,since.Format(time.RFC3339Nano),until.Format(time.RFC3339Nano))
-		if err==nil { defer rows.Close(); for rows.Next(){var item usageView;if rows.Scan(&item.ProviderID,&item.ModelID,&item.Currency,&item.Requests,&item.InputTokens,&item.OutputTokens,&item.CostMicros)==nil{data.UsageRows=append(data.UsageRows,item)}} }
-		eventRows,eventErr:=h.db.QueryContext(c.Request.Context(),`SELECT id,occurred_at,provider_id,model_id,usage_source,COALESCE(currency,''),COALESCE(input_tokens,0),COALESCE(output_tokens,0),COALESCE(estimated_cost_micros,0),COALESCE(execution_id,''),COALESCE(attempt_id,'') FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? ORDER BY occurred_at DESC,id DESC LIMIT ? OFFSET ?`,since.Format(time.RFC3339Nano),until.Format(time.RFC3339Nano),limit+1,offset)
-		if eventErr==nil { defer eventRows.Close(); for eventRows.Next(){var item usageEventView;if eventRows.Scan(&item.ID,&item.OccurredAt,&item.ProviderID,&item.ModelID,&item.Source,&item.Currency,&item.InputTokens,&item.OutputTokens,&item.CostMicros,&item.ExecutionID,&item.AttemptID)==nil{data.UsageEvents=append(data.UsageEvents,item)}};data.UsageHasMore=len(data.UsageEvents)>limit;if data.UsageHasMore{data.UsageEvents=data.UsageEvents[:limit]} }
+		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT provider_id,model_id,COALESCE(currency,''),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? GROUP BY provider_id,model_id,currency ORDER BY SUM(total_tokens) DESC LIMIT 100`, since.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano))
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var item usageView
+				if rows.Scan(&item.ProviderID, &item.ModelID, &item.Currency, &item.Requests, &item.InputTokens, &item.OutputTokens, &item.CostMicros) == nil {
+					data.UsageRows = append(data.UsageRows, item)
+				}
+			}
+		}
+		eventRows, eventErr := h.db.QueryContext(c.Request.Context(), `SELECT id,occurred_at,provider_id,model_id,usage_source,COALESCE(currency,''),COALESCE(input_tokens,0),COALESCE(output_tokens,0),COALESCE(estimated_cost_micros,0),COALESCE(execution_id,''),COALESCE(attempt_id,'') FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? ORDER BY occurred_at DESC,id DESC LIMIT ? OFFSET ?`, since.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano), limit+1, offset)
+		if eventErr == nil {
+			defer eventRows.Close()
+			for eventRows.Next() {
+				var item usageEventView
+				if eventRows.Scan(&item.ID, &item.OccurredAt, &item.ProviderID, &item.ModelID, &item.Source, &item.Currency, &item.InputTokens, &item.OutputTokens, &item.CostMicros, &item.ExecutionID, &item.AttemptID) == nil {
+					data.UsageEvents = append(data.UsageEvents, item)
+				}
+			}
+			data.UsageHasMore = len(data.UsageEvents) > limit
+			if data.UsageHasMore {
+				data.UsageEvents = data.UsageEvents[:limit]
+			}
+		}
 	}
-	h.render(c,data,http.StatusOK)
+	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
