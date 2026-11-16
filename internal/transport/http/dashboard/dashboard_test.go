@@ -229,7 +229,6 @@ func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
 	}
 }
 
-
 func TestDashboardOperationsMetricsPage(t *testing.T) {
 	metrics := observability.NewMetrics()
 	metrics.ObserveHTTPRequest(http.MethodGet, "/api/v1/models", http.StatusOK, 20*time.Millisecond)
