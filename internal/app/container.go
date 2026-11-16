@@ -73,6 +73,7 @@ type Container struct {
 	AIResources           *airesource.Service
 	AIRouter              *airesource.Router
 	HTTPHandler           http.Handler
+	ShutdownRequests      chan struct{}
 }
 
 func (c *Container) Close() error {
