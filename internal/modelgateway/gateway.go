@@ -11,6 +11,9 @@ import (
 
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -121,6 +124,8 @@ func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *p
 // Generate executes a non-streaming model request.
 func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {
 	started := time.Now()
+	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.generate")
+	defer func() { if resultErr != nil { span.SetStatus(codes.Error, "model request failed") }; span.End() }()
 	defer func() { g.observe("generate", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
@@ -131,6 +136,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 	}
 
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
+	if err == nil { span.SetAttributes(attribute.String("agentmesh.provider_id", string(model.ProviderID)), attribute.String("agentmesh.model_id", string(model.ID))) }
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +193,8 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 // or the request context is canceled.
 func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {
 	started := time.Now()
+	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.stream")
+	defer func() { if resultErr != nil { span.SetStatus(codes.Error, "model stream failed") }; span.End() }()
 	defer func() { g.observe("stream_open", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
