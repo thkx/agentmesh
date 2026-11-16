@@ -281,7 +281,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize model usage ledger: %w", err)
 	}
-	gateway.SetUsageObserver(usage.GatewayObserver{Ledger: usageLedger})
+	gateway.SetUsageObserver(usage.GatewayObserver{Ledger: usageLedger, OnError: metrics.ObserveUsageWriteFailure})
 	// Agent Runtime, Workflow, Planner and Evaluator all share this gateway.
 	// Matching AI resource model keys are routed through the persisted
 	// multi-credential pool before any legacy single-key provider adapter.
@@ -432,8 +432,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 			primaryWorker = worker
 		}
 		workerWG.Add(1)
+		metrics.AddRuntimeWorkers(1)
 		go func(w *scheduler.Worker) {
 			defer workerWG.Done()
+			defer metrics.AddRuntimeWorkers(-1)
 			if runErr := w.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 				log.Error("agent scheduler worker stopped", "error", runErr)
 			}
@@ -504,8 +506,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("register workflow execution adapter: %w", err)
 	}
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		executionManager.RunReconciler(workerCtx, 15*time.Second, 200, func(err error) {
 			log.WarnContext(workerCtx, "execution reconciliation failed", "error", err)
 		})
@@ -611,8 +615,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		}
 		workflowWorkers = append(workflowWorkers, workflowWorker)
 		workerWG.Add(1)
+		metrics.AddRuntimeWorkers(1)
 		go func(w *wfruntime.Worker) {
 			defer workerWG.Done()
+			defer metrics.AddRuntimeWorkers(-1)
 			if runErr := w.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 				log.Error("workflow worker stopped", "error", runErr)
 			}
@@ -649,8 +655,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize collaboration dispatcher: %w", err)
 	}
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 			log.Error("collaboration dispatcher stopped", "error", runErr)
 		}
@@ -686,8 +694,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	wakeupWorker.SetTaskResultEvaluator(resultEvaluator)
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		if runErr := wakeupWorker.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 			log.Error("collaboration wakeup worker stopped", "error", runErr)
 		}
