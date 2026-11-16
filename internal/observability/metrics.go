@@ -22,12 +22,12 @@ type requestKey struct {
 
 type modelRequestKey struct {
 	operation string
-	outcome string
+	outcome   string
 }
 
 type modelRequestStats struct {
 	count uint64
-	sum float64
+	sum   float64
 }
 
 type requestStats struct {
@@ -39,10 +39,10 @@ type requestStats struct {
 // Metrics is an in-memory collector. It never stores request IDs, query strings,
 // request bodies, model prompts, credentials, or arbitrary error messages.
 type Metrics struct {
-	started  time.Time
-	inFlight atomic.Int64
-	mu       sync.RWMutex
-	requests map[requestKey]*requestStats
+	started       time.Time
+	inFlight      atomic.Int64
+	mu            sync.RWMutex
+	requests      map[requestKey]*requestStats
 	modelRequests map[modelRequestKey]*modelRequestStats
 }
 
