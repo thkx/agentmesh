@@ -178,7 +178,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		m := metrics.Snapshot()
 		version := "development"
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" { version = info.Main.Version }
-		report := diagnostics.Build(diagnostics.Input{Version:version,StartedAt:time.Now().Add(-time.Duration(m.ProcessUptimeSeconds*float64(time.Second))),DatabaseReady:snapshot.DatabaseAvailable,WorkerCount:int(m.RuntimeWorkers),Metrics:map[string]int64{"http_requests":int64(m.HTTPRequestCount),"model_requests":int64(m.ModelGatewayCount),"http_in_flight":m.HTTPRequestsInFlight,"execution_backlog":m.ExecutionBacklog}},time.Now().UTC())
+		report := diagnostics.Build(diagnostics.Input{Version:version,StartedAt:time.Now().Add(-time.Duration(m.ProcessUptimeSeconds*float64(time.Second))),DatabaseReady:snapshot.DatabaseAvailable,WorkerCount:int(m.RuntimeWorkers),RecentLogs:recentLogSnapshot(deps.LogBuffer),Metrics:map[string]int64{"http_requests":int64(m.HTTPRequestCount),"model_requests":int64(m.ModelGatewayCount),"http_in_flight":m.HTTPRequestsInFlight,"execution_backlog":m.ExecutionBacklog,"runtime_workers":m.RuntimeWorkers,"active_executions":m.ActiveExecutions,"usage_write_failures":int64(m.UsageWriteFailures)}},time.Now().UTC())
 		reportJSON,_:=json.MarshalIndent(report,"","  ")
 		var metricsBuffer bytes.Buffer
 		metrics.Handler().ServeHTTP(&metricsResponseWriter{header:make(http.Header),body:&metricsBuffer},c.Request)
