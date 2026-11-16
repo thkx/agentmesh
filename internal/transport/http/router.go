@@ -150,7 +150,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	api := router.Group("/api/v1")
 	api.GET("/operations/health", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
-		dbState := collectSQLiteDiagnostics(c.Request.Context(), deps.DB, false)
+		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer dbCancel()
+		dbState := collectSQLiteDiagnostics(dbCtx, deps.DB, false)
 		m := metrics.Snapshot()
 		status := http.StatusOK
 		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning || dbState.MigrationDirty {
