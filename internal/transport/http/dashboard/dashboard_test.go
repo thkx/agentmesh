@@ -107,6 +107,18 @@ func TestDashboardServesVendoredHTMXAsset(t *testing.T) {
 	}
 }
 
+func TestDashboardServesStylesheetFromEmbeddedWebAssets(t *testing.T) {
+	r := testRouter("")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/assets/app.css", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stylesheet status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/css") || !strings.Contains(rec.Body.String(), ".shell") {
+		t.Fatal("dashboard stylesheet was not served from embedded web assets")
+	}
+}
+
 func TestDashboardLoginRateLimit(t *testing.T) {
 	r := testRouter("expected-token")
 	for attempt := 1; attempt <= 6; attempt++ {
