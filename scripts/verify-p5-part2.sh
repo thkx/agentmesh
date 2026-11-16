@@ -30,6 +30,14 @@ test -f web/embed.go
 test -d web/dashboard
 test -d web/workflow-editor
 
+echo "== SQLC generated-code consistency =="
+if command -v sqlc >/dev/null 2>&1; then
+  sqlc generate
+  git diff --exit-code -- internal/db
+else
+  echo "sqlc is not installed; generated-code consistency check skipped."
+fi
+
 echo "== Focused operations and migration tests =="
 go test ./internal/platform/database ./internal/observability ./internal/usage ./internal/operations/backup ./internal/operations/upgrade ./internal/operations/diagnostics ./internal/transport/http ./internal/transport/http/dashboard ./internal/transport/http/handlers
 
