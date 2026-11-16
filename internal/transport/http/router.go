@@ -326,6 +326,7 @@ func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observab
 		s.WorkerRunning = m.RuntimeWorkers > 0
 		s.ProviderRequests = m.ModelGatewayCount
 		s.ProviderFailures = m.ProviderFailures
+		s.UsageWriteFailures = m.UsageWriteFailures
 		s.ReconciliationBacklog = m.ExecutionBacklog
 	}
 	return s
