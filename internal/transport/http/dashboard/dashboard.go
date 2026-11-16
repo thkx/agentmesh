@@ -126,7 +126,7 @@ type pageData struct {
 	RunResult        string
 	ActiveAlerts     []observability.Alert
 	AlertHistory     []observability.Alert
-	OperationsHealth operationsHealthView
+	OpsHealth operationsHealthView
 }
 
 type operationsHealthView struct {
@@ -463,28 +463,28 @@ func (h *Handler) requestGracefulShutdown(c *gin.Context) {
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
-	data := pageData{Title: "Operations Metrics", Active: "operations", OperationsHealth: operationsHealthView{DatabaseIntegrity: "unknown"}}
+	data := pageData{Title: "Operations Metrics", Active: "operations", OpsHealth: operationsHealthView{DatabaseIntegrity: "unknown"}}
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
-		data.OperationsHealth.Version = info.Main.Version
+		data.OpsHealth.Version = info.Main.Version
 	} else {
-		data.OperationsHealth.Version = "development"
+		data.OpsHealth.Version = "development"
 	}
 	if h.db != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		snapshot.DatabaseAvailable = h.db.PingContext(ctx) == nil
-		data.OperationsHealth.DatabaseReady = snapshot.DatabaseAvailable
+		data.OpsHealth.DatabaseReady = snapshot.DatabaseAvailable
 		var version uint
 		var dirty bool
 		if err := h.db.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version, &dirty); err == nil {
-			data.OperationsHealth.SchemaVersion = version
-			data.OperationsHealth.MigrationDirty = dirty
+			data.OpsHealth.SchemaVersion = version
+			data.OpsHealth.MigrationDirty = dirty
 		}
 		var integrity string
 		if err := h.db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&integrity); err == nil {
 			if strings.EqualFold(strings.TrimSpace(integrity), "ok") {
-				data.OperationsHealth.DatabaseIntegrity = "ok"
+				data.OpsHealth.DatabaseIntegrity = "ok"
 			} else {
-				data.OperationsHealth.DatabaseIntegrity = "failed"
+				data.OpsHealth.DatabaseIntegrity = "failed"
 			}
 		}
 		if rows, err := h.db.QueryContext(ctx, "PRAGMA database_list"); err == nil {
@@ -493,7 +493,7 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 				var name, file string
 				if rows.Scan(&sequence, &name, &file) == nil && name == "main" && file != "" {
 					if info, statErr := os.Stat(file); statErr == nil && info.Mode().IsRegular() {
-						data.OperationsHealth.DatabaseSizeBytes = info.Size()
+						data.OpsHealth.DatabaseSizeBytes = info.Size()
 					}
 				}
 			}
@@ -506,9 +506,9 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	}
 	m := h.metrics.Snapshot()
 	if m.RuntimeWorkers > 0 {
-		data.OperationsHealth.WorkerStatus = "running"
+		data.OpsHealth.WorkerStatus = "running"
 	} else {
-		data.OperationsHealth.WorkerStatus = "stopped"
+		data.OpsHealth.WorkerStatus = "stopped"
 	}
 	snapshot.WorkerRunning = m.RuntimeWorkers > 0
 	snapshot.ProviderRequests = m.ProviderRequests
@@ -522,15 +522,15 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 		alertHistory = h.alerts.History()
 	}
 	data.Counts = map[string]int64{
-			"HTTP requests":          int64(m.HTTPRequestCount),
-			"Model Gateway requests": int64(m.ModelGatewayCount),
-			"HTTP in flight":         m.HTTPRequestsInFlight,
-			"Runtime workers":        m.RuntimeWorkers,
-			"Active executions":      m.ActiveExecutions,
-			"Execution backlog":      m.ExecutionBacklog,
-			"Usage write failures":   int64(m.UsageWriteFailures),
-			"Process uptime seconds": int64(m.ProcessUptimeSeconds),
-		}
+		"HTTP requests":          int64(m.HTTPRequestCount),
+		"Model Gateway requests": int64(m.ModelGatewayCount),
+		"HTTP in flight":         m.HTTPRequestsInFlight,
+		"Runtime workers":        m.RuntimeWorkers,
+		"Active executions":      m.ActiveExecutions,
+		"Execution backlog":      m.ExecutionBacklog,
+		"Usage write failures":   int64(m.UsageWriteFailures),
+		"Process uptime seconds": int64(m.ProcessUptimeSeconds),
+	}
 	data.ActiveAlerts = activeAlerts
 	data.AlertHistory = alertHistory
 	h.render(c, data, http.StatusOK)
