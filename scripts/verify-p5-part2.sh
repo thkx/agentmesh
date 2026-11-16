@@ -21,9 +21,9 @@ if [[ -n "$unformatted" ]]; then
 fi
 
 echo "== Frontend asset boundary =="
-if find internal -type f \\( -name '*.html' -o -name '*.css' -o -name '*.js' \\) -print -quit | grep -q .; then
+if find internal -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' \) -print -quit | grep -q .; then
   echo "Browser-facing source must live under repository-root web/."
-  find internal -type f \\( -name '*.html' -o -name '*.css' -o -name '*.js' \\)
+  find internal -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' \)
   exit 1
 fi
 test -f web/embed.go
