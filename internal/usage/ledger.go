@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/thkx/agentmesh/internal/domain/provider"
@@ -50,7 +51,8 @@ func (l *Ledger) SetRate(ctx context.Context, r Rate) error {
 	if l == nil || l.db == nil {
 		return errors.New("usage ledger is not initialized")
 	}
-	if r.ProviderID == "" || r.ModelID == "" || len(r.Currency) != 3 || r.InputRateMicrosPerMillion < 0 || r.OutputRateMicrosPerMillion < 0 {
+	r.Currency = strings.ToUpper(strings.TrimSpace(r.Currency))
+	if r.ProviderID == "" || r.ModelID == "" || !validCurrencyCode(r.Currency) || r.InputRateMicrosPerMillion < 0 || r.OutputRateMicrosPerMillion < 0 {
 		return ErrInvalidPricing
 	}
 	if r.EffectiveAt.IsZero() {
@@ -86,7 +88,7 @@ func (l *Ledger) Record(ctx context.Context, r Record) error {
 	if r.Source != "unavailable" {
 		var c string
 		var inRate, outRate int64
-		err := l.db.QueryRowContext(ctx, `SELECT currency,input_rate_micros_per_million,output_rate_micros_per_million FROM model_pricing_rates WHERE provider_id=? AND model_id=? AND effective_at<=? ORDER BY effective_at DESC LIMIT 1`, r.ProviderID, r.ModelID, r.OccurredAt.UTC().Format(time.RFC3339Nano)).Scan(&c, &inRate, &outRate)
+		err := l.db.QueryRowContext(ctx, `SELECT currency,input_rate_micros_per_million,output_rate_micros_per_million FROM model_pricing_rates WHERE provider_id=? AND model_id=? AND effective_at<=? ORDER BY effective_at DESC,created_at DESC,id DESC LIMIT 1`, r.ProviderID, r.ModelID, r.OccurredAt.UTC().Format(time.RFC3339Nano)).Scan(&c, &inRate, &outRate)
 		if err == nil {
 			computed, ok := estimateCost(r.Usage.InputTokens, inRate, r.Usage.OutputTokens, outRate)
 			if !ok {
@@ -114,6 +116,18 @@ type Summary struct {
 	TotalTokens         int64
 	EstimatedCostMicros int64
 	UnavailableUsage    int64
+}
+
+func validCurrencyCode(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, r := range value {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
 }
 
 func estimateCost(input, inRate, output, outRate int64) (int64, bool) {
