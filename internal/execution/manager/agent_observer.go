@@ -38,11 +38,12 @@ func (o *AgentObserver) find(ctx context.Context, taskID string) (dom.Entity, er
 	return items[0], nil
 }
 
-
 // Context attaches the exact managed Execution and Attempt identity to downstream Gateway calls.
 func (o *AgentObserver) Context(ctx context.Context, job scheduler.Job) context.Context {
 	entity, err := o.find(ctx, job.Task.ID)
-	if err != nil { return ctx }
+	if err != nil {
+		return ctx
+	}
 	attemptID := entity.ID + "-a-" + strconv.Itoa(job.Attempts)
 	return modelgateway.WithExecutionProvenance(ctx, entity.ID, attemptID)
 }
