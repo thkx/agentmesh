@@ -2,6 +2,7 @@
 package upgrade
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
@@ -13,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,41 +42,88 @@ var ErrInvalidRelease = errors.New("release manifest or signature is invalid")
 func VerifyManifest(manifestBytes []byte, signature string, publicKey ed25519.PublicKey) (Manifest, error) {
 	var m Manifest
 	sig, err := base64.StdEncoding.DecodeString(strings.TrimSpace(signature))
-	if len(manifestBytes)==0 || len(manifestBytes)>64<<10 || err!=nil || len(publicKey)!=ed25519.PublicKeySize || len(sig)!=ed25519.SignatureSize || !ed25519.Verify(publicKey,manifestBytes,sig) { return m,ErrInvalidRelease }
-	decoder:=json.NewDecoder(strings.NewReader(string(manifestBytes)))
+	if len(manifestBytes) == 0 || len(manifestBytes) > 64<<10 || err != nil || len(publicKey) != ed25519.PublicKeySize || len(sig) != ed25519.SignatureSize || !ed25519.Verify(publicKey, manifestBytes, sig) {
+		return m, ErrInvalidRelease
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(manifestBytes)))
 	decoder.DisallowUnknownFields()
-	if err=decoder.Decode(&m);err!=nil || !versionPattern.MatchString(m.Version) || m.OS=="" || m.Arch=="" || m.BinarySize<=0 || m.BinarySize>maxBinarySize || len(m.BinarySHA256)!=64 { return Manifest{},ErrInvalidRelease }
-	if _,err=hex.DecodeString(m.BinarySHA256);err!=nil{return Manifest{},ErrInvalidRelease}
-	if m.OS!=runtime.GOOS||m.Arch!=runtime.GOARCH{return Manifest{},fmt.Errorf("%w: release targets %s/%s, current platform is %s/%s",ErrInvalidRelease,m.OS,m.Arch,runtime.GOOS,runtime.GOARCH)}
-	return m,nil
+	if err = decoder.Decode(&m); err != nil || !versionPattern.MatchString(m.Version) || m.OS == "" || m.Arch == "" || m.BinarySize <= 0 || m.BinarySize > maxBinarySize || len(m.BinarySHA256) != 64 {
+		return Manifest{}, ErrInvalidRelease
+	}
+	if _, err = hex.DecodeString(m.BinarySHA256); err != nil {
+		return Manifest{}, ErrInvalidRelease
+	}
+	if m.OS != runtime.GOOS || m.Arch != runtime.GOARCH {
+		return Manifest{}, fmt.Errorf("%w: release targets %s/%s, current platform is %s/%s", ErrInvalidRelease, m.OS, m.Arch, runtime.GOOS, runtime.GOARCH)
+	}
+	return m, nil
 }
 
 // VerifyRelease additionally verifies the staged executable's exact size and SHA-256 digest.
 func VerifyRelease(manifestBytes []byte, signature string, publicKey ed25519.PublicKey, binaryPath string) (Manifest, error) {
-	m,err:=VerifyManifest(manifestBytes,signature,publicKey);if err!=nil{return Manifest{},err}
-	file,err:=os.Open(binaryPath);if err!=nil{return Manifest{},err};defer file.Close()
-	hash:=sha256.New();n,err:=io.Copy(hash,io.LimitReader(file,maxBinarySize+1))
-	if err!=nil||n!=m.BinarySize||n>maxBinarySize||hex.EncodeToString(hash.Sum(nil))!=strings.ToLower(m.BinarySHA256){return Manifest{},ErrInvalidRelease}
-	return m,nil
+	m, err := VerifyManifest(manifestBytes, signature, publicKey)
+	if err != nil {
+		return Manifest{}, err
+	}
+	file, err := os.Open(binaryPath)
+	if err != nil {
+		return Manifest{}, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(file, maxBinarySize+1))
+	if err != nil || n != m.BinarySize || n > maxBinarySize || hex.EncodeToString(hash.Sum(nil)) != strings.ToLower(m.BinarySHA256) {
+		return Manifest{}, ErrInvalidRelease
+	}
+	return m, nil
 }
 
 // CheckRelease downloads only the signed manifest and signature; binary bytes are fetched separately by the operator.
-func CheckRelease(ctx context.Context, manifestURL, signatureURL string, publicKey ed25519.PublicKey) (Manifest,error) {
-	client:=&http.Client{Timeout:8*time.Second}
-	manifestBytes,err:=fetchReleaseDocument(ctx,client,manifestURL);if err!=nil{return Manifest{},err}
-	signatureBytes,err:=fetchReleaseDocument(ctx,client,signatureURL);if err!=nil{return Manifest{},err}
-	return VerifyManifest(manifestBytes,string(signatureBytes),publicKey)
+func CheckRelease(ctx context.Context, manifestURL, signatureURL string, publicKey ed25519.PublicKey) (Manifest, error) {
+	client := &http.Client{Timeout: 8 * time.Second}
+	manifestBytes, err := fetchReleaseDocument(ctx, client, manifestURL)
+	if err != nil {
+		return Manifest{}, err
+	}
+	signatureBytes, err := fetchReleaseDocument(ctx, client, signatureURL)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return VerifyManifest(manifestBytes, string(signatureBytes), publicKey)
 }
 
-func fetchReleaseDocument(ctx context.Context,client *http.Client,rawURL string)([]byte,error){
-	u,err:=url.Parse(strings.TrimSpace(rawURL));if err!=nil||u.Host==""||u.User!=nil||u.Fragment!=""{return nil,errors.New("invalid release URL")}
-	if u.Scheme!="https"&&u.Scheme!="http"{return nil,errors.New("release URLs must use HTTPS or loopback HTTP")}
-	if u.Scheme=="http"{host:=u.Hostname();ip:=net.ParseIP(host);if host!="localhost"&&(ip==nil||!ip.IsLoopback()){return nil,errors.New("unencrypted release downloads are allowed only from loopback")}}
-	req,err:=http.NewRequestWithContext(ctx,http.MethodGet,u.String(),nil);if err!=nil{return nil,err}
-	resp,err:=client.Do(req);if err!=nil{return nil,errors.New("release metadata request failed")};defer resp.Body.Close()
-	if resp.StatusCode<200||resp.StatusCode>=300{return nil,fmt.Errorf("release metadata endpoint returned HTTP %d",resp.StatusCode)}
-	data,err:=io.ReadAll(io.LimitReader(resp.Body,(64<<10)+1));if err!=nil||len(data)>64<<10{return nil,errors.New("release metadata is too large or unreadable")}
-	return data,nil
+func fetchReleaseDocument(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return nil, errors.New("invalid release URL")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return nil, errors.New("release URLs must use HTTPS or loopback HTTP")
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return nil, errors.New("unencrypted release downloads are allowed only from loopback")
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.New("release metadata request failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("release metadata endpoint returned HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, (64<<10)+1))
+	if err != nil || len(data) > 64<<10 {
+		return nil, errors.New("release metadata is too large or unreadable")
+	}
+	return data, nil
 }
 
 // Stage verifies a release before copying any executable into a new staging directory.
