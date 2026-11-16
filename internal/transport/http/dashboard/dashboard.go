@@ -32,6 +32,7 @@ import (
 	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/execution/manager"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
+	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	webassets "github.com/thkx/agentmesh/web"
@@ -40,6 +41,7 @@ import (
 const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
+	Metrics             *observability.Metrics
 	DB                  *sql.DB
 	APIToken            string
 	ExecutionManager    *manager.Manager
@@ -54,6 +56,7 @@ type Dependencies struct {
 }
 
 type Handler struct {
+	metrics             *observability.Metrics
 	db                  *sql.DB
 	token               string
 	manager             *manager.Manager
@@ -180,6 +183,7 @@ func New(d Dependencies) *Handler {
 	t := template.Must(template.ParseFS(webassets.Assets, "dashboard/templates/*.html"))
 	h := &Handler{
 		db:                  d.DB,
+		metrics:             d.Metrics,
 		token:               d.APIToken,
 		manager:             d.ExecutionManager,
 		providerRegistry:    d.Providers,
@@ -246,6 +250,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
 	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
+	g.GET("/operations/metrics", h.requireSession(), h.operationsMetrics)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
 	g.POST("/executions/:id/cancel", h.requireSession(), h.cancelExecution)
@@ -395,6 +400,21 @@ func (h *Handler) logout(c *gin.Context) {
 		MaxAge:   -1,
 	})
 	c.Redirect(http.StatusSeeOther, "/dashboard/login")
+}
+
+
+func (h *Handler) operationsMetrics(c *gin.Context) {
+	snapshot := h.metrics.Snapshot()
+	h.render(c, pageData{
+		Title:  "Operations Metrics",
+		Active: "operations",
+		Counts: map[string]int64{
+			"HTTP requests":          int64(snapshot.HTTPRequestCount),
+			"Model Gateway requests": int64(snapshot.ModelGatewayCount),
+			"HTTP in flight":         snapshot.HTTPRequestsInFlight,
+			"Process uptime seconds": int64(snapshot.ProcessUptimeSeconds),
+		},
+	}, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
