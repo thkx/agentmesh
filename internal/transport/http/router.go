@@ -248,13 +248,16 @@ func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observab
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		s.DatabaseAvailable = db.PingContext(pingCtx) == nil
 		cancel()
-		_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&s.ProviderRequests, &s.ReconciliationBacklog)
+		var active, backlog int64
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&active, &backlog)
+		if metrics != nil { metrics.SetExecutionState(active, backlog) }
+		s.ReconciliationBacklog = backlog
 	}
 	if metrics != nil {
 		m := metrics.Snapshot()
 		s.WorkerRunning = m.RuntimeWorkers > 0
 		s.ProviderRequests = m.ModelGatewayCount
-		s.ProviderFailures = m.ModelGatewayFailures
+		s.ProviderFailures = m.ProviderFailures
 		s.ReconciliationBacklog = m.ExecutionBacklog
 	}
 	return s
