@@ -25,6 +25,8 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"github.com/thkx/agentmesh/internal/observability"
+	"log/slog"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
 	"github.com/thkx/agentmesh/internal/reflection"
@@ -37,6 +39,8 @@ import (
 )
 
 type Dependencies struct {
+	Logger                *slog.Logger
+	Metrics               *observability.Metrics
 	DB                    *sql.DB
 	Providers             *provider.ProviderRegistry
 	Models                *provider.ModelRegistry
@@ -74,6 +78,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	metrics := deps.Metrics
+	if metrics == nil {
+		metrics = observability.NewMetrics()
+	}
+	router.Use(requestCorrelationMiddleware(deps.Logger))
+	router.Use(requestMetricsMiddleware(metrics))
 	if deps.APIToken != "" {
 		router.Use(func(c *gin.Context) {
 			// The Dashboard has its own short-lived browser session; API routes
@@ -103,6 +113,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.Next()
 	})
 	registerWorkflowEditor(router)
+	router.GET("/metrics", gin.WrapH(metrics.Handler()))
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.DB == nil || deps.Providers == nil || deps.Models == nil || deps.Adapters == nil || deps.ProviderRuntime == nil || deps.Gateway == nil || deps.Repository == nil || deps.AgentExecutor == nil || deps.AgentRuntime == nil || deps.Workspaces == nil {
