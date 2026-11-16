@@ -42,14 +42,19 @@ type DynamicRouter interface {
 	Generate(context.Context, GenerateRequest) (*GenerateResponse, error)
 }
 
+type Observer interface {
+	ObserveModelGateway(operation, outcome string, elapsed time.Duration)
+}
+
 type Gateway struct {
+	observer Observer
 	registry      *Registry
 	resolver      Resolver
 	providers     *provider.ProviderRegistry
 	dynamicRouter DynamicRouter
 }
 
-// SetDynamicRouter installs the optional database-backed credential router.
+// SetObserver installs an optional bounded-cardinality operational observer.\nfunc (g *Gateway) SetObserver(observer Observer) {\n\tg.observer = observer\n}\n\n// SetDynamicRouter installs the optional database-backed credential router.
 // Bootstrap must call this before the gateway starts serving requests.
 func (g *Gateway) SetDynamicRouter(router DynamicRouter) {
 	g.dynamicRouter = router
@@ -84,7 +89,7 @@ func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *p
 }
 
 // Generate executes a non-streaming model request.
-func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {\n\tstarted := time.Now()\n\tdefer func() { g.observe("generate", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
@@ -146,7 +151,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 //
 // The returned channel is closed when the provider stream ends
 // or the request context is canceled.
-func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan StreamEvent, error) {
+func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {\n\tstarted := time.Now()\n\tdefer func() { g.observe("stream_open", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
@@ -263,6 +268,21 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	}()
 
 	return output, nil
+}
+
+
+func (g *Gateway) observe(operation string, started time.Time, err error) {
+	if g == nil || g.observer == nil {
+		return
+	}
+	outcome := "success"
+	if err != nil {
+		outcome = "error"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			outcome = "canceled"
+		}
+	}
+	g.observer.ObserveModelGateway(operation, outcome, time.Since(started))
 }
 
 // SupportsNativeToolCalling reports whether the resolved adapter implements provider-native function calling.
