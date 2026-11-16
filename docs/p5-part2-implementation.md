@@ -2,7 +2,7 @@
 
 **Branch:** `p5/control-plane`  
 **Baseline:** P5 Part 1 / P4 unified execution core  
-**Implementation status:** M53–M56 implementation delivered; final GitHub Actions and local macOS acceptance are tracked separately.
+**Implementation status:** M53–M56 implementation and acceptance hardening are in progress on this branch. Do not treat Part 2 as accepted until the exact branch-head CI run and the local Go 1.27.3 macOS verification script both pass.
 
 Part 2 adds operational capabilities around the existing runtime. It does not introduce a second scheduler, queue, execution state machine, or event ledger.
 
@@ -64,6 +64,9 @@ Examples:
 export AGENTMESH_BACKUP_PASSPHRASE='use-a-long-unique-passphrase'
 go run ./cmd/agentmesh-backup create --config configs/config.yaml --output ./backups/agentmesh.backup
 go run ./cmd/agentmesh-backup verify --archive ./backups/agentmesh.backup
+# List verified archives and retain only the 10 newest verified backups:
+go run ./cmd/agentmesh-backup list --directory ./backups
+go run ./cmd/agentmesh-backup prune --directory ./backups --keep 10
 go run ./cmd/agentmesh-backup restore --archive ./backups/agentmesh.backup --destination ./restore-staging
 # Stop AgentMesh before this explicit offline replacement:
 go run ./cmd/agentmesh-backup apply-restore --archive ./backups/agentmesh.backup --database ./data/agentmesh.db --credential-key ./data/keys/credential.key --backup-dir ./backups/pre-restore --confirm-stopped
@@ -99,6 +102,7 @@ Part 2 does not publish releases or manage signing-key rotation; it verifies and
 - A bounded in-memory log ring retains only static log message text; structured attributes are excluded before report redaction.
 - `GET /api/v1/operations/health` exposes database, worker, execution, provider and ledger health without returning raw dependency errors.
 - `POST /api/v1/operations/shutdown` requests graceful process shutdown. It is protected by the existing Bearer API-token boundary when configured.
+- Dashboard Operations includes an explicit-confirmation graceful shutdown action protected by the browser session and same-origin check; start/restart remains delegated to an external service manager.
 - `cmd/agentmesh-ops status` and `cmd/agentmesh-ops shutdown` provide local command-line controls. The CLI reads `AGENTMESH_API_TOKEN` from the environment and refuses to send it over remote plaintext HTTP.
 
 ## Security and operational boundaries
@@ -117,4 +121,4 @@ Run on the development machine:
 bash scripts/verify-p5-part2.sh
 ```
 
-This performs shell syntax, gofmt, build, vet and race tests. GitHub Actions performs the same Go checks on the branch. CI success does not replace the final local macOS acceptance run.
+This performs shell syntax, gofmt, frontend asset-boundary checks, focused migration/operations tests, build, vet and the full race suite. GitHub Actions performs formatting, P3 acceptance-script syntax, build, vet and race tests. CI success does not replace the final local macOS acceptance run.
