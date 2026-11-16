@@ -219,8 +219,14 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 							return
 						}
 						normalizeStreamEvent(&event, model)
-						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil { g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey); usageRecorded = true }
-						if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil { g.observeUsage(ctx, event.Response, requestKey); usageRecorded = true }
+						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
+							g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
+							usageRecorded = true
+						}
+						if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil {
+							g.observeUsage(ctx, event.Response, requestKey)
+							usageRecorded = true
+						}
 						select {
 						case output <- event:
 						case <-ctx.Done():
@@ -280,8 +286,14 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 				}
 
 				normalizeStreamEvent(&event, model)
-				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil { g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey); usageRecorded = true }
-				if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil { g.observeUsage(ctx, event.Response, requestKey); usageRecorded = true }
+				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
+					g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
+					usageRecorded = true
+				}
+				if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil {
+					g.observeUsage(ctx, event.Response, requestKey)
+					usageRecorded = true
+				}
 
 				select {
 				case output <- event:
@@ -300,20 +312,30 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 }
 
 func (g *Gateway) observeUsage(ctx context.Context, response *GenerateResponse, key string) {
-    if response == nil { return }
-    g.observeUsageValues(ctx, response.ProviderID, response.ModelID, response.Usage, response.CreatedAt, key)
+	if response == nil {
+		return
+	}
+	g.observeUsageValues(ctx, response.ProviderID, response.ModelID, response.Usage, response.CreatedAt, key)
 }
 func (g *Gateway) observeUsageValues(ctx context.Context, providerID provider.ID, modelID string, usage Usage, occurredAt time.Time, key string) {
-    if g == nil || g.usageObserver == nil || providerID == "" || modelID == "" { return }
-    usage.Normalize()
-    if occurredAt.IsZero() { occurredAt = time.Now().UTC() }
-    g.usageObserver.ObserveModelUsage(ctx, providerID, modelID, usage, occurredAt, key)
+	if g == nil || g.usageObserver == nil || providerID == "" || modelID == "" {
+		return
+	}
+	usage.Normalize()
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
+	g.usageObserver.ObserveModelUsage(ctx, providerID, modelID, usage, occurredAt, key)
 }
 func usageKey(existing string) string {
-    if existing != "" { return existing }
-    var b [16]byte
-    if _, err := rand.Read(b[:]); err == nil { return hex.EncodeToString(b[:]) }
-    return fmt.Sprintf("usage-%d", time.Now().UnixNano())
+	if existing != "" {
+		return existing
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("usage-%d", time.Now().UnixNano())
 }
 
 func (g *Gateway) observe(operation string, started time.Time, err error) {
