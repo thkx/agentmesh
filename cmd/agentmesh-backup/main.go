@@ -66,7 +66,7 @@ func main() {
 			fatal(err.Error())
 		}
 		for _, item := range items {
-			fmt.Printf("%s  created=%s  version=%s  schema=%d\\n", item.Path, item.Manifest.CreatedAt.UTC().Format(time.RFC3339), item.Manifest.ApplicationVersion, item.Manifest.SchemaVersion)
+			fmt.Printf("%s  created=%s  version=%s  schema=%d\n", item.Path, item.Manifest.CreatedAt.UTC().Format(time.RFC3339), item.Manifest.ApplicationVersion, item.Manifest.SchemaVersion)
 		}
 	case "prune":
 		fs := flag.NewFlagSet("prune", flag.ExitOnError)
