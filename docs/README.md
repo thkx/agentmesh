@@ -17,7 +17,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P5 Product Control Plane](p5-product-control-plane.md) | M49–M52 Dashboard architecture, security boundary and acceptance contract |
 | [P5 Part 1 Checklist](p5-part1-checklist.md) | M49–M52 implementation tasks and final acceptance gates |
 | [P5 Part 1 Implementation](p5-part1-implementation.md) | Dashboard implementation record and exact verification gates |
-| [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |
+| [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |\n| [P5 M53 Implementation Status](p5-m53-implementation.md) | Current M53 implementation record, limitations and verification command |
 
 ## Architecture and implementation history
 
@@ -82,4 +82,4 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 - Part 1 implementation record: [p5-part1-implementation.md](p5-part1-implementation.md)
 - Part 1 delivery checklist: [p5-part1-checklist.md](p5-part1-checklist.md)
 - Part 1 verification entry point: `bash scripts/verify-p5-part1.sh`
-- Part 2 architecture and delivery plan: [p5-part2-operations.md](p5-part2-operations.md)
+- Part 2 architecture and delivery plan: [p5-part2-operations.md](p5-part2-operations.md)\n- M53 implementation status: [p5-m53-implementation.md](p5-m53-implementation.md)
