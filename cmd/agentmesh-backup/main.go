@@ -67,14 +67,18 @@ func main() {
 		fmt.Printf("Backup verified: created=%s version=%s schema=%d\n", manifest.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), manifest.ApplicationVersion, manifest.SchemaVersion)
 	case "apply-restore":
 		fs:=flag.NewFlagSet("apply-restore",flag.ExitOnError)
-		staging:=fs.String("staging","","verified restore staging directory")
+		archive:=fs.String("archive","","encrypted backup archive")
 		databasePath:=fs.String("database","","active SQLite database path")
 		credentialKey:=fs.String("credential-key","","active credential encryption key path")
 		backupDir:=fs.String("backup-dir","","directory for pre-restore safety copies")
 		stopped:=fs.Bool("confirm-stopped",false,"confirm AgentMesh has been stopped")
 		_=fs.Parse(os.Args[2:])
-		if *staging==""||*databasePath==""||*credentialKey==""||*backupDir==""{fatal("staging, database, credential-key and backup-dir are required")}
-		result,err:=backup.ApplyRestoreOffline(*staging,*databasePath,*credentialKey,*backupDir,*stopped);if err!=nil{fatal(err.Error())}
+		if *archive==""||*databasePath==""||*credentialKey==""||*backupDir==""||len(pass)<12{fatal("archive, database, credential-key, backup-dir and AGENTMESH_BACKUP_PASSPHRASE are required")}
+		if !*stopped{fatal("refusing restore apply without --confirm-stopped")}
+		staging,err:=os.MkdirTemp("","agentmesh-restore-verified-*");if err!=nil{fatal(err.Error())}
+		defer os.RemoveAll(staging)
+		if _,err=backup.ExtractVerified(*archive,pass,staging);err!=nil{fatal(err.Error())}
+		result,err:=backup.ApplyRestoreOffline(staging,*databasePath,*credentialKey,*backupDir,true);if err!=nil{fatal(err.Error())}
 		fmt.Printf("Offline restore applied. Previous database: %s; previous credential key: %s\n",result.DatabaseBackup,result.CredentialKeyBackup)
 	case "restore":
 		fs := flag.NewFlagSet("restore", flag.ExitOnError)
