@@ -150,12 +150,13 @@ func NewRouter(deps Dependencies) http.Handler {
 	api := router.Group("/api/v1")
 	api.GET("/operations/health", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		dbState := collectSQLiteDiagnostics(c.Request.Context(), deps.DB, false)
 		m := metrics.Snapshot()
 		status := http.StatusOK
-		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning {
+		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning || dbState.MigrationDirty {
 			status = http.StatusServiceUnavailable
 		}
-		c.JSON(status, gin.H{"database_available": snapshot.DatabaseAvailable, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_requests": snapshot.ProviderRequests, "provider_failures": snapshot.ProviderFailures, "usage_write_failures": m.UsageWriteFailures, "uptime_seconds": m.ProcessUptimeSeconds, "observed_at": snapshot.ObservedAt})
+		c.JSON(status, gin.H{"database_available": snapshot.DatabaseAvailable, "schema_version": dbState.SchemaVersion, "migration_dirty": dbState.MigrationDirty, "database_size_bytes": dbState.SizeBytes, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_requests": snapshot.ProviderRequests, "provider_failures": snapshot.ProviderFailures, "usage_write_failures": m.UsageWriteFailures, "uptime_seconds": m.ProcessUptimeSeconds, "observed_at": snapshot.ObservedAt})
 	})
 	api.POST("/operations/shutdown", func(c *gin.Context) {
 		if deps.RequestShutdown == nil {
@@ -188,7 +189,9 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 	api.GET("/diagnostics/bundle", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
-		dbState := collectSQLiteDiagnostics(c.Request.Context(), deps.DB, true)
+		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer dbCancel()
+		dbState := collectSQLiteDiagnostics(dbCtx, deps.DB, true)
 		m := metrics.Snapshot()
 		version := "development"
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
