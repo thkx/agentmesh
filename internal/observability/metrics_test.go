@@ -69,7 +69,7 @@ func TestRuntimeAndLedgerMetricsAreExported(t *testing.T) {
 	metrics.ObserveUsageWriteFailure()
 	metrics.ObserveModelGateway("generate", "error", time.Second)
 	snapshot := metrics.Snapshot()
-	if snapshot.RuntimeWorkers != 3 || snapshot.ActiveExecutions != 4 || snapshot.ExecutionBacklog != 12 || snapshot.UsageWriteFailures != 1 || snapshot.ProviderFailures != 1 {
+	if snapshot.RuntimeWorkers != 3 || snapshot.ActiveExecutions != 4 || snapshot.ExecutionBacklog != 12 || snapshot.UsageWriteFailures != 1 || snapshot.ProviderFailures != 1 || snapshot.ProviderRequests != 1 {
 		t.Fatalf("unexpected snapshot: %#v", snapshot)
 	}
 	rec := httptest.NewRecorder()
