@@ -45,6 +45,7 @@ type Dependencies struct {
 	Alerts              *observability.AlertEvaluator
 	DB                  *sql.DB
 	APIToken            string
+	RequestShutdown     chan<- struct{}
 	ExecutionManager    *manager.Manager
 	Providers           *domainprovider.ProviderRegistry
 	Models              *domainprovider.ModelRegistry
@@ -61,6 +62,7 @@ type Handler struct {
 	alerts              *observability.AlertEvaluator
 	db                  *sql.DB
 	token               string
+	requestShutdown     chan<- struct{}
 	manager             *manager.Manager
 	providerRegistry    *domainprovider.ProviderRegistry
 	modelRegistry       *domainprovider.ModelRegistry
@@ -211,6 +213,7 @@ func New(d Dependencies) *Handler {
 		metrics:             metrics,
 		alerts:              d.Alerts,
 		token:               d.APIToken,
+		requestShutdown:     d.RequestShutdown,
 		manager:             d.ExecutionManager,
 		providerRegistry:    d.Providers,
 		modelRegistry:       d.Models,
@@ -277,6 +280,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
 	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
 	g.GET("/operations/metrics", h.requireSession(), h.operationsMetrics)
+	g.POST("/operations/shutdown", h.requireSession(), h.requestGracefulShutdown)
 	g.GET("/usage", h.requireSession(), h.usage)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
@@ -427,6 +431,23 @@ func (h *Handler) logout(c *gin.Context) {
 		MaxAge:   -1,
 	})
 	c.Redirect(http.StatusSeeOther, "/dashboard/login")
+}
+
+func (h *Handler) requestGracefulShutdown(c *gin.Context) {
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.requestShutdown == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	select {
+	case h.requestShutdown <- struct{}{}:
+		c.Redirect(http.StatusSeeOther, "/dashboard/operations/metrics?message=shutdown-requested")
+	default:
+		c.Redirect(http.StatusSeeOther, "/dashboard/operations/metrics?error=shutdown")
+	}
 }
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
@@ -1606,6 +1627,8 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Message = "Workflow template deleted."
 	case "workflow-run-queued":
 		data.Message = "Workflow run queued."
+	case "shutdown-requested":
+		data.Message = "Graceful shutdown requested. The service will stop after in-flight work is drained."
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
