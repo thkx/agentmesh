@@ -415,15 +415,28 @@ func verifySQLiteBytes(data []byte, expectedSchema uint) error {
 
 func copyBackupFile(source, destination string, mode os.FileMode) error {
 	in, err := os.Open(source)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer in.Close()
 	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	_, copyErr := io.Copy(out, in)
 	syncErr := out.Sync()
 	closeErr := out.Close()
-	if copyErr != nil { _ = os.Remove(destination); return copyErr }
-	if syncErr != nil { _ = os.Remove(destination); return syncErr }
-	if closeErr != nil { _ = os.Remove(destination); return closeErr }
+	if copyErr != nil {
+		_ = os.Remove(destination)
+		return copyErr
+	}
+	if syncErr != nil {
+		_ = os.Remove(destination)
+		return syncErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(destination)
+		return closeErr
+	}
 	return nil
 }
