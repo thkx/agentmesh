@@ -53,4 +53,16 @@ func TestEncryptedBackupVerifyAndExtract(t *testing.T) {
 	if value != "preserved" {
 		t.Fatalf("restored value=%q", value)
 	}
+	currentDB:=filepath.Join(t.TempDir(),"current.sqlite")
+	currentKey:=filepath.Join(t.TempDir(),"credential.key")
+	if err=os.WriteFile(currentDB,[]byte("old database"),0600);err!=nil{t.Fatal(err)}
+	if err=os.WriteFile(currentKey,[]byte("old credential key"),0600);err!=nil{t.Fatal(err)}
+	if _,err=ApplyRestoreOffline(out,currentDB,currentKey,filepath.Join(t.TempDir(),"safety-backups"),false);err==nil{t.Fatal("restore apply without stop confirmation succeeded")}
+	result,err:=ApplyRestoreOffline(out,currentDB,currentKey,filepath.Join(t.TempDir(),"safety-backups"),true);if err!=nil{t.Fatal(err)}
+	if _,err=os.Stat(result.DatabaseBackup);err!=nil{t.Fatalf("database rollback backup missing: %v",err)}
+	if _,err=os.Stat(result.CredentialKeyBackup);err!=nil{t.Fatalf("credential rollback backup missing: %v",err)}
+	gotDB,err:=os.ReadFile(currentDB);if err!=nil{t.Fatal(err)}
+	if len(gotDB)==0{t.Fatal("restored database is empty")}
+	gotKey,err:=os.ReadFile(currentKey);if err!=nil{t.Fatal(err)}
+	if string(gotKey)!="0123456789abcdef0123456789abcdef"{t.Fatalf("restored credential key=%q",gotKey)}
 }
