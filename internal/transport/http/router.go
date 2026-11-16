@@ -311,13 +311,12 @@ func NewRouter(deps Dependencies) http.Handler {
 	return otelhttp.NewHandler(router, "agentmesh.http")
 }
 
-
 type sqliteDiagnosticSnapshot struct {
-	Ready         bool
-	SchemaVersion uint
+	Ready          bool
+	SchemaVersion  uint
 	MigrationDirty bool
-	Integrity     string
-	SizeBytes     int64
+	Integrity      string
+	SizeBytes      int64
 }
 
 // collectSQLiteDiagnostics reports only allow-listed SQLite facts; it never returns
