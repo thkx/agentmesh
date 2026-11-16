@@ -472,7 +472,11 @@ func (h *Handler) usage(c *gin.Context) {
 	if raw:=c.Query("offset");raw!="" { if n,err:=strconv.Atoi(raw);err==nil&&n>=0&&n<=1000000 { offset=n } else { h.render(c,pageData{Title:"Model Usage & Cost",Active:"usage",Error:"offset must be between 0 and 1000000"},http.StatusBadRequest);return } }
 	data:=pageData{Title:"Model Usage & Cost",Active:"usage",Counts:map[string]int64{},UsageSince:since.Format(time.RFC3339),UsageUntil:until.Format(time.RFC3339),UsageLimit:limit,UsageOffset:offset,UsageNextOffset:offset+limit}
 	if h.db!=nil {
-		_ = h.db.QueryRowContext(c.Request.Context(),`SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<?`,since.Format(time.RFC3339Nano),until.Format(time.RFC3339Nano)).Scan(&data.Counts["Requests"],&data.Counts["Input tokens"],&data.Counts["Output tokens"])
+		var requestCount, inputTokens, outputTokens int64
+		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<?`, since.Format(time.RFC3339Nano), until.Format(time.RFC3339Nano)).Scan(&requestCount, &inputTokens, &outputTokens)
+		data.Counts["Requests"] = requestCount
+		data.Counts["Input tokens"] = inputTokens
+		data.Counts["Output tokens"] = outputTokens
 		rows,err:=h.db.QueryContext(c.Request.Context(),`SELECT provider_id,model_id,COALESCE(currency,''),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? GROUP BY provider_id,model_id,currency ORDER BY SUM(total_tokens) DESC LIMIT 100`,since.Format(time.RFC3339Nano),until.Format(time.RFC3339Nano))
 		if err==nil { defer rows.Close(); for rows.Next(){var item usageView;if rows.Scan(&item.ProviderID,&item.ModelID,&item.Currency,&item.Requests,&item.InputTokens,&item.OutputTokens,&item.CostMicros)==nil{data.UsageRows=append(data.UsageRows,item)}} }
 		eventRows,eventErr:=h.db.QueryContext(c.Request.Context(),`SELECT id,occurred_at,provider_id,model_id,usage_source,COALESCE(currency,''),COALESCE(input_tokens,0),COALESCE(output_tokens,0),COALESCE(estimated_cost_micros,0),COALESCE(execution_id,''),COALESCE(attempt_id,'') FROM model_usage_events WHERE occurred_at>=? AND occurred_at<? ORDER BY occurred_at DESC,id DESC LIMIT ? OFFSET ?`,since.Format(time.RFC3339Nano),until.Format(time.RFC3339Nano),limit+1,offset)
