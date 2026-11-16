@@ -41,3 +41,23 @@ func TestMetricsNormalizesUnboundedLabels(t *testing.T) {
 		t.Fatalf("unbounded labels were not normalized: %s", body)
 	}
 }
+
+func TestMetricsRecordsModelGatewayOperationsWithBoundedLabels(t *testing.T) {
+	metrics := NewMetrics()
+	metrics.ObserveModelGateway("generate", "success", 125*time.Millisecond)
+	metrics.ObserveModelGateway("stream_open", "canceled", 10*time.Millisecond)
+	metrics.ObserveModelGateway("untrusted-operation", "untrusted-outcome", time.Second)
+
+	rec := httptest.NewRecorder()
+	metrics.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`agentmesh_model_gateway_requests_total{operation="generate",outcome="success"} 1`,
+		`agentmesh_model_gateway_requests_total{operation="stream_open",outcome="canceled"} 1`,
+		`agentmesh_model_gateway_requests_total{operation="other",outcome="error"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics output missing %q: %s", want, body)
+		}
+	}
+}
