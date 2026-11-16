@@ -17,6 +17,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -40,6 +42,69 @@ type CreateOptions struct {
 	CredentialKeyPath  string
 	ApplicationVersion string
 	SchemaVersion      uint
+}
+
+type ArchiveInfo struct {
+	Path     string
+	Manifest Manifest
+}
+
+// List verifies each regular *.backup archive before returning its manifest.
+// Invalid archives are reported as errors and are never treated as prune candidates.
+func List(directory string, passphrase []byte) ([]ArchiveInfo, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]ArchiveInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(strings.ToLower(entry.Name()), ".backup") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		path := filepath.Join(directory, entry.Name())
+		manifest, err := Verify(path, passphrase)
+		if err != nil {
+			return nil, fmt.Errorf("verify backup %s: %w", entry.Name(), err)
+		}
+		items = append(items, ArchiveInfo{Path: path, Manifest: manifest})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Manifest.CreatedAt.Equal(items[j].Manifest.CreatedAt) {
+			return items[i].Path > items[j].Path
+		}
+		return items[i].Manifest.CreatedAt.After(items[j].Manifest.CreatedAt)
+	})
+	return items, nil
+}
+
+// Prune removes only verified archives older than the newest keep entries.
+// At least one verified backup must always remain.
+func Prune(directory string, passphrase []byte, keep int) ([]string, error) {
+	if keep < 1 {
+		return nil, errors.New("backup retention must keep at least one archive")
+	}
+	items, err := List(directory, passphrase)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) <= keep {
+		return nil, nil
+	}
+	removed := make([]string, 0, len(items)-keep)
+	for _, item := range items[keep:] {
+		if err := os.Remove(item.Path); err != nil {
+			return removed, err
+		}
+		removed = append(removed, item.Path)
+	}
+	return removed, nil
 }
 
 func Create(ctx context.Context, opts CreateOptions, passphrase []byte, destination string) error {
