@@ -210,6 +210,6 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
-	dashboard.New(dashboard.Dependencies{DB: deps.DB, APIToken: deps.APIToken, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, APIToken: deps.APIToken, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
 	return router
 }
