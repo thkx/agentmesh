@@ -3,7 +3,7 @@
 **Branch:** `p5/control-plane`  
 **Base:** `p4/unified-execution-core`  
 **Scope:** M49–M52  
-**Status:** Implementation in progress; acceptance is not yet declared.
+**Status:** Accepted. The user's local Go 1.27.3 darwin/arm64 verification and GitHub Actions verification both passed.
 
 ## Implemented surfaces
 
@@ -62,11 +62,8 @@ bash scripts/verify-p5-part1.sh
 
 The script checks gofmt without modifying files, shell syntax, build, vet and race tests.
 
-**Current gate:** Go formatting has been applied by CI in commit `0414cfb6c2ec1d19a5014c70306a1f6b98691435`. Build, vet and race verification for the final Part 1 commit remain pending. Do not treat earlier failed intermediate commits or a formatting-only run as acceptance evidence. The final report must identify the exact commit SHA and the completed CI result; the user should also run the script on the local Go 1.27.3 darwin/arm64 environment.
+**Accepted commit:** `733f1224664bbb3b2e39f76ced4b310a74da65f0` on `p5/control-plane`.
 
-## Remaining acceptance work
+**Verification:** GitHub Actions and the user's local macOS run both passed. Local command: `bash scripts/verify-p5-part1.sh`, Go `go1.27.3 darwin/arm64`. The script completed formatting, shell syntax, build, vet and full race-test checks and printed `P5 Part 1 verification passed.`
 
-- Finish and review Dashboard-specific integration/security tests for service mutations and execution provenance.
-- Verify the exact final commit with Go 1.27.3 CI: gofmt, build, vet and race tests.
-- Run the acceptance script locally on the user's macOS environment.
-- Update the checklist only when the corresponding behavior and tests are verified.
+Part 1 is accepted. P5 Part 2 is specified in [p5-part2-operations.md](p5-part2-operations.md).
