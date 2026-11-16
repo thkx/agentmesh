@@ -89,3 +89,49 @@ func TestEncryptedBackupVerifyAndExtract(t *testing.T) {
 		t.Fatalf("restored credential key=%q", gotKey)
 	}
 }
+
+func TestListAndPruneOnlyVerifiedArchives(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec("CREATE TABLE schema_migrations(version INTEGER,dirty BOOLEAN); INSERT INTO schema_migrations(version,dirty) VALUES(44,0); CREATE TABLE sample(value TEXT);"); err != nil {
+		t.Fatal(err)
+	}
+	key := filepath.Join(t.TempDir(), "credential.key")
+	if err = os.WriteFile(key, []byte("0123456789abcdef0123456789abcdef"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	passphrase := []byte("a-long-test-passphrase")
+	for _, name := range []string{"one.backup", "two.backup", "three.backup"} {
+		if err = Create(context.Background(), CreateOptions{Database: db, CredentialKeyPath: key, ApplicationVersion: "test", SchemaVersion: 44}, passphrase, filepath.Join(directory, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := List(directory, passphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 {
+		t.Fatalf("listed %d backups, want 3", len(items))
+	}
+	removed, err := Prune(directory, passphrase, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("removed %d backups, want 2", len(removed))
+	}
+	items, err = List(directory, passphrase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("retained %d backups, want 1", len(items))
+	}
+	if _, err = Prune(directory, passphrase, 0); err == nil {
+		t.Fatal("prune accepted zero retention")
+	}
+}
