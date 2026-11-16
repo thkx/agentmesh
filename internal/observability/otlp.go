@@ -56,12 +56,32 @@ func ParseOTLPHeaders(raw string) (map[string]string, error) {
 			continue
 		}
 		name, value, ok := strings.Cut(part, "=")
-		if !ok || strings.TrimSpace(name) == "" || strings.ContainsAny(value, "\r\n") {
+		name = strings.TrimSpace(name)
+		if !ok || !validOTLPHeaderName(name) || strings.ContainsAny(value, "\\r\\n") {
 			return nil, errors.New("invalid OTLP headers environment value")
 		}
-		result[strings.TrimSpace(name)] = value
+		canonical := textproto.CanonicalMIMEHeaderKey(name)
+		if _, exists := result[canonical]; exists {
+			return nil, errors.New("duplicate OTLP header")
+		}
+		result[canonical] = strings.TrimSpace(value)
 	}
 	return result, nil
+}
+
+func validOTLPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' {
+			continue
+		}
+		if !strings.ContainsRune("!#$%&'*+-.^_`|~", r) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeOTLPEndpoint(raw string) (string, error) {
