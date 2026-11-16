@@ -261,3 +261,51 @@ func TestDashboardOperationsShowsActiveAndResolvedAlerts(t *testing.T) {
 		t.Fatalf("operational alerts not rendered: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDashboardGracefulShutdownRequiresSameOriginAndConfirmation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requests := make(chan struct{}, 1)
+	router := gin.New()
+	New(Dependencies{RequestShutdown: requests}).RegisterRoutes(router)
+
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Gracefully stop AgentMesh") {
+		t.Fatalf("operations page missing shutdown action: status=%d", page.Code)
+	}
+
+	crossOrigin := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=yes"))
+	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crossOrigin.Header.Set("Origin", "https://attacker.example")
+	crossOrigin.Host = "127.0.0.1"
+	rejected := httptest.NewRecorder()
+	router.ServeHTTP(rejected, crossOrigin)
+	if rejected.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin shutdown status=%d", rejected.Code)
+	}
+
+	unconfirmed := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=no"))
+	unconfirmed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unconfirmed.Header.Set("Origin", "http://127.0.0.1")
+	unconfirmed.Host = "127.0.0.1"
+	unconfirmedRec := httptest.NewRecorder()
+	router.ServeHTTP(unconfirmedRec, unconfirmed)
+	if unconfirmedRec.Code != http.StatusForbidden {
+		t.Fatalf("unconfirmed shutdown status=%d", unconfirmedRec.Code)
+	}
+
+	confirmed := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=yes"))
+	confirmed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	confirmed.Header.Set("Origin", "http://127.0.0.1")
+	confirmed.Host = "127.0.0.1"
+	confirmedRec := httptest.NewRecorder()
+	router.ServeHTTP(confirmedRec, confirmed)
+	if confirmedRec.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed shutdown status=%d body=%s", confirmedRec.Code, confirmedRec.Body.String())
+	}
+	select {
+	case <-requests:
+	default:
+		t.Fatal("graceful shutdown request was not sent")
+	}
+}
