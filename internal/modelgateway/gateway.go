@@ -246,17 +246,22 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 			output := make(chan StreamEvent)
 			requestKey := usageKey("")
 			go func() {
+				streamStarted := time.Now()
 				usageRecorded := false
 				defer close(output)
 				for {
 					select {
 					case <-ctx.Done():
+						g.observe("stream", streamStarted, ctx.Err())
 						return
 					case event, open := <-source:
 						if !open {
+							g.observe("stream", streamStarted, errors.New("provider stream ended without completion"))
 							return
 						}
 						normalizeStreamEvent(&event, model)
+						if event.Type == StreamEventError { g.observe("stream", streamStarted, errors.New("provider stream failed")) }
+						if event.Type == StreamEventCompleted { g.observe("stream", streamStarted, nil) }
 						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
 							g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
 							usageRecorded = true
@@ -310,20 +315,25 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-cha
 	requestKey := usageKey("")
 
 	go func() {
+		streamStarted := time.Now()
 		usageRecorded := false
 		defer close(output)
 
 		for {
 			select {
 			case <-ctx.Done():
+				g.observe("stream", streamStarted, ctx.Err())
 				return
 
 			case event, ok := <-source:
 				if !ok {
+					g.observe("stream", streamStarted, errors.New("provider stream ended without completion"))
 					return
 				}
 
 				normalizeStreamEvent(&event, model)
+				if event.Type == StreamEventError { g.observe("stream", streamStarted, errors.New("provider stream failed")) }
+				if event.Type == StreamEventCompleted { g.observe("stream", streamStarted, nil) }
 				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
 					g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
 					usageRecorded = true
