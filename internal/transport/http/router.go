@@ -77,6 +77,7 @@ type Dependencies struct {
 	CodingService         *coding.Service
 	APIToken              string
 	Alerts                *observability.AlertEvaluator
+	RequestShutdown       chan<- struct{}
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -136,6 +137,17 @@ func NewRouter(deps Dependencies) http.Handler {
 	alerts := deps.Alerts
 	if alerts == nil { alerts = observability.NewAlertEvaluator(100) }
 	api := router.Group("/api/v1")
+	api.GET("/operations/health", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		m := metrics.Snapshot()
+		status := http.StatusOK
+		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning { status = http.StatusServiceUnavailable }
+		c.JSON(status, gin.H{"database_available": snapshot.DatabaseAvailable, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_requests": snapshot.ProviderRequests, "provider_failures": snapshot.ProviderFailures, "usage_write_failures": m.UsageWriteFailures, "uptime_seconds": m.ProcessUptimeSeconds, "observed_at": snapshot.ObservedAt})
+	})
+	api.POST("/operations/shutdown", func(c *gin.Context) {
+		if deps.RequestShutdown == nil { c.JSON(http.StatusServiceUnavailable, gin.H{"error":"graceful shutdown is not configured"}); return }
+		select { case deps.RequestShutdown <- struct{}{}: c.JSON(http.StatusAccepted, gin.H{"status":"shutdown_requested"}); default: c.JSON(http.StatusConflict, gin.H{"status":"shutdown_already_requested"}) }
+	})
 	api.GET("/operations/alerts", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
 		active := alerts.Evaluate(snapshot)
