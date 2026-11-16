@@ -294,8 +294,10 @@ func TestGatewayObserverRecordsGenerateAndStreamSetup(t *testing.T) {
 	if _, err := gateway.Generate(context.Background(), validGatewayRequest()); err != nil {
 		t.Fatal(err)
 	}
-	adapter.stream = make(chan StreamEvent)
+	source := make(chan StreamEvent)
+	adapter.stream = source
 	stream, err := gateway.Stream(context.Background(), validGatewayRequest())
+	close(source)
 	if err != nil {
 		t.Fatal(err)
 	}
