@@ -76,6 +76,7 @@ type Dependencies struct {
 	Collaboration         *collaboration.Service
 	CodingService         *coding.Service
 	APIToken              string
+	Alerts                *observability.AlertEvaluator
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -132,7 +133,14 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
+	alerts := deps.Alerts
+	if alerts == nil { alerts = observability.NewAlertEvaluator(100) }
 	api := router.Group("/api/v1")
+	api.GET("/operations/alerts", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		active := alerts.Evaluate(snapshot)
+		c.JSON(http.StatusOK, gin.H{"active": active, "history": alerts.History(), "observed_at": snapshot.ObservedAt})
+	})
 	api.GET("/diagnostics/report", func(c *gin.Context) {
 		dbReady := false
 		if deps.DB != nil {
@@ -229,6 +237,25 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
-	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, APIToken: deps.APIToken, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
 	return otelhttp.NewHandler(router, "agentmesh.http")
+}
+
+// operationalAlertSnapshot reads only bounded operational facts; query failures never expose raw SQL errors.
+func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observability.Metrics) observability.AlertSnapshot {
+	s := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
+	if db != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		s.DatabaseAvailable = db.PingContext(pingCtx) == nil
+		cancel()
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&s.ProviderRequests, &s.ReconciliationBacklog)
+	}
+	if metrics != nil {
+		m := metrics.Snapshot()
+		s.WorkerRunning = m.RuntimeWorkers > 0
+		s.ProviderRequests = m.ModelGatewayCount
+		s.ProviderFailures = m.ModelGatewayFailures
+		s.ReconciliationBacklog = m.ExecutionBacklog
+	}
+	return s
 }
