@@ -17,6 +17,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P5 Product Control Plane](p5-product-control-plane.md) | M49–M52 Dashboard architecture, security boundary and acceptance contract |
 | [P5 Part 1 Checklist](p5-part1-checklist.md) | M49–M52 implementation tasks and final acceptance gates |
 | [P5 Part 1 Implementation](p5-part1-implementation.md) | Dashboard implementation record and exact verification gates |
+| [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |
 
 ## Architecture and implementation history
 
@@ -60,7 +61,7 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 ## P3: Agent Collaboration Plane
 
 - P3 collaboration contract: [p3-collaboration.md](p3-collaboration.md)
-- Verification entry point: bash scripts/verify-p3.sh
+- Verification entry point: `bash scripts/verify-p3.sh`
 - Database migrations: 000024_collaboration_core and 000025_collaboration_governance
 
 ## P4 Part 2
@@ -69,16 +70,16 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 - Verification entry point: `bash scripts/verify-p4-part2.sh`
 - Migration: `internal/platform/database/migrations/000043_execution_lifecycle_enforcement.*.sql`
 
-
 ## P4 Part 3
 
 - Implementation record: [p4-part3-implementation.md](p4-part3-implementation.md)
 - Verification entry point: `bash scripts/verify-p4-part3.sh`
 - Additive HTTP read APIs: `/api/v1/managed-executions/:id/detail` and `/api/v1/managed-executions/:id/timeline`
 
-## P5 Part 1
+## P5
 
-- Architecture: [p5-product-control-plane.md](p5-product-control-plane.md)
-- Implementation record: [p5-part1-implementation.md](p5-part1-implementation.md)
-- Delivery checklist: [p5-part1-checklist.md](p5-part1-checklist.md)
-- Verification entry point: `bash scripts/verify-p5-part1.sh`
+- Part 1 architecture: [p5-product-control-plane.md](p5-product-control-plane.md)
+- Part 1 implementation record: [p5-part1-implementation.md](p5-part1-implementation.md)
+- Part 1 delivery checklist: [p5-part1-checklist.md](p5-part1-checklist.md)
+- Part 1 verification entry point: `bash scripts/verify-p5-part1.sh`
+- Part 2 architecture and delivery plan: [p5-part2-operations.md](p5-part2-operations.md)
