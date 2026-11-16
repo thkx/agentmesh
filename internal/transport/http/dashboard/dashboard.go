@@ -463,7 +463,7 @@ func (h *Handler) requestGracefulShutdown(c *gin.Context) {
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
-	data := pageData{Title: "Operations Metrics", Active: "operations", DatabaseIntegrity: "unknown"}
+	data := pageData{Title: "Operations Metrics", Active: "operations", OperationsHealth: operationsHealthView{DatabaseIntegrity: "unknown"}}
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
 		data.OperationsHealth.Version = info.Main.Version
 	} else {
