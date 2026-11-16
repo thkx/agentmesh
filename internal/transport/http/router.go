@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -174,32 +175,30 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"active": active, "history": alerts.History(), "observed_at": snapshot.ObservedAt})
 	})
 	api.GET("/diagnostics/report", func(c *gin.Context) {
-		dbReady := false
-		if deps.DB != nil {
-			ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
-			defer cancel()
-			dbReady = deps.DB.PingContext(ctx) == nil
-		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+		dbState := collectSQLiteDiagnostics(ctx, deps.DB, true)
 		version := "development"
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
 			version = info.Main.Version
 		}
 		snap := metrics.Snapshot()
-		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbReady, RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbState.Ready, SchemaVersion: dbState.SchemaVersion, MigrationDirty: dbState.MigrationDirty, DatabaseIntegrity: dbState.Integrity, DatabaseSizeBytes: dbState.SizeBytes, RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
 		c.JSON(http.StatusOK, report)
 	})
 	api.GET("/diagnostics/bundle", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		dbState := collectSQLiteDiagnostics(c.Request.Context(), deps.DB, true)
 		m := metrics.Snapshot()
 		version := "development"
 		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
 			version = info.Main.Version
 		}
-		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(m.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: snapshot.DatabaseAvailable, WorkerCount: int(m.RuntimeWorkers), RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(m.HTTPRequestCount), "model_requests": int64(m.ModelGatewayCount), "http_in_flight": m.HTTPRequestsInFlight, "execution_backlog": m.ExecutionBacklog, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "usage_write_failures": int64(m.UsageWriteFailures)}}, time.Now().UTC())
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(m.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbState.Ready, SchemaVersion: dbState.SchemaVersion, MigrationDirty: dbState.MigrationDirty, DatabaseIntegrity: dbState.Integrity, DatabaseSizeBytes: dbState.SizeBytes, WorkerCount: int(m.RuntimeWorkers), RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(m.HTTPRequestCount), "model_requests": int64(m.ModelGatewayCount), "http_in_flight": m.HTTPRequestsInFlight, "execution_backlog": m.ExecutionBacklog, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "usage_write_failures": int64(m.UsageWriteFailures)}}, time.Now().UTC())
 		reportJSON, _ := json.MarshalIndent(report, "", "  ")
 		var metricsBuffer bytes.Buffer
 		metrics.Handler().ServeHTTP(&metricsResponseWriter{header: make(http.Header), body: &metricsBuffer}, c.Request)
-		healthJSON, _ := json.MarshalIndent(gin.H{"database_available": snapshot.DatabaseAvailable, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_failures": m.ProviderFailures, "usage_write_failures": m.UsageWriteFailures}, "", "  ")
+		healthJSON, _ := json.MarshalIndent(gin.H{"database_available": snapshot.DatabaseAvailable, "database_integrity": dbState.Integrity, "database_size_bytes": dbState.SizeBytes, "schema_version": dbState.SchemaVersion, "migration_dirty": dbState.MigrationDirty, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_failures": m.ProviderFailures, "usage_write_failures": m.UsageWriteFailures}, "", "  ")
 		var bundle bytes.Buffer
 		zw := zip.NewWriter(&bundle)
 		for name, data := range map[string][]byte{"diagnostics.json": reportJSON, "metrics.prom": metricsBuffer.Bytes(), "health.json": healthJSON} {
@@ -305,6 +304,57 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
 	return otelhttp.NewHandler(router, "agentmesh.http")
+}
+
+
+type sqliteDiagnosticSnapshot struct {
+	Ready         bool
+	SchemaVersion uint
+	MigrationDirty bool
+	Integrity     string
+	SizeBytes     int64
+}
+
+// collectSQLiteDiagnostics reports only allow-listed SQLite facts; it never returns
+// database paths or raw driver errors. quick_check is reserved for diagnostics calls.
+func collectSQLiteDiagnostics(ctx context.Context, db *sql.DB, checkIntegrity bool) sqliteDiagnosticSnapshot {
+	state := sqliteDiagnosticSnapshot{Integrity: "unknown"}
+	if db == nil {
+		return state
+	}
+	if db.PingContext(ctx) == nil {
+		state.Ready = true
+	}
+	var version uint
+	var dirty bool
+	if err := db.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version, &dirty); err == nil {
+		state.SchemaVersion = version
+		state.MigrationDirty = dirty
+	}
+	rows, err := db.QueryContext(ctx, "PRAGMA database_list")
+	if err == nil {
+		for rows.Next() {
+			var sequence int
+			var name, file string
+			if rows.Scan(&sequence, &name, &file) == nil && name == "main" && file != "" {
+				if info, statErr := os.Stat(file); statErr == nil && info.Mode().IsRegular() {
+					state.SizeBytes = info.Size()
+				}
+			}
+		}
+		_ = rows.Close()
+	}
+	if checkIntegrity {
+		var result string
+		if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&result); err == nil {
+			if strings.EqualFold(strings.TrimSpace(result), "ok") {
+				state.Integrity = "ok"
+			} else {
+				state.Integrity = "failed"
+			}
+		}
+	}
+	return state
 }
 
 // operationalAlertSnapshot reads only bounded operational facts; query failures never expose raw SQL errors.
