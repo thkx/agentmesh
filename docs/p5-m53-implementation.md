@@ -28,6 +28,7 @@
 - When `AGENTMESH_API_TOKEN` is configured, metrics access requires the existing Bearer API token. Dashboard cookies do not authorize this endpoint.
 - HTTP request count, duration histogram, in-flight requests and process uptime are recorded.
 - Model Gateway generate and stream-open operation counts and setup durations are recorded through an observer hook.
+- Dashboard adds an Operations page with in-process request/model gateway totals and a pointer to the protected Prometheus scrape endpoint.
 - Metric labels are restricted to registered Gin route patterns, a finite HTTP method set, status codes, operation names and outcome names. No model IDs, provider IDs, execution IDs, request IDs, prompts or arbitrary error strings are labels.
 - Metrics remain in process memory and are not exported to an external service.
 
@@ -36,7 +37,7 @@
 - Trace ID propagation is implemented; OpenTelemetry spans/exporter integration is not yet implemented.
 - Model Gateway stream metrics currently measure stream-open/setup latency, not full stream lifetime. HTTP duration covers the full HTTP streaming response.
 - Runtime worker and execution-specific gauges are not yet exposed.
-- In-app alert evaluation and Dashboard metrics/alerts pages are not yet implemented.
+- In-app alert evaluation and alert history/rules are not yet implemented. The initial Dashboard Operations metrics summary is implemented.
 - No external telemetry or notification delivery is enabled.
 
 These are deliberate remaining deliverables, not accepted features. Do not mark M53 complete until the remaining work and tests are finished.
