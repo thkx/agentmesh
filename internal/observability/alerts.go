@@ -22,6 +22,7 @@ type AlertSnapshot struct {
 	ProviderRequests      uint64
 	ProviderFailures      uint64
 	ReconciliationBacklog int64
+	UsageWriteFailures uint64
 	ObservedAt            time.Time
 }
 
@@ -69,6 +70,7 @@ func NewAlertEvaluator(historyLimit int) *AlertEvaluator {
 				return s.ProviderRequests >= 5 && s.ProviderFailures*2 >= s.ProviderRequests
 			}},
 			{id: "reconciliation_backlog", severity: AlertWarning, title: "Execution reconciliation backlog", description: "The execution reconciliation backlog exceeds the operational threshold.", matches: func(s AlertSnapshot) bool { return s.ReconciliationBacklog > 10 }},
+			{id: "usage_ledger_write_failures", severity: AlertCritical, title: "Usage ledger write failures", description: "One or more provider usage records could not be persisted; token and cost reporting may be incomplete.", matches: func(s AlertSnapshot) bool { return s.UsageWriteFailures > 0 }},
 		},
 	}
 }
