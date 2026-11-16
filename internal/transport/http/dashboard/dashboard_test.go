@@ -248,3 +248,16 @@ func TestDashboardOperationsMetricsPage(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardOperationsShowsActiveAndResolvedAlerts(t *testing.T) {
+	metrics:=observability.NewMetrics()
+	alerts:=observability.NewAlertEvaluator(10)
+	gin.SetMode(gin.TestMode)
+	router:=gin.New()
+	New(Dependencies{Metrics:metrics,Alerts:alerts}).RegisterRoutes(router)
+	rec:=httptest.NewRecorder()
+	router.ServeHTTP(rec,httptest.NewRequest(http.MethodGet,"/dashboard/operations/metrics",nil))
+	if rec.Code!=http.StatusOK||!strings.Contains(rec.Body.String(),"Database unavailable")||!strings.Contains(rec.Body.String(),"Runtime worker stopped") {
+		t.Fatalf("operational alerts not rendered: status=%d body=%s",rec.Code,rec.Body.String())
+	}
+}
