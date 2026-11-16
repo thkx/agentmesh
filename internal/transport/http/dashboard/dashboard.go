@@ -42,6 +42,7 @@ const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
 	Metrics             *observability.Metrics
+	Alerts              *observability.AlertEvaluator
 	DB                  *sql.DB
 	APIToken            string
 	ExecutionManager    *manager.Manager
@@ -57,6 +58,7 @@ type Dependencies struct {
 
 type Handler struct {
 	metrics             *observability.Metrics
+	alerts              *observability.AlertEvaluator
 	db                  *sql.DB
 	token               string
 	manager             *manager.Manager
@@ -112,6 +114,8 @@ type pageData struct {
 	TimelineHasMore  bool
 	TimelineNextURL  string
 	RunResult        string
+	ActiveAlerts      []observability.Alert
+	AlertHistory      []observability.Alert
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
@@ -189,6 +193,7 @@ func New(d Dependencies) *Handler {
 	h := &Handler{
 		db:                  d.DB,
 		metrics:             d.Metrics,
+		alerts:              d.Alerts,
 		token:               d.APIToken,
 		manager:             d.ExecutionManager,
 		providerRegistry:    d.Providers,
@@ -409,16 +414,40 @@ func (h *Handler) logout(c *gin.Context) {
 }
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
-	snapshot := h.metrics.Snapshot()
+	if h.metrics == nil { h.metrics = observability.NewMetrics() }
+	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
+	if h.db != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		snapshot.DatabaseAvailable = h.db.PingContext(ctx) == nil
+		cancel()
+		var active, backlog int64
+		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&active, &backlog)
+		h.metrics.SetExecutionState(active, backlog)
+	}
+	m := h.metrics.Snapshot()
+	snapshot.WorkerRunning = m.RuntimeWorkers > 0
+	snapshot.ProviderRequests = m.ModelGatewayCount
+	snapshot.ProviderFailures = m.ProviderFailures
+	snapshot.ReconciliationBacklog = m.ExecutionBacklog
+	var activeAlerts []observability.Alert
+	var alertHistory []observability.Alert
+	if h.alerts != nil {
+		activeAlerts = h.alerts.Evaluate(snapshot)
+		alertHistory = h.alerts.History()
+	}
 	h.render(c, pageData{
-		Title:  "Operations Metrics",
-		Active: "operations",
+		Title: "Operations Metrics", Active: "operations",
 		Counts: map[string]int64{
-			"HTTP requests":          int64(snapshot.HTTPRequestCount),
-			"Model Gateway requests": int64(snapshot.ModelGatewayCount),
-			"HTTP in flight":         snapshot.HTTPRequestsInFlight,
-			"Process uptime seconds": int64(snapshot.ProcessUptimeSeconds),
+			"HTTP requests": int64(m.HTTPRequestCount),
+			"Model Gateway requests": int64(m.ModelGatewayCount),
+			"HTTP in flight": m.HTTPRequestsInFlight,
+			"Runtime workers": m.RuntimeWorkers,
+			"Active executions": m.ActiveExecutions,
+			"Execution backlog": m.ExecutionBacklog,
+			"Usage write failures": int64(m.UsageWriteFailures),
+			"Process uptime seconds": int64(m.ProcessUptimeSeconds),
 		},
+		ActiveAlerts: activeAlerts, AlertHistory: alertHistory,
 	}, http.StatusOK)
 }
 
