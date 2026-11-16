@@ -63,7 +63,25 @@ func TestOTLPEndpointRequiresTLSOutsideLoopback(t *testing.T) {
 	if _, err := NewOTLPTraceProvider("https://collector.example:4318", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ParseOTLPHeaders("Authorization=***"); err == nil {
-		t.Fatal("header injection accepted")
+}
+
+func TestOTLPHeadersValidation(t *testing.T) {
+	headers, err := ParseOTLPHeaders("Authorization=Bearer-token,X-Collector-Key=secret")
+	if err != nil {
+		t.Fatalf("valid headers rejected: %v", err)
+	}
+	if headers["Authorization"] != "Bearer-token" || headers["X-Collector-Key"] != "secret" {
+		t.Fatalf("unexpected parsed headers: %#v", headers)
+	}
+
+	for _, raw := range []string{
+		"Authorization=Bearer\\r\\nInjected: yes",
+		"Bad Header=value",
+		"=value",
+		"Authorization=value\\nInjected=yes",
+	} {
+		if _, err := ParseOTLPHeaders(raw); err == nil {
+			t.Errorf("invalid header accepted: %q", raw)
+		}
 	}
 }
