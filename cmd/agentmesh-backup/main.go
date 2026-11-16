@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/thkx/agentmesh/internal/config"
 	"github.com/thkx/agentmesh/internal/operations/backup"
@@ -53,6 +54,38 @@ func main() {
 			fatal(err.Error())
 		}
 		fmt.Println("Encrypted backup created:", *output)
+	case "list":
+		fs := flag.NewFlagSet("list", flag.ExitOnError)
+		directory := fs.String("directory", "./backups", "directory containing encrypted *.backup archives")
+		_ = fs.Parse(os.Args[2:])
+		if len(pass) < 12 {
+			fatal("AGENTMESH_BACKUP_PASSPHRASE (at least 12 bytes) is required")
+		}
+		items, err := backup.List(*directory, pass)
+		if err != nil {
+			fatal(err.Error())
+		}
+		for _, item := range items {
+			fmt.Printf("%s  created=%s  version=%s  schema=%d\\n", item.Path, item.Manifest.CreatedAt.UTC().Format(time.RFC3339), item.Manifest.ApplicationVersion, item.Manifest.SchemaVersion)
+		}
+	case "prune":
+		fs := flag.NewFlagSet("prune", flag.ExitOnError)
+		directory := fs.String("directory", "./backups", "directory containing encrypted *.backup archives")
+		keep := fs.Int("keep", 10, "number of newest verified backups to retain (minimum 1)")
+		_ = fs.Parse(os.Args[2:])
+		if len(pass) < 12 {
+			fatal("AGENTMESH_BACKUP_PASSPHRASE (at least 12 bytes) is required")
+		}
+		removed, err := backup.Prune(*directory, pass, *keep)
+		if err != nil {
+			fatal(err.Error())
+		}
+		for _, path := range removed {
+			fmt.Println("Removed verified old backup:", path)
+		}
+		if len(removed) == 0 {
+			fmt.Println("No backups removed.")
+		}
 	case "verify":
 		fs := flag.NewFlagSet("verify", flag.ExitOnError)
 		archive := fs.String("archive", "", "backup archive")
@@ -113,6 +146,6 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|verify|restore|apply-restore> [flags]\nPassphrase is read only from AGENTMESH_BACKUP_PASSPHRASE and is never persisted.")
+	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|list|prune|verify|restore|apply-restore> [flags]\nPassphrase is read only from AGENTMESH_BACKUP_PASSPHRASE and is never persisted.")
 }
 func fatal(message string) { fmt.Fprintln(os.Stderr, "agentmesh-backup:", message); os.Exit(1) }
