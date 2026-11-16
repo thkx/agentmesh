@@ -25,8 +25,9 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
-	"github.com/thkx/agentmesh/internal/observability"
 	"log/slog"
+
+	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
 	"github.com/thkx/agentmesh/internal/reflection"
