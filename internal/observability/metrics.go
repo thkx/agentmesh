@@ -44,6 +44,11 @@ type Metrics struct {
 	mu            sync.RWMutex
 	requests      map[requestKey]*requestStats
 	modelRequests map[modelRequestKey]*modelRequestStats
+	runtimeWorkers atomic.Int64
+	activeExecutions atomic.Int64
+	executionBacklog atomic.Int64
+	usageWriteFailures atomic.Uint64
+	providerFailures atomic.Uint64
 }
 
 func NewMetrics() *Metrics {
@@ -115,6 +120,10 @@ func normalizeRoute(route string) string {
 	return route
 }
 
+func (m *Metrics) AddRuntimeWorkers(delta int64) { if m != nil { m.runtimeWorkers.Add(delta) } }
+func (m *Metrics) SetExecutionState(active, backlog int64) { if m != nil { m.activeExecutions.Store(max(0, active)); m.executionBacklog.Store(max(0, backlog)) } }
+func (m *Metrics) ObserveUsageWriteFailure() { if m != nil { m.usageWriteFailures.Add(1) } }
+
 func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Duration) {
 	if m == nil {
 		return
@@ -131,6 +140,7 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	if seconds < 0 {
 		seconds = 0
 	}
+	if outcome == "error" { m.providerFailures.Add(1) }
 	key := modelRequestKey{operation: operation, outcome: outcome}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -148,6 +158,11 @@ type Snapshot struct {
 	ModelGatewayCount    uint64
 	HTTPRequestsInFlight int64
 	ProcessUptimeSeconds float64
+	RuntimeWorkers int64
+	ActiveExecutions int64
+	ExecutionBacklog int64
+	ProviderFailures uint64
+	UsageWriteFailures uint64
 }
 
 func (m *Metrics) Snapshot() Snapshot {
@@ -157,6 +172,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	result := Snapshot{
 		HTTPRequestsInFlight: m.inFlight.Load(),
 		ProcessUptimeSeconds: time.Since(m.started).Seconds(),
+		RuntimeWorkers: m.runtimeWorkers.Load(), ActiveExecutions: m.activeExecutions.Load(), ExecutionBacklog: m.executionBacklog.Load(), ProviderFailures: m.providerFailures.Load(), UsageWriteFailures: m.usageWriteFailures.Load(),
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -243,6 +259,18 @@ func (m *Metrics) Handler() http.Handler {
 		_, _ = fmt.Fprintln(w, "# HELP agentmesh_http_requests_in_flight Current number of HTTP requests being handled.")
 		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_http_requests_in_flight gauge")
 		_, _ = fmt.Fprintf(w, "agentmesh_http_requests_in_flight %d\n", m.inFlight.Load())
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_runtime_workers Current running runtime worker loops.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_runtime_workers gauge")
+		_, _ = fmt.Fprintf(w, "agentmesh_runtime_workers %d\\n", m.runtimeWorkers.Load())
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_active_executions Current active executions.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_active_executions gauge")
+		_, _ = fmt.Fprintf(w, "agentmesh_active_executions %d\\n", m.activeExecutions.Load())
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_execution_backlog Queued and reconciling executions.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_execution_backlog gauge")
+		_, _ = fmt.Fprintf(w, "agentmesh_execution_backlog %d\\n", m.executionBacklog.Load())
+		_, _ = fmt.Fprintln(w, "# HELP agentmesh_usage_write_failures_total Failed durable usage writes.")
+		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_usage_write_failures_total counter")
+		_, _ = fmt.Fprintf(w, "agentmesh_usage_write_failures_total %d\\n", m.usageWriteFailures.Load())
 		_, _ = fmt.Fprintln(w, "# HELP agentmesh_process_uptime_seconds Process uptime in seconds.")
 		_, _ = fmt.Fprintln(w, "# TYPE agentmesh_process_uptime_seconds gauge")
 		_, _ = fmt.Fprintf(w, "agentmesh_process_uptime_seconds %s\n", strconv.FormatFloat(time.Since(m.started).Seconds(), 'f', 3, 64))
