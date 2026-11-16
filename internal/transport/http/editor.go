@@ -1,17 +1,17 @@
 package http
 
 import (
-	"embed"
-	"github.com/gin-gonic/gin"
 	"net/http"
+
+	"github.com/gin-gonic/gin"
+	webassets "github.com/thkx/agentmesh/web"
 )
 
-//go:embed workflow-editor/index.html workflow-editor/app.js
-var workflowEditor embed.FS
-
+// registerWorkflowEditor serves the editor's source assets from the shared web
+// embed filesystem. Browser-facing files live under the repository-root web/ directory.
 func registerWorkflowEditor(r *gin.Engine) {
 	r.GET("/workflow-editor", func(c *gin.Context) {
-		b, err := workflowEditor.ReadFile("workflow-editor/index.html")
+		b, err := webassets.Assets.ReadFile("workflow-editor/index.html")
 		if err != nil {
 			c.Status(http.StatusNotFound)
 			return
@@ -19,7 +19,7 @@ func registerWorkflowEditor(r *gin.Engine) {
 		c.Data(http.StatusOK, "text/html; charset=utf-8", b)
 	})
 	r.GET("/workflow-editor/app.js", func(c *gin.Context) {
-		b, err := workflowEditor.ReadFile("workflow-editor/app.js")
+		b, err := webassets.Assets.ReadFile("workflow-editor/app.js")
 		if err != nil {
 			c.Status(http.StatusNotFound)
 			return
