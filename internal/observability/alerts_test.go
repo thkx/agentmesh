@@ -55,3 +55,11 @@ func TestAlertEvaluatorProviderAndBacklogThresholds(t *testing.T) {
 		t.Fatalf("unexpected active alerts: %#v", active)
 	}
 }
+
+func TestUsageLedgerWriteFailureRaisesCriticalAlert(t *testing.T) {
+	evaluator:=NewAlertEvaluator(10)
+	active:=evaluator.Evaluate(AlertSnapshot{DatabaseAvailable:true,WorkerRunning:true,UsageWriteFailures:1,ObservedAt:time.Date(2026,11,16,0,0,0,0,time.UTC)})
+	found:=false
+	for _,alert:=range active{if alert.RuleID=="usage_ledger_write_failures"&&alert.Severity==AlertCritical{found=true}}
+	if !found{t.Fatalf("usage ledger failure alert missing: %#v",active)}
+}
