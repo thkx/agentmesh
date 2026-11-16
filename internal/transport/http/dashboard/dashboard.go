@@ -165,7 +165,7 @@ type artifactView struct {
 }
 type evidenceView struct{ ID, ArtifactID, VersionID, Kind, Statement, ExecutionID, AttemptID string }
 type usageView struct {
-	ProviderID, ModelID                             string
+	ProviderID, ModelID, Currency                   string
 	Requests, InputTokens, OutputTokens, CostMicros int64
 }
 type eventView struct {
@@ -426,18 +426,17 @@ func (h *Handler) usage(c *gin.Context) {
 	data := pageData{Title: "Model Usage & Cost", Active: "usage", Counts: map[string]int64{}}
 	if h.db != nil {
 		since := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(time.RFC3339Nano)
-		var requests, inputTokens, outputTokens, costMicros int64
-		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=?`, since).Scan(&requests, &inputTokens, &outputTokens, &costMicros)
+		var requests, inputTokens, outputTokens int64
+		_ = h.db.QueryRowContext(c.Request.Context(), `SELECT COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0) FROM model_usage_events WHERE occurred_at>=?`, since).Scan(&requests, &inputTokens, &outputTokens)
 		data.Counts["Requests"] = requests
 		data.Counts["Input tokens"] = inputTokens
 		data.Counts["Output tokens"] = outputTokens
-		data.Counts["Estimated cost (micro USD)"] = costMicros
-		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT provider_id,model_id,COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? GROUP BY provider_id,model_id ORDER BY SUM(total_tokens) DESC LIMIT 100`, since)
+		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT provider_id,model_id,COALESCE(currency,''),COUNT(*),COALESCE(SUM(input_tokens),0),COALESCE(SUM(output_tokens),0),COALESCE(SUM(estimated_cost_micros),0) FROM model_usage_events WHERE occurred_at>=? GROUP BY provider_id,model_id,currency ORDER BY SUM(total_tokens) DESC LIMIT 100`, since)
 		if err == nil {
 			defer rows.Close()
 			for rows.Next() {
 				var item usageView
-				if rows.Scan(&item.ProviderID, &item.ModelID, &item.Requests, &item.InputTokens, &item.OutputTokens, &item.CostMicros) == nil {
+				if rows.Scan(&item.ProviderID, &item.ModelID, &item.Currency, &item.Requests, &item.InputTokens, &item.OutputTokens, &item.CostMicros) == nil {
 					data.UsageRows = append(data.UsageRows, item)
 				}
 			}
