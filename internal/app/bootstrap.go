@@ -164,7 +164,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("AGENTMESH_API_TOKEN is required when server host is not loopback")
 	}
 
-	log, err := logger.New(cfg.Log.Level, cfg.Log.Format)
+	log, logBuffer, err := logger.NewBuffered(cfg.Log.Level, cfg.Log.Format, 100)
 	if err != nil {
 		return nil, fmt.Errorf("initialize logger: %w", err)
 	}
@@ -705,7 +705,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 
 	shutdownRequests := make(chan struct{}, 1)
 	container := &Container{
-		Config: cfg, Logger: log, Metrics: metrics, RequestShutdown: shutdownRequests, DB: sqliteDB.DB, ShutdownRequests: shutdownRequests, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
+		Config: cfg, Logger: log, LogBuffer: logBuffer, Metrics: metrics, RequestShutdown: shutdownRequests, DB: sqliteDB.DB, ShutdownRequests: shutdownRequests, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
 		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, CLIExecutionAdapter: cliExecutionAdapter, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResources: aiResources, AIRouter: aiRouter,
 	}
