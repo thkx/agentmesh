@@ -85,10 +85,12 @@ func main() {
 		}
 		defer os.RemoveAll(staging)
 		if _, err = backup.ExtractVerified(*archive, pass, staging); err != nil {
+			_ = os.RemoveAll(staging)
 			fatal(err.Error())
 		}
 		result, err := backup.ApplyRestoreOffline(staging, *databasePath, *credentialKey, *backupDir, true)
 		if err != nil {
+			_ = os.RemoveAll(staging)
 			fatal(err.Error())
 		}
 		fmt.Printf("Offline restore applied. Previous database: %s; previous credential key: %s\n", result.DatabaseBackup, result.CredentialKeyBackup)
