@@ -52,6 +52,21 @@ type UsageObserver interface {
 	ObserveModelUsage(context.Context, provider.ID, string, Usage, time.Time, string)
 }
 
+type executionProvenanceKey struct{}
+
+type ExecutionProvenance struct { ExecutionID string; AttemptID string }
+
+// WithExecutionProvenance attaches durable execution identity to a model request context.
+func WithExecutionProvenance(ctx context.Context, executionID, attemptID string) context.Context {
+	return context.WithValue(ctx, executionProvenanceKey{}, ExecutionProvenance{ExecutionID: executionID, AttemptID: attemptID})
+}
+
+// ExecutionProvenanceFromContext returns explicit provenance without inspecting prompts or request payloads.
+func ExecutionProvenanceFromContext(ctx context.Context) ExecutionProvenance {
+	value, _ := ctx.Value(executionProvenanceKey{}).(ExecutionProvenance)
+	return value
+}
+
 type Gateway struct {
 	observer      Observer
 	usageObserver UsageObserver
