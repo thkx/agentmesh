@@ -10,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type requestContextKey string
@@ -38,16 +40,24 @@ func requestCorrelationMiddleware(logger *slog.Logger) gin.HandlerFunc {
 		if !validCorrelationID(requestID, 64) {
 			requestID = randomHex(16)
 		}
-		traceID := traceIDFromParent(c.GetHeader("traceparent"))
-		if traceID == "" {
-			traceID = randomHex(16)
+		ctx := c.Request.Context()
+		if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
+			traceID := spanContext.TraceID().String()
+			ctx = context.WithValue(ctx, traceIDKey, traceID)
+			trace.SpanFromContext(ctx).SetAttributes(attribute.String("agentmesh.request_id", requestID))
+		} else {
+			traceID := traceIDFromParent(c.GetHeader("traceparent"))
+			if traceID == "" {
+				traceID = randomHex(16)
+			}
+			ctx = context.WithValue(ctx, traceIDKey, traceID)
 		}
 
-		ctx := context.WithValue(c.Request.Context(), requestIDKey, requestID)
+		ctx = context.WithValue(ctx, requestIDKey, requestID)
 		ctx = context.WithValue(ctx, traceIDKey, traceID)
 		c.Request = c.Request.WithContext(ctx)
 		c.Header("X-Request-ID", requestID)
-		c.Header("X-Trace-ID", traceID)
+		c.Header("X-Trace-ID", TraceIDFromContext(ctx))
 
 		started := time.Now()
 		c.Next()
