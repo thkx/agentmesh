@@ -1501,4 +1501,3 @@ func isLoopbackRequest(r *http.Request) bool {
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
 }
-
