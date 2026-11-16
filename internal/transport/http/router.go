@@ -3,10 +3,10 @@ package http
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/json"
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -34,9 +34,9 @@ import (
 
 	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/operations/diagnostics"
-	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
@@ -124,7 +124,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.Next()
 	})
 	registerWorkflowEditor(router)
-	router.GET("/metrics", func(c *gin.Context) { _ = operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics); metrics.Handler().ServeHTTP(c.Writer, c.Request) })
+	router.GET("/metrics", func(c *gin.Context) {
+		_ = operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		metrics.Handler().ServeHTTP(c.Writer, c.Request)
+	})
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.DB == nil || deps.Providers == nil || deps.Models == nil || deps.Adapters == nil || deps.ProviderRuntime == nil || deps.Gateway == nil || deps.Repository == nil || deps.AgentExecutor == nil || deps.AgentRuntime == nil || deps.Workspaces == nil {
@@ -140,18 +143,30 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
 	alerts := deps.Alerts
-	if alerts == nil { alerts = observability.NewAlertEvaluator(100) }
+	if alerts == nil {
+		alerts = observability.NewAlertEvaluator(100)
+	}
 	api := router.Group("/api/v1")
 	api.GET("/operations/health", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
 		m := metrics.Snapshot()
 		status := http.StatusOK
-		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning { status = http.StatusServiceUnavailable }
+		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning {
+			status = http.StatusServiceUnavailable
+		}
 		c.JSON(status, gin.H{"database_available": snapshot.DatabaseAvailable, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_requests": snapshot.ProviderRequests, "provider_failures": snapshot.ProviderFailures, "usage_write_failures": m.UsageWriteFailures, "uptime_seconds": m.ProcessUptimeSeconds, "observed_at": snapshot.ObservedAt})
 	})
 	api.POST("/operations/shutdown", func(c *gin.Context) {
-		if deps.RequestShutdown == nil { c.JSON(http.StatusServiceUnavailable, gin.H{"error":"graceful shutdown is not configured"}); return }
-		select { case deps.RequestShutdown <- struct{}{}: c.JSON(http.StatusAccepted, gin.H{"status":"shutdown_requested"}); default: c.JSON(http.StatusConflict, gin.H{"status":"shutdown_already_requested"}) }
+		if deps.RequestShutdown == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "graceful shutdown is not configured"})
+			return
+		}
+		select {
+		case deps.RequestShutdown <- struct{}{}:
+			c.JSON(http.StatusAccepted, gin.H{"status": "shutdown_requested"})
+		default:
+			c.JSON(http.StatusConflict, gin.H{"status": "shutdown_already_requested"})
+		}
 	})
 	api.GET("/operations/alerts", func(c *gin.Context) {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
@@ -177,23 +192,35 @@ func NewRouter(deps Dependencies) http.Handler {
 		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
 		m := metrics.Snapshot()
 		version := "development"
-		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" { version = info.Main.Version }
-		report := diagnostics.Build(diagnostics.Input{Version:version,StartedAt:time.Now().Add(-time.Duration(m.ProcessUptimeSeconds*float64(time.Second))),DatabaseReady:snapshot.DatabaseAvailable,WorkerCount:int(m.RuntimeWorkers),RecentLogs:recentLogSnapshot(deps.LogBuffer),Metrics:map[string]int64{"http_requests":int64(m.HTTPRequestCount),"model_requests":int64(m.ModelGatewayCount),"http_in_flight":m.HTTPRequestsInFlight,"execution_backlog":m.ExecutionBacklog,"runtime_workers":m.RuntimeWorkers,"active_executions":m.ActiveExecutions,"usage_write_failures":int64(m.UsageWriteFailures)}},time.Now().UTC())
-		reportJSON,_:=json.MarshalIndent(report,"","  ")
-		var metricsBuffer bytes.Buffer
-		metrics.Handler().ServeHTTP(&metricsResponseWriter{header:make(http.Header),body:&metricsBuffer},c.Request)
-		healthJSON,_:=json.MarshalIndent(gin.H{"database_available":snapshot.DatabaseAvailable,"worker_running":snapshot.WorkerRunning,"runtime_workers":m.RuntimeWorkers,"active_executions":m.ActiveExecutions,"execution_backlog":m.ExecutionBacklog,"provider_failures":m.ProviderFailures,"usage_write_failures":m.UsageWriteFailures},"","  ")
-		var bundle bytes.Buffer
-		zw:=zip.NewWriter(&bundle)
-		for name,data:=range map[string][]byte{"diagnostics.json":reportJSON,"metrics.prom":metricsBuffer.Bytes(),"health.json":healthJSON} {
-			entry,err:=zw.Create(name);if err!=nil{c.Status(http.StatusInternalServerError);return}
-			if _,err=entry.Write(data);err!=nil{c.Status(http.StatusInternalServerError);return}
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+			version = info.Main.Version
 		}
-		if err:=zw.Close();err!=nil{c.Status(http.StatusInternalServerError);return}
-		c.Header("Content-Type","application/zip")
-		c.Header("Content-Disposition",`attachment; filename="agentmesh-support.zip"`)
-		c.Header("Cache-Control","no-store")
-		c.Data(http.StatusOK,"application/zip",bundle.Bytes())
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(m.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: snapshot.DatabaseAvailable, WorkerCount: int(m.RuntimeWorkers), RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(m.HTTPRequestCount), "model_requests": int64(m.ModelGatewayCount), "http_in_flight": m.HTTPRequestsInFlight, "execution_backlog": m.ExecutionBacklog, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "usage_write_failures": int64(m.UsageWriteFailures)}}, time.Now().UTC())
+		reportJSON, _ := json.MarshalIndent(report, "", "  ")
+		var metricsBuffer bytes.Buffer
+		metrics.Handler().ServeHTTP(&metricsResponseWriter{header: make(http.Header), body: &metricsBuffer}, c.Request)
+		healthJSON, _ := json.MarshalIndent(gin.H{"database_available": snapshot.DatabaseAvailable, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_failures": m.ProviderFailures, "usage_write_failures": m.UsageWriteFailures}, "", "  ")
+		var bundle bytes.Buffer
+		zw := zip.NewWriter(&bundle)
+		for name, data := range map[string][]byte{"diagnostics.json": reportJSON, "metrics.prom": metricsBuffer.Bytes(), "health.json": healthJSON} {
+			entry, err := zw.Create(name)
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+			if _, err = entry.Write(data); err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+		}
+		if err := zw.Close(); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Header("Content-Type", "application/zip")
+		c.Header("Content-Disposition", `attachment; filename="agentmesh-support.zip"`)
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "application/zip", bundle.Bytes())
 	})
 	if deps.DB != nil {
 		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
@@ -289,7 +316,9 @@ func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observab
 		cancel()
 		var active, backlog int64
 		_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&active, &backlog)
-		if metrics != nil { metrics.SetExecutionState(active, backlog) }
+		if metrics != nil {
+			metrics.SetExecutionState(active, backlog)
+		}
 		s.ReconciliationBacklog = backlog
 	}
 	if metrics != nil {
@@ -302,9 +331,19 @@ func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observab
 	return s
 }
 
-type metricsResponseWriter struct { header http.Header; body *bytes.Buffer; status int }
-func (w *metricsResponseWriter) Header() http.Header { return w.header }
-func (w *metricsResponseWriter) WriteHeader(status int) { w.status=status }
-func (w *metricsResponseWriter) Write(data []byte) (int,error) { return w.body.Write(data) }
+type metricsResponseWriter struct {
+	header http.Header
+	body   *bytes.Buffer
+	status int
+}
 
-func recentLogSnapshot(buffer *logger.RingBuffer) []string { if buffer == nil { return nil }; return buffer.Snapshot() }
+func (w *metricsResponseWriter) Header() http.Header            { return w.header }
+func (w *metricsResponseWriter) WriteHeader(status int)         { w.status = status }
+func (w *metricsResponseWriter) Write(data []byte) (int, error) { return w.body.Write(data) }
+
+func recentLogSnapshot(buffer *logger.RingBuffer) []string {
+	if buffer == nil {
+		return nil
+	}
+	return buffer.Snapshot()
+}
