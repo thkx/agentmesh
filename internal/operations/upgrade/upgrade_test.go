@@ -1,15 +1,15 @@
 package upgrade
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"context"
-	"net/http"
-	"net/http/httptest"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -94,20 +94,36 @@ func TestVerifyReleaseRejectsModifiedBinary(t *testing.T) {
 }
 
 func TestCheckReleaseFetchesAndVerifiesSignedMetadata(t *testing.T) {
-	dir:=t.TempDir()
-	manifestPath,signaturePath,_,keyPath:=signedFixture(t,dir)
-	manifest,_:=os.ReadFile(manifestPath)
-	signature,_:=os.ReadFile(signaturePath)
-	server:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-		switch r.URL.Path{case "/manifest.json":_,_=w.Write(manifest);case "/manifest.sig":_,_=w.Write(signature);default:http.NotFound(w,r)}
+	dir := t.TempDir()
+	manifestPath, signaturePath, _, keyPath := signedFixture(t, dir)
+	manifest, _ := os.ReadFile(manifestPath)
+	signature, _ := os.ReadFile(signaturePath)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/manifest.json":
+			_, _ = w.Write(manifest)
+		case "/manifest.sig":
+			_, _ = w.Write(signature)
+		default:
+			http.NotFound(w, r)
+		}
 	}))
 	defer server.Close()
-	pub,err:=os.ReadFile(keyPath);if err!=nil{t.Fatal(err)}
-	result,err:=CheckRelease(context.Background(),server.URL+"/manifest.json",server.URL+"/manifest.sig",ed25519.PublicKey(pub))
-	if err!=nil{t.Fatal(err)}
-	if result.Version!="v1.2.3"{t.Fatalf("version=%s",result.Version)}
+	pub, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := CheckRelease(context.Background(), server.URL+"/manifest.json", server.URL+"/manifest.sig", ed25519.PublicKey(pub))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Version != "v1.2.3" {
+		t.Fatalf("version=%s", result.Version)
+	}
 }
 
 func TestCheckReleaseRejectsRemotePlainHTTP(t *testing.T) {
-	if _,err:=fetchReleaseDocument(context.Background(),&http.Client{},"http://release.example/manifest");err==nil{t.Fatal("remote plain HTTP release URL accepted")}
+	if _, err := fetchReleaseDocument(context.Background(), &http.Client{}, "http://release.example/manifest"); err == nil {
+		t.Fatal("remote plain HTTP release URL accepted")
+	}
 }
