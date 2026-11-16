@@ -56,6 +56,22 @@ type UsageObserver interface {
 }
 
 type executionProvenanceKey struct{}
+type requestIDContextKey struct{}
+
+// WithRequestID attaches the inbound HTTP correlation ID to downstream model
+// calls so usage records can be joined back to the originating request.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	if requestID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestIDContextKey{}, requestID)
+}
+
+// RequestIDFromContext returns the request correlation ID, if one was attached.
+func RequestIDFromContext(ctx context.Context) string {
+	requestID, _ := ctx.Value(requestIDContextKey{}).(string)
+	return requestID
+}
 
 type ExecutionProvenance struct {
 	ExecutionID string
