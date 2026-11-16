@@ -19,32 +19,32 @@ var (
 // Input contains only explicitly selected operational metadata. Callers must
 // not pass prompts, completions, request bodies, or raw provider errors.
 type Input struct {
-	Version       string
-	StartedAt     time.Time
-	DatabaseReady       bool
-	SchemaVersion       uint
-	MigrationDirty      bool
-	DatabaseIntegrity   string
-	DatabaseSizeBytes   int64
-	WorkerCount         int
-	Metrics       map[string]int64
-	RecentLogs    []string
+	Version           string
+	StartedAt         time.Time
+	DatabaseReady     bool
+	SchemaVersion     uint
+	MigrationDirty    bool
+	DatabaseIntegrity string
+	DatabaseSizeBytes int64
+	WorkerCount       int
+	Metrics           map[string]int64
+	RecentLogs        []string
 }
 
 // Report is safe to serialize and attach to a support request.
 type Report struct {
-	GeneratedAt   time.Time        `json:"generated_at"`
-	Version       string           `json:"version"`
-	UptimeSeconds int64            `json:"uptime_seconds"`
+	GeneratedAt       time.Time        `json:"generated_at"`
+	Version           string           `json:"version"`
+	UptimeSeconds     int64            `json:"uptime_seconds"`
 	DatabaseReady     bool             `json:"database_ready"`
 	SchemaVersion     uint             `json:"schema_version"`
 	MigrationDirty    bool             `json:"migration_dirty"`
 	DatabaseIntegrity string           `json:"database_integrity"`
 	DatabaseSizeBytes int64            `json:"database_size_bytes"`
 	WorkerCount       int              `json:"worker_count"`
-	Metrics       map[string]int64 `json:"metrics"`
-	RecentLogs    []string         `json:"recent_logs"`
-	ReportID      string           `json:"report_id"`
+	Metrics           map[string]int64 `json:"metrics"`
+	RecentLogs        []string         `json:"recent_logs"`
+	ReportID          string           `json:"report_id"`
 }
 
 // Build creates a bounded report. Metric names are allow-listed and log lines
