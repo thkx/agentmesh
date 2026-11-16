@@ -32,6 +32,15 @@
 - Metric labels are restricted to registered Gin route patterns, a finite HTTP method set, status codes, operation names and outcome names. No model IDs, provider IDs, execution IDs, request IDs, prompts or arbitrary error strings are labels.
 - Metrics remain in process memory and are not exported to an external service.
 
+### Alert evaluation foundation
+
+- Added a fixed-rule alert evaluator for database availability, worker liveness, repeated provider failures and reconciliation backlog.
+- Alert rule IDs, severities and descriptions are compile-time constants; user-controlled labels and raw error messages are not accepted.
+- Active alert occurrences and bounded in-memory resolved history are tracked with deterministic ordering.
+- Unit tests cover activation, resolution, thresholds and bounded history.
+
+The evaluator is currently a domain-level foundation. Runtime signal wiring and the Dashboard alert-history view remain outstanding; this does not complete the M53 alert deliverable.
+
 ## Current limitations / remaining M53 work
 
 - Trace ID propagation is implemented; OpenTelemetry spans/exporter integration is not yet implemented.
