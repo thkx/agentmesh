@@ -1,75 +1,120 @@
-# P5 Part 2 — Implementation Status
+# P5 Part 2 — Operations & Observability
 
 **Branch:** `p5/control-plane`  
 **Baseline:** P5 Part 1 / P4 unified execution core  
-**Status:** Implementation in progress. This document deliberately does not claim M53–M56 acceptance.
+**Implementation status:** M53–M56 implementation delivered; final GitHub Actions and local macOS acceptance are tracked separately.
 
-## Delivered in this implementation slice
+Part 2 adds operational capabilities around the existing runtime. It does not introduce a second scheduler, queue, execution state machine, or event ledger.
 
-### M53 — Observability foundation
-- Existing bounded-cardinality HTTP and Model Gateway metrics remain the source of process-local counters.
-- HTTP request correlation continues to provide request IDs and W3C trace context.
-- The HTTP router is wrapped with OpenTelemetry HTTP instrumentation. The default global provider is no-op; no exporter or network telemetry is configured by this change.
-- A redacted diagnostics JSON endpoint is exposed at `GET /api/v1/diagnostics/report`, under the existing API-token middleware.
-- Existing in-memory alert evaluator and metrics dashboard are retained.
+## M53 — Web assets, metrics, tracing and alerts
 
-### M54 — Usage ledger
-- Additive migration `000044_model_usage_ledger` introduces append-only `model_usage_events` and effective-dated `model_pricing_rates`.
-- Successful non-stream Gateway calls and the first terminal usage event for a stream are recorded through a Gateway observer.
-- The ledger has a unique idempotency key, provider/model identity, token dimensions, source classification, correlation key, and immutable pricing snapshot.
-- Cost arithmetic uses integer micro-currency units. Aggregations keep currencies separate.
-- API: `GET /api/v1/usage/summary`, `GET /api/v1/usage/by-model`, `GET /api/v1/usage/rates`, `POST /api/v1/usage/rates`.
-- Dashboard: `/dashboard/usage`.
+- Browser-facing templates, styles, HTMX and Workflow Editor assets remain under repository-root `web/` and are embedded into the binary.
+- HTTP request metrics use registered route templates, bounded method/status labels, duration histograms and in-flight gauges.
+- Model Gateway metrics count generate, stream-open and stream-completion outcomes. Stream duration and terminal errors are observed without recording raw provider errors.
+- Runtime scheduler, workflow, reconciler, collaboration dispatcher and wakeup worker loops update the live worker gauge on start/exit.
+- Execution active/backlog gauges are refreshed by the metrics scrape and Operations API.
+- Usage ledger write failures are counted.
+- Request ID and W3C trace correlation remain enabled. HTTP and Model Gateway operations create OpenTelemetry spans; span attributes contain only provider/model identifiers, not prompts, completions, credentials or arbitrary errors.
+- Optional OTLP/HTTP export is disabled by default. Enable it with:
 
-Rate payload example:
-
-```json
-{
-  "provider_id": "openai",
-  "model_id": "gpt-4.1",
-  "currency": "USD",
-  "input_rate_micros_per_million": 2000000,
-  "output_rate_micros_per_million": 8000000
-}
+```yaml
+tracing:
+  enabled: true
+  otlp_endpoint: "http://127.0.0.1:4318"
+  headers_env: AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS
 ```
 
-Rates are expressed as micro-currency units per one million tokens. Historical usage keeps the rate snapshot used at insertion time. An absent rate means cost is unknown, not zero.
+Remote collectors must use HTTPS. Plain HTTP is accepted only for loopback endpoints. Optional headers are read from the named environment variable, never logged or persisted.
 
-### M55 — Encrypted backup primitives and offline CLI
-- SQLite snapshots use `VACUUM INTO`, so committed WAL state is included through SQLite snapshot semantics rather than copying a live database file.
-- The archive includes the SQLite snapshot, credential encryption key and a checksummed manifest.
-- The archive is encrypted with AES-256-GCM; a passphrase is expanded with scrypt (N=32768, r=8, p=1).
-- Verification authenticates and checks the archive before extraction.
-- `cmd/agentmesh-backup` supports `create`, `verify`, and `restore`. Restore only stages verified files into a new directory; it never overwrites a live database.
-- Supply the passphrase through `AGENTMESH_BACKUP_PASSPHRASE` (minimum 12 bytes). It is not persisted by the CLI.
+- The fixed alert evaluator tracks database availability, stopped workers, repeated provider failures, reconciliation backlog and usage-ledger write failures. Active and resolved alert history is retained in process memory and shown in Dashboard Operations.
+- API: `GET /metrics`, `GET /api/v1/operations/alerts`, `GET /api/v1/operations/health`.
+
+Alert history is intentionally process-local; it is not a durable incident-management system and no external notifications are sent.
+
+## M54 — Usage and cost ledger
+
+- Append-only `model_usage_events` with idempotency key, provider/model, token dimensions, source classification, correlation and optional execution/attempt provenance.
+- Effective-dated pricing rates are snapshotted at record time. Cost uses integer micro-currency arithmetic; aggregations keep currencies separate.
+- Non-stream Gateway calls and the first terminal usage event from a stream are recorded once.
+- Agent scheduler context and Workflow Worker context explicitly propagate managed Execution/Attempt identity; no provenance is inferred from prompt content.
+- Ledger write failures are visible in metrics and trigger a critical Operations alert.
+- API:
+  - `GET /api/v1/usage/summary`
+  - `GET /api/v1/usage/by-model`
+  - `GET /api/v1/usage/events` (RFC3339 time filters, provider/model/execution/attempt filters, bounded pagination)
+  - `GET /api/v1/usage/rates`
+  - `POST /api/v1/usage/rates`
+- Dashboard `/dashboard/usage` provides time-range filters, per-model/currency breakdown, paginated request ledger and links to managed Execution detail when provenance exists.
+
+Rates are operator-supplied estimates, not provider invoices. Missing provider usage is recorded as unavailable; unknown cost is not represented as zero.
+
+## M55 — Backup, restore and signed upgrades
+
+### Backup / restore
+
+- SQLite backup uses `VACUUM INTO` for a consistent snapshot.
+- The archive includes the database, credential encryption key and manifest, encrypted using AES-256-GCM with a scrypt-derived key.
+- Verify authenticates the archive, checks member hashes, runs SQLite `integrity_check` and checks the migration version when present.
+- Restore first stages verified files into a new directory. `apply-restore` re-verifies the original encrypted archive, refuses to run without `--confirm-stopped`, creates pre-restore copies of both database and credential key, and then replaces the files offline.
+- The service never overwrites its own live database from an HTTP request.
 
 Examples:
 
 ```bash
-AGENTMESH_BACKUP_PASSPHRASE='use-a-long-unique-passphrase' go run ./cmd/agentmesh-backup create --config configs/config.yaml --output ./backups/agentmesh.backup
-AGENTMESH_BACKUP_PASSPHRASE='use-a-long-unique-passphrase' go run ./cmd/agentmesh-backup verify --archive ./backups/agentmesh.backup
-AGENTMESH_BACKUP_PASSPHRASE='use-a-long-unique-passphrase' go run ./cmd/agentmesh-backup restore --archive ./backups/agentmesh.backup --destination ./restore-staging
+export AGENTMESH_BACKUP_PASSPHRASE='use-a-long-unique-passphrase'
+go run ./cmd/agentmesh-backup create --config configs/config.yaml --output ./backups/agentmesh.backup
+go run ./cmd/agentmesh-backup verify --archive ./backups/agentmesh.backup
+go run ./cmd/agentmesh-backup restore --archive ./backups/agentmesh.backup --destination ./restore-staging
+# Stop AgentMesh before this explicit offline replacement:
+go run ./cmd/agentmesh-backup apply-restore --archive ./backups/agentmesh.backup --database ./data/agentmesh.db --credential-key ./data/keys/credential.key --backup-dir ./backups/pre-restore --confirm-stopped
 ```
 
-Restore staging is intentionally not the same as replacing the active database. Stop AgentMesh and follow a separately reviewed offline replacement procedure.
+The database and credential-key paths must match the configured local deployment. Keep the pre-restore backup directory protected; it contains sensitive key material.
 
-### M56 — Diagnostics foundation
-- The diagnostics report allow-lists metric names, caps log count and line length, sanitizes version strings, and redacts common bearer tokens, secret assignments, URL userinfo/query/fragment and absolute paths.
-- The report endpoint does not include prompt/completion content or credentials.
+### Upgrade
 
-## Remaining before Part 2 can be called complete
+- Release metadata is Ed25519-signed. The manifest binds version, OS/architecture, binary size and SHA-256.
+- `agentmesh-upgrade check` downloads only signed metadata over HTTPS (loopback HTTP is allowed for local testing).
+- `stage` verifies signature, platform, size and digest before copying the binary into a new staging directory.
+- `verify` rechecks the staged package.
+- `apply` requires `--confirm-stopped`, atomically replaces an existing executable and preserves a timestamped rollback copy.
+- The trusted Ed25519 public key is operator-managed and supplied as a raw 32-byte key file. No key is embedded in this repository; operators must obtain the trusted key through an authenticated release channel.
 
-- M53: worker/execution-specific gauges; connect the alert evaluator to live dependency/worker/backlog state and render alert history; configurable opt-in OTLP exporter and explicit Model Gateway spans.
-- M54: propagate execution/attempt provenance from runtime contexts; expose pagination/time filters and currency-safe cost details in the Dashboard; surface ledger write failures as operational alerts; extend tests to exercise real Gateway streaming and cancellation.
-- M55: add signed release metadata verification, platform-aware update checking/staging, and a separately reviewed offline apply procedure; add restore preflight including SQLite integrity/schema validation and pre-restore safety backup.
-- M56: complete disk usage, migration and worker health diagnostics; bounded support bundle/log collection; graceful shutdown request integrated with the existing server lifecycle and CLI service status/stop commands.
+Example:
+
+```bash
+go run ./cmd/agentmesh-upgrade check --manifest-url https://releases.example/agentmesh.json --signature-url https://releases.example/agentmesh.json.sig --public-key ./trusted-release.pub
+go run ./cmd/agentmesh-upgrade stage --manifest ./agentmesh.json --signature ./agentmesh.json.sig --binary ./agentmesh --public-key ./trusted-release.pub --output ./upgrade-staging
+go run ./cmd/agentmesh-upgrade verify --stage ./upgrade-staging --public-key ./trusted-release.pub
+# Stop AgentMesh before this explicit offline replacement:
+go run ./cmd/agentmesh-upgrade apply --stage ./upgrade-staging --public-key ./trusted-release.pub --target ./bin/agentmesh --backup-dir ./backups/upgrades --confirm-stopped
+```
+
+Part 2 does not publish releases or manage signing-key rotation; it verifies and applies packages from an operator-selected release source.
+
+## M56 — Diagnostics and service operations
+
+- `GET /api/v1/diagnostics/report` returns an allow-listed, redacted report.
+- `GET /api/v1/diagnostics/bundle` downloads a bounded ZIP containing diagnostics JSON, Prometheus metrics and health JSON.
+- A bounded in-memory log ring retains only static log message text; structured attributes are excluded before report redaction.
+- `GET /api/v1/operations/health` exposes database, worker, execution, provider and ledger health without returning raw dependency errors.
+- `POST /api/v1/operations/shutdown` requests graceful process shutdown. It is protected by the existing Bearer API-token boundary when configured.
+- `cmd/agentmesh-ops status` and `cmd/agentmesh-ops shutdown` provide local command-line controls. The CLI reads `AGENTMESH_API_TOKEN` from the environment and refuses to send it over remote plaintext HTTP.
+
+## Security and operational boundaries
+
+- No prompts, completions, tool arguments, API keys, Authorization values, raw provider errors or DSNs are included in metrics, spans or support bundles.
+- Metrics labels are bounded and exclude request/execution/attempt IDs.
+- Telemetry export is disabled unless explicitly configured.
+- Backup/restore and executable replacement are offline operations with explicit stop confirmation and rollback copies.
+- The default local-first deployment and existing API authentication behavior are unchanged.
 
 ## Verification
 
-Run:
+Run on the development machine:
 
 ```bash
 bash scripts/verify-p5-part2.sh
 ```
 
-This runs formatting, build, vet and race tests. GitHub Actions is also configured to check the Part 2 verification script. Local macOS acceptance still needs to be run on the user's machine; CI success is not a substitute for that acceptance.
+This performs shell syntax, gofmt, build, vet and race tests. GitHub Actions performs the same Go checks on the branch. CI success does not replace the final local macOS acceptance run.
