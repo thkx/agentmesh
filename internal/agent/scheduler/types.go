@@ -63,7 +63,9 @@ type Store interface {
 	CancelTask(context.Context, string) error
 }
 
-type ExecutionContextObserver interface { Context(context.Context, Job) context.Context }
+type ExecutionContextObserver interface {
+	Context(context.Context, Job) context.Context
+}
 
 type Observer interface {
 	Started(context.Context, Job) error
