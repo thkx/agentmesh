@@ -25,6 +25,10 @@ func (o GatewayObserver) ObserveModelUsage(ctx context.Context, providerID provi
 		source = "unavailable"
 	}
 	provenance := modelgateway.ExecutionProvenanceFromContext(ctx)
+	requestID := modelgateway.RequestIDFromContext(ctx)
+	if requestID == "" {
+		requestID = requestKey
+	}
 	traceID := ""
 	if span := trace.SpanContextFromContext(ctx); span.IsValid() {
 		traceID = span.TraceID().String()
@@ -36,7 +40,7 @@ func (o GatewayObserver) ObserveModelUsage(ctx context.Context, providerID provi
 		OccurredAt:     occurredAt,
 		Usage:          tokens,
 		Source:         source,
-		RequestID:      requestKey,
+		RequestID:      requestID,
 		TraceID:        traceID,
 		ExecutionID:    provenance.ExecutionID,
 		AttemptID:      provenance.AttemptID,
