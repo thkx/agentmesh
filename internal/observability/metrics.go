@@ -179,6 +179,7 @@ type Snapshot struct {
 	RuntimeWorkers       int64
 	ActiveExecutions     int64
 	ExecutionBacklog     int64
+	ProviderRequests     uint64
 	ProviderFailures     uint64
 	UsageWriteFailures   uint64
 }
