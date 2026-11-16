@@ -1,9 +1,9 @@
 package dashboard
 
 import (
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
