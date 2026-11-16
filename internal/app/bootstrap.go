@@ -55,6 +55,7 @@ import (
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -172,6 +173,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 
 	metrics := observability.NewMetrics()
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
 	log.InfoContext(ctx, "starting AgentMesh",
 		"environment", cfg.App.Environment,
