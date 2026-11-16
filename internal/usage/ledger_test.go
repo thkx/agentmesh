@@ -88,3 +88,33 @@ func TestGatewayObserverSurfacesLedgerWriteFailures(t *testing.T) {
 		t.Fatalf("write failures=%d", failures)
 	}
 }
+
+func TestLedgerNormalizesAndValidatesCurrencyCodes(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec(`CREATE TABLE model_pricing_rates(id TEXT PRIMARY KEY,provider_id TEXT,model_id TEXT,currency TEXT,input_rate_micros_per_million INTEGER,output_rate_micros_per_million INTEGER,effective_at TEXT,created_at TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := NewLedger(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rate := Rate{ProviderID: "openai", ModelID: "gpt-test", Currency: "usd", InputRateMicrosPerMillion: 1}
+	if err = ledger.SetRate(context.Background(), rate); err != nil {
+		t.Fatalf("lowercase ISO currency was not normalized: %v", err)
+	}
+	var currency string
+	if err = db.QueryRow("SELECT currency FROM model_pricing_rates LIMIT 1").Scan(&currency); err != nil {
+		t.Fatal(err)
+	}
+	if currency != "USD" {
+		t.Fatalf("stored currency=%q, want USD", currency)
+	}
+	rate.Currency = "$$$"
+	if err = ledger.SetRate(context.Background(), rate); err == nil {
+		t.Fatal("invalid currency code accepted")
+	}
+}
