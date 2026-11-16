@@ -142,6 +142,33 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	stats.count++
 	stats.sum += seconds
 }
+
+type Snapshot struct {
+	HTTPRequestCount       uint64
+	ModelGatewayCount      uint64
+	HTTPRequestsInFlight   int64
+	ProcessUptimeSeconds   float64
+}
+
+func (m *Metrics) Snapshot() Snapshot {
+	if m == nil {
+		return Snapshot{}
+	}
+	result := Snapshot{
+		HTTPRequestsInFlight: m.inFlight.Load(),
+		ProcessUptimeSeconds: time.Since(m.started).Seconds(),
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, stats := range m.requests {
+		result.HTTPRequestCount += stats.count
+	}
+	for _, stats := range m.modelRequests {
+		result.ModelGatewayCount += stats.count
+	}
+	return result
+}
+
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
