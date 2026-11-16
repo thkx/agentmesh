@@ -34,6 +34,7 @@ import (
 
 	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/operations/diagnostics"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
 	"github.com/thkx/agentmesh/internal/reflection"
@@ -81,6 +82,7 @@ type Dependencies struct {
 	APIToken              string
 	Alerts                *observability.AlertEvaluator
 	RequestShutdown       chan<- struct{}
+	LogBuffer             *logger.RingBuffer
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -168,7 +170,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			version = info.Main.Version
 		}
 		snap := metrics.Snapshot()
-		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbReady, Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbReady, RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
 		c.JSON(http.StatusOK, report)
 	})
 	api.GET("/diagnostics/bundle", func(c *gin.Context) {
@@ -304,3 +306,5 @@ type metricsResponseWriter struct { header http.Header; body *bytes.Buffer; stat
 func (w *metricsResponseWriter) Header() http.Header { return w.header }
 func (w *metricsResponseWriter) WriteHeader(status int) { w.status=status }
 func (w *metricsResponseWriter) Write(data []byte) (int,error) { return w.body.Write(data) }
+
+func recentLogSnapshot(buffer *logger.RingBuffer) []string { if buffer == nil { return nil }; return buffer.Snapshot() }
