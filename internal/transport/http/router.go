@@ -124,7 +124,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.Next()
 	})
 	registerWorkflowEditor(router)
-	router.GET("/metrics", gin.WrapH(metrics.Handler()))
+	router.GET("/metrics", func(c *gin.Context) { _ = operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics); metrics.Handler().ServeHTTP(c.Writer, c.Request) })
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.DB == nil || deps.Providers == nil || deps.Models == nil || deps.Adapters == nil || deps.ProviderRuntime == nil || deps.Gateway == nil || deps.Repository == nil || deps.AgentExecutor == nil || deps.AgentRuntime == nil || deps.Workspaces == nil {
