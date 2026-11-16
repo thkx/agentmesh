@@ -65,6 +65,17 @@ func main() {
 			fatal(err.Error())
 		}
 		fmt.Printf("Backup verified: created=%s version=%s schema=%d\n", manifest.CreatedAt.Format("2006-01-02T15:04:05Z07:00"), manifest.ApplicationVersion, manifest.SchemaVersion)
+	case "apply-restore":
+		fs:=flag.NewFlagSet("apply-restore",flag.ExitOnError)
+		staging:=fs.String("staging","","verified restore staging directory")
+		databasePath:=fs.String("database","","active SQLite database path")
+		credentialKey:=fs.String("credential-key","","active credential encryption key path")
+		backupDir:=fs.String("backup-dir","","directory for pre-restore safety copies")
+		stopped:=fs.Bool("confirm-stopped",false,"confirm AgentMesh has been stopped")
+		_=fs.Parse(os.Args[2:])
+		if *staging==""||*databasePath==""||*credentialKey==""||*backupDir==""{fatal("staging, database, credential-key and backup-dir are required")}
+		result,err:=backup.ApplyRestoreOffline(*staging,*databasePath,*credentialKey,*backupDir,*stopped);if err!=nil{fatal(err.Error())}
+		fmt.Printf("Offline restore applied. Previous database: %s; previous credential key: %s\n",result.DatabaseBackup,result.CredentialKeyBackup)
 	case "restore":
 		fs := flag.NewFlagSet("restore", flag.ExitOnError)
 		archive := fs.String("archive", "", "backup archive")
@@ -84,6 +95,6 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|verify|restore> [flags]\nPassphrase is read only from AGENTMESH_BACKUP_PASSPHRASE and is never persisted.")
+	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|verify|restore|apply-restore> [flags]\nPassphrase is read only from AGENTMESH_BACKUP_PASSPHRASE and is never persisted.")
 }
 func fatal(message string) { fmt.Fprintln(os.Stderr, "agentmesh-backup:", message); os.Exit(1) }
