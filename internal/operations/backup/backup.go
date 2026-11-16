@@ -267,10 +267,10 @@ func ApplyRestoreOffline(stagingDir, databasePath, credentialKeyPath, backupDir 
 	stamp := time.Now().UTC().Format("20060102T150405.000000000Z")
 	result.DatabaseBackup = filepath.Join(backupDir, "database."+stamp+".sqlite.bak")
 	result.CredentialKeyBackup = filepath.Join(backupDir, "credential."+stamp+".key.bak")
-	if err = copyFile(dbTarget, result.DatabaseBackup, 0o600); err != nil {
+	if err = copyBackupFile(dbTarget, result.DatabaseBackup, 0o600); err != nil {
 		return RestoreResult{}, err
 	}
-	if err = copyFile(keyTarget, result.CredentialKeyBackup, 0o600); err != nil {
+	if err = copyBackupFile(keyTarget, result.CredentialKeyBackup, 0o600); err != nil {
 		return RestoreResult{}, err
 	}
 	dbTemp, err := writeRestoreTemp(dbTarget, dbBytes)
@@ -410,5 +410,20 @@ func verifySQLiteBytes(data []byte, expectedSchema uint) error {
 			return fmt.Errorf("sqlite schema version mismatch")
 		}
 	}
+	return nil
+}
+
+func copyBackupFile(source, destination string, mode os.FileMode) error {
+	in, err := os.Open(source)
+	if err != nil { return err }
+	defer in.Close()
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil { return err }
+	_, copyErr := io.Copy(out, in)
+	syncErr := out.Sync()
+	closeErr := out.Close()
+	if copyErr != nil { _ = os.Remove(destination); return copyErr }
+	if syncErr != nil { _ = os.Remove(destination); return syncErr }
+	if closeErr != nil { _ = os.Remove(destination); return closeErr }
 	return nil
 }
