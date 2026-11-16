@@ -441,7 +441,7 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	}
 	m := h.metrics.Snapshot()
 	snapshot.WorkerRunning = m.RuntimeWorkers > 0
-	snapshot.ProviderRequests = m.ModelGatewayCount
+	snapshot.ProviderRequests = m.ProviderRequests
 	snapshot.ProviderFailures = m.ProviderFailures
 	snapshot.UsageWriteFailures = m.UsageWriteFailures
 	snapshot.ReconciliationBacklog = m.ExecutionBacklog
