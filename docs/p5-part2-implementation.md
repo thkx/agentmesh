@@ -55,6 +55,7 @@ Rates are operator-supplied estimates, not provider invoices. Missing provider u
 - SQLite backup uses `VACUUM INTO` for a consistent snapshot.
 - The archive includes the database, credential encryption key and manifest, encrypted using AES-256-GCM with a scrypt-derived key.
 - Verify authenticates the archive, checks member hashes, runs SQLite `integrity_check` and checks the migration version when present.
+- `agentmesh-backup list` verifies and lists encrypted archives; `prune --keep N` removes only verified archives beyond the newest N and refuses to prune if any candidate archive is invalid.
 - Restore first stages verified files into a new directory. `apply-restore` re-verifies the original encrypted archive, refuses to run without `--confirm-stopped`, creates pre-restore copies of both database and credential key, and then replaces the files offline.
 - The service never overwrites its own live database from an HTTP request.
 
@@ -97,10 +98,11 @@ Part 2 does not publish releases or manage signing-key rotation; it verifies and
 
 ## M56 — Diagnostics and service operations
 
-- `GET /api/v1/diagnostics/report` returns an allow-listed, redacted report.
-- `GET /api/v1/diagnostics/bundle` downloads a bounded ZIP containing diagnostics JSON, Prometheus metrics and health JSON.
+- `GET /api/v1/diagnostics/report` returns an allow-listed, redacted report including SQLite quick-check status, migration version/dirty flag and database file size; it never includes the database path.
+- `GET /api/v1/diagnostics/bundle` downloads a bounded ZIP containing diagnostics JSON, Prometheus metrics and health JSON, including the same safe SQLite metadata.
 - A bounded in-memory log ring retains only static log message text; structured attributes are excluded before report redaction.
-- `GET /api/v1/operations/health` exposes database, worker, execution, provider and ledger health without returning raw dependency errors.
+- `GET /api/v1/operations/health` exposes database readiness, migration version/dirty state, database file size, worker, execution, provider and ledger health without returning raw dependency errors.
+- Dashboard Operations shows application version, database readiness/integrity, schema version, migration dirty state, database size, worker state, metrics and recent alerts.
 - `POST /api/v1/operations/shutdown` requests graceful process shutdown. It is protected by the existing Bearer API-token boundary when configured.
 - Dashboard Operations includes an explicit-confirmation graceful shutdown action protected by the browser session and same-origin check; start/restart remains delegated to an external service manager.
 - `cmd/agentmesh-ops status` and `cmd/agentmesh-ops shutdown` provide local command-line controls. The CLI reads `AGENTMESH_API_TOKEN` from the environment and refuses to send it over remote plaintext HTTP.
