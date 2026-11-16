@@ -443,6 +443,7 @@ func (h *Handler) operationsMetrics(c *gin.Context) {
 	snapshot.WorkerRunning = m.RuntimeWorkers > 0
 	snapshot.ProviderRequests = m.ModelGatewayCount
 	snapshot.ProviderFailures = m.ProviderFailures
+	snapshot.UsageWriteFailures = m.UsageWriteFailures
 	snapshot.ReconciliationBacklog = m.ExecutionBacklog
 	var activeAlerts []observability.Alert
 	var alertHistory []observability.Alert
