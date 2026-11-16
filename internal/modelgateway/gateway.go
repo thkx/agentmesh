@@ -57,7 +57,10 @@ type UsageObserver interface {
 
 type executionProvenanceKey struct{}
 
-type ExecutionProvenance struct { ExecutionID string; AttemptID string }
+type ExecutionProvenance struct {
+	ExecutionID string
+	AttemptID   string
+}
 
 // WithExecutionProvenance attaches durable execution identity to a model request context.
 func WithExecutionProvenance(ctx context.Context, executionID, attemptID string) context.Context {
@@ -125,7 +128,12 @@ func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *p
 func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {
 	started := time.Now()
 	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.generate")
-	defer func() { if resultErr != nil { span.SetStatus(codes.Error, "model request failed") }; span.End() }()
+	defer func() {
+		if resultErr != nil {
+			span.SetStatus(codes.Error, "model request failed")
+		}
+		span.End()
+	}()
 	defer func() { g.observe("generate", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
@@ -136,7 +144,9 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 	}
 
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
-	if err == nil { span.SetAttributes(attribute.String("agentmesh.provider_id", string(model.ProviderID)), attribute.String("agentmesh.model_id", string(model.ID))) }
+	if err == nil {
+		span.SetAttributes(attribute.String("agentmesh.provider_id", string(model.ProviderID)), attribute.String("agentmesh.model_id", string(model.ID)))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +204,12 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *
 func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {
 	started := time.Now()
 	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.stream")
-	defer func() { if resultErr != nil { span.SetStatus(codes.Error, "model stream failed") }; span.End() }()
+	defer func() {
+		if resultErr != nil {
+			span.SetStatus(codes.Error, "model stream failed")
+		}
+		span.End()
+	}()
 	defer func() { g.observe("stream_open", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
