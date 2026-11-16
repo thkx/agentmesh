@@ -153,9 +153,8 @@ func (m *Metrics) ObserveModelGateway(operation, outcome string, elapsed time.Du
 	if seconds < 0 {
 		seconds = 0
 	}
-	if outcome == "error" {
-		m.providerFailures.Add(1)
-	}
+	if operation == "generate" || operation == "stream_open" { m.providerRequests.Add(1) }
+	if outcome == "error" { m.providerFailures.Add(1) }
 	key := modelRequestKey{operation: operation, outcome: outcome}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -187,7 +186,7 @@ func (m *Metrics) Snapshot() Snapshot {
 	result := Snapshot{
 		HTTPRequestsInFlight: m.inFlight.Load(),
 		ProcessUptimeSeconds: time.Since(m.started).Seconds(),
-		RuntimeWorkers:       m.runtimeWorkers.Load(), ActiveExecutions: m.activeExecutions.Load(), ExecutionBacklog: m.executionBacklog.Load(), ProviderFailures: m.providerFailures.Load(), UsageWriteFailures: m.usageWriteFailures.Load(),
+		RuntimeWorkers:       m.runtimeWorkers.Load(), ActiveExecutions: m.activeExecutions.Load(), ExecutionBacklog: m.executionBacklog.Load(), ProviderRequests: m.providerRequests.Load(), ProviderFailures: m.providerFailures.Load(), UsageWriteFailures: m.usageWriteFailures.Load(),
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
