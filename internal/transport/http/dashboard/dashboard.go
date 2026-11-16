@@ -198,10 +198,12 @@ type executionDetail struct {
 }
 
 func New(d Dependencies) *Handler {
+	metrics := d.Metrics
+	if metrics == nil { metrics = observability.NewMetrics() }
 	t := template.Must(template.ParseFS(webassets.Assets, "dashboard/templates/*.html"))
 	h := &Handler{
 		db:                  d.DB,
-		metrics:             d.Metrics,
+		metrics:             metrics,
 		alerts:              d.Alerts,
 		token:               d.APIToken,
 		manager:             d.ExecutionManager,
@@ -423,7 +425,6 @@ func (h *Handler) logout(c *gin.Context) {
 }
 
 func (h *Handler) operationsMetrics(c *gin.Context) {
-	if h.metrics == nil { h.metrics = observability.NewMetrics() }
 	snapshot := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
 	if h.db != nil {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
