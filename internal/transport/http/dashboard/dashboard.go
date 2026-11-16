@@ -126,7 +126,7 @@ type pageData struct {
 	RunResult        string
 	ActiveAlerts     []observability.Alert
 	AlertHistory     []observability.Alert
-	OpsHealth operationsHealthView
+	OpsHealth         operationsHealthView
 }
 
 type operationsHealthView struct {
