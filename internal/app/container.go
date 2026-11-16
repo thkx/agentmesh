@@ -24,6 +24,7 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/planning"
 	planworkflow "github.com/thkx/agentmesh/internal/planworkflow"
@@ -37,6 +38,7 @@ import (
 type Container struct {
 	Config                config.Config
 	Logger                *slog.Logger
+	LogBuffer             *logger.RingBuffer
 	Metrics               *observability.Metrics
 	DB                    *sql.DB
 	RuntimeRepository     provider.CatalogRepository
