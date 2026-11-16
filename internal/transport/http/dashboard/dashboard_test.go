@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/observability"
+	"time"
 )
 
 func testRouter(token string) *gin.Engine {
@@ -223,6 +225,27 @@ func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s returned %d: %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+
+func TestDashboardOperationsMetricsPage(t *testing.T) {
+	metrics := observability.NewMetrics()
+	metrics.ObserveHTTPRequest(http.MethodGet, "/api/v1/models", http.StatusOK, 20*time.Millisecond)
+	metrics.ObserveModelGateway("generate", "success", 100*time.Millisecond)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	New(Dependencies{Metrics: metrics}).RegisterRoutes(router)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operations metrics status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Operations Metrics", "HTTP requests", "Model Gateway requests", "Prometheus text format"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("operations metrics page missing %q", want)
 		}
 	}
 }
