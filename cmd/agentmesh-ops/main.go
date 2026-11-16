@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"net/http"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -28,8 +28,16 @@ func main() {
 		fatal("AGENTMESH_API_TOKEN is required")
 	}
 	parsedURL, parseErr := url.Parse(*base)
-	if parseErr != nil || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") { fatal("url must be an HTTPS or loopback HTTP base URL") }
-	if parsedURL.Scheme == "http" { host:=parsedURL.Hostname(); ip:=net.ParseIP(host); if host!="localhost" && (ip==nil || !ip.IsLoopback()) { fatal("API token will only be sent over HTTPS to remote hosts") } }
+	if parseErr != nil || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
+		fatal("url must be an HTTPS or loopback HTTP base URL")
+	}
+	if parsedURL.Scheme == "http" {
+		host := parsedURL.Hostname()
+		ip := net.ParseIP(host)
+		if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			fatal("API token will only be sent over HTTPS to remote hosts")
+		}
+	}
 	endpoint := strings.TrimRight(*base, "/")
 	method := http.MethodGet
 	switch os.Args[1] {
