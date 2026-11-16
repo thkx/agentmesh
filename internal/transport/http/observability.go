@@ -41,12 +41,13 @@ func requestCorrelationMiddleware(logger *slog.Logger) gin.HandlerFunc {
 			requestID = randomHex(16)
 		}
 		ctx := c.Request.Context()
+		var traceID string
 		if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
-			traceID := spanContext.TraceID().String()
+			traceID = spanContext.TraceID().String()
 			ctx = context.WithValue(ctx, traceIDKey, traceID)
 			trace.SpanFromContext(ctx).SetAttributes(attribute.String("agentmesh.request_id", requestID))
 		} else {
-			traceID := traceIDFromParent(c.GetHeader("traceparent"))
+			traceID = traceIDFromParent(c.GetHeader("traceparent"))
 			if traceID == "" {
 				traceID = randomHex(16)
 			}
