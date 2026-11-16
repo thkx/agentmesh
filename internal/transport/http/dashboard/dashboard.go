@@ -37,9 +37,6 @@ import (
 	webassets "github.com/thkx/agentmesh/web"
 )
 
-//go:embed static/htmx.min.js
-var htmxJS []byte
-
 const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
