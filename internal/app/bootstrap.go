@@ -32,6 +32,7 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"github.com/thkx/agentmesh/internal/observability"
 	anthropicadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/anthropic"
 	geminiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/gemini"
 	ollamaadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/ollama"
@@ -166,6 +167,8 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize logger: %w", err)
 	}
+
+	metrics := observability.NewMetrics()
 
 	log.InfoContext(ctx, "starting AgentMesh",
 		"environment", cfg.App.Environment,
@@ -683,11 +686,12 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}()
 
 	container := &Container{
-		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
+		Config: cfg, Logger: log, Metrics: metrics, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
 		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, CLIExecutionAdapter: cliExecutionAdapter, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResources: aiResources, AIRouter: aiRouter,
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
+		Logger: log, Metrics: metrics,
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
 		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, AIResources: aiResources, APIToken: apiToken,
 	})
