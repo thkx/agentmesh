@@ -2,8 +2,10 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"flag"
+	"time"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,6 +19,16 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "check":
+		fs := flag.NewFlagSet("check", flag.ExitOnError)
+		manifestURL := fs.String("manifest-url", "", "HTTPS URL for signed release manifest")
+		signatureURL := fs.String("signature-url", "", "HTTPS URL for Ed25519 signature")
+		key := fs.String("public-key", "", "trusted Ed25519 public key (32 raw bytes)")
+		_ = fs.Parse(os.Args[2:])
+		if *manifestURL == "" || *signatureURL == "" || *key == "" { fatal("manifest-url, signature-url and public-key are required") }
+		pub, err := os.ReadFile(*key); if err != nil { fatal(err.Error()) }
+		m, err := upgrade.CheckRelease(context.Background(), *manifestURL, *signatureURL, ed25519.PublicKey(pub)); if err != nil { fatal(err.Error()) }
+		fmt.Printf("Signed release available: %s (%s/%s), published %s\n", m.Version, m.OS, m.Arch, m.PublishedAt.UTC().Format(time.RFC3339))
 	case "stage":
 		fs := flag.NewFlagSet("stage", flag.ExitOnError)
 		manifest := fs.String("manifest", "", "signed release manifest JSON")
@@ -80,6 +92,6 @@ func main() {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: agentmesh-upgrade <stage|verify|apply> [flags]\nThe release manifest must be signed by a trusted Ed25519 key. Apply is offline and requires --confirm-stopped.")
+	fmt.Fprintln(os.Stderr, "Usage: agentmesh-upgrade <check|stage|verify|apply> [flags]\nThe release manifest must be signed by a trusted Ed25519 key. Apply is offline and requires --confirm-stopped.")
 }
 func fatal(message string) { fmt.Fprintln(os.Stderr, "agentmesh-upgrade:", message); os.Exit(1) }
