@@ -48,6 +48,7 @@ type Metrics struct {
 	activeExecutions   atomic.Int64
 	executionBacklog   atomic.Int64
 	usageWriteFailures atomic.Uint64
+	providerRequests     atomic.Uint64
 	providerFailures   atomic.Uint64
 }
 
