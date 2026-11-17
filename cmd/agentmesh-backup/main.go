@@ -22,6 +22,12 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
+	switch os.Args[1] {
+	case "create", "list", "prune", "verify", "restore", "apply-restore":
+	default:
+		usage()
+		os.Exit(2)
+	}
 	pass, err := readPassphrase()
 	if err != nil {
 		fatal(err.Error())
