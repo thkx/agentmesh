@@ -24,6 +24,10 @@ func main() {
 	base := fs.String("url", "http://127.0.0.1:8080", "AgentMesh base URL")
 	timeout := fs.Duration("timeout", 5*time.Second, "request timeout")
 	_ = fs.Parse(os.Args[2:])
+	if os.Args[1] != "status" && os.Args[1] != "shutdown" {
+		usage()
+		os.Exit(2)
+	}
 	token, tokenErr := readAPIToken()
 	if tokenErr != nil {
 		fatal(tokenErr.Error())
