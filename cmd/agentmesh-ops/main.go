@@ -81,6 +81,7 @@ func main() {
 		os.Exit(1)
 	}
 }
+
 // readAPIToken prefers the optional environment override. Otherwise it reads
 // the token from stdin, allowing callers to pipe a hidden interactive prompt.
 func readAPIToken() (string, error) {
