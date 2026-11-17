@@ -63,7 +63,8 @@ curl --silent --show-error --fail --max-time 10 "$BASE_URL/dashboard/login" >/de
 curl --silent --show-error --output /dev/null --max-time 10 \
   --cookie-jar "$COOKIE_JAR" --cookie "$COOKIE_JAR" \
   -H "Origin: $BASE_URL" -H "Referer: $BASE_URL/dashboard/login" \
-  --data-urlencode "token=$TOKEN" "$BASE_URL/dashboard/login" || true
+  --data-urlencode "token=$TOKEN" "$BASE_URL/dashboard/login"
+grep -q "agentmesh_dashboard" "$COOKIE_JAR" || fail "Dashboard login did not issue a session cookie"
 for page in /dashboard /dashboard/providers /dashboard/models /dashboard/agents /dashboard/tasks /dashboard/workflows /dashboard/executions /dashboard/usage /dashboard/operations/metrics; do
   status="$(curl --silent --show-error --output "$TMP_DIR/page" --write-out '%{http_code}' --max-time 10 --cookie "$COOKIE_JAR" "$BASE_URL$page")"
   [[ "$status" == "200" ]] || fail "Dashboard page $page returned HTTP $status"
