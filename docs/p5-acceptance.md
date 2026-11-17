@@ -79,7 +79,13 @@ Pass criteria:
 1. Open `/dashboard/operations/metrics`.
 2. Inspect `GET /api/v1/operations/health`, `GET /api/v1/diagnostics/report` and `GET /api/v1/diagnostics/bundle`.
 3. Confirm the report contains no API token, provider key, prompt, URL query string, or local absolute path.
-4. Run `AGENTMESH_API_TOKEN="$AGENTMESH_API_TOKEN" go run ./cmd/agentmesh-ops status`.
+4. Run the operations CLI without exporting the token:
+   ```bash
+   read -rsp "AgentMesh API token: " token; echo
+   printf '%s' "$token" | go run ./cmd/agentmesh-ops status
+   unset token
+   ```
+   The CLI reads the token from stdin when the environment override is absent.
 5. When ready to stop the service, use the Dashboard shutdown confirmation or `go run ./cmd/agentmesh-ops shutdown`; verify the process exits cleanly and its database can be reopened.
 
 ## 6. Acceptance record
