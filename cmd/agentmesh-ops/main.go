@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -23,9 +24,12 @@ func main() {
 	base := fs.String("url", "http://127.0.0.1:8080", "AgentMesh base URL")
 	timeout := fs.Duration("timeout", 5*time.Second, "request timeout")
 	_ = fs.Parse(os.Args[2:])
-	token := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
+	token, tokenErr := readAPIToken()
+	if tokenErr != nil {
+		fatal(tokenErr.Error())
+	}
 	if token == "" {
-		fatal("AGENTMESH_API_TOKEN is required")
+		fatal("API token is required via AGENTMESH_API_TOKEN or stdin")
 	}
 	parsedURL, parseErr := url.Parse(*base)
 	if parseErr != nil || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Scheme != "https" && parsedURL.Scheme != "http") {
@@ -73,7 +77,23 @@ func main() {
 		os.Exit(1)
 	}
 }
+// readAPIToken prefers the optional environment override. Otherwise it reads
+// the token from stdin, allowing callers to pipe a hidden interactive prompt.
+func readAPIToken() (string, error) {
+	if value := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN")); value != "" {
+		return value, nil
+	}
+	value, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
+	if err != nil {
+		return "", fmt.Errorf("read API token from stdin: %w", err)
+	}
+	if len(value) > 4096 {
+		return "", fmt.Errorf("API token is too long")
+	}
+	return strings.TrimSpace(string(value)), nil
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: agentmesh-ops <status|shutdown> [--url http://127.0.0.1:8080] [--timeout 5s]\nSet AGENTMESH_API_TOKEN in the environment.")
+	fmt.Fprintln(os.Stderr, "Usage: agentmesh-ops <status|shutdown> [--url http://127.0.0.1:8080] [--timeout 5s]\nProvide the API token via AGENTMESH_API_TOKEN or stdin.")
 }
 func fatal(message string) { fmt.Fprintln(os.Stderr, "agentmesh-ops:", message); os.Exit(1) }
