@@ -16,7 +16,7 @@ COOKIE_JAR="$TMP_DIR/cookies.txt"
 BACKUP="$TMP_DIR/agentmesh-e2e.backup"
 RESTORE_DIR="$TMP_DIR/restore"
 
-cleanup() { rm -rf "$TMP_DIR"; }
+cleanup() { unset TOKEN PASSPHRASE; rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -28,8 +28,19 @@ need jq
 need go
 need unzip
 [[ -f "$CONFIG" ]] || fail "config file not found: $CONFIG"
-[[ -n "$TOKEN" && ${#TOKEN} -ge 32 ]] || fail "set AGENTMESH_API_TOKEN (at least 32 characters)"
-[[ -n "$PASSPHRASE" && ${#PASSPHRASE} -ge 12 ]] || fail "set AGENTMESH_BACKUP_PASSPHRASE (at least 12 characters)"
+# Prompt interactively by default. Environment overrides remain optional for CI only.
+if [[ -z "$TOKEN" ]]; then
+  [[ -t 0 ]] || fail "interactive terminal required to enter the API token"
+  read -r -s -p "AgentMesh API token (32+ characters): " TOKEN
+  echo
+fi
+if [[ -z "$PASSPHRASE" ]]; then
+  [[ -t 0 ]] || fail "interactive terminal required to enter the backup passphrase"
+  read -r -s -p "Backup encryption passphrase (12+ characters): " PASSPHRASE
+  echo
+fi
+[[ ${#TOKEN} -ge 32 ]] || fail "API token must be at least 32 characters"
+[[ ${#PASSPHRASE} -ge 12 ]] || fail "backup passphrase must be at least 12 characters"
 
 BASE_URL="${BASE_URL%/}"
 AUTH=(-H "Authorization: Bearer $TOKEN")
@@ -85,11 +96,12 @@ request "$BASE_URL/api/v1/usage/by-model" | jq -e 'type == "object"' >/dev/null
 pass "Usage summary endpoints"
 
 echo "== Encrypted backup, verification and isolated restore staging =="
-export AGENTMESH_BACKUP_PASSPHRASE="$PASSPHRASE"
-go run ./cmd/agentmesh-backup create --config "$CONFIG" --output "$BACKUP" --version p5-acceptance
-go run ./cmd/agentmesh-backup verify --archive "$BACKUP"
+# Feed the passphrase over stdin; it is never exported or written to a file.
+backup_cli() { printf '%s' "$PASSPHRASE" | go run ./cmd/agentmesh-backup "$@"; }
+backup_cli create --config "$CONFIG" --output "$BACKUP" --version p5-acceptance
+backup_cli verify --archive "$BACKUP"
 mkdir -p "$RESTORE_DIR"
-go run ./cmd/agentmesh-backup restore --archive "$BACKUP" --destination "$RESTORE_DIR"
+backup_cli restore --archive "$BACKUP" --destination "$RESTORE_DIR"
 [[ -s "$RESTORE_DIR/manifest.json" ]] || fail "restore manifest missing"
 [[ -s "$RESTORE_DIR/database.sqlite" ]] || fail "restored SQLite snapshot missing"
 [[ -s "$RESTORE_DIR/credential.key" ]] || fail "restored credential encryption key missing"
