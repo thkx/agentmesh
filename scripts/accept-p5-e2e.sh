@@ -26,6 +26,7 @@ need() { command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1
 need curl
 need jq
 need go
+need unzip
 [[ -f "$CONFIG" ]] || fail "config file not found: $CONFIG"
 [[ -n "$TOKEN" && ${#TOKEN} -ge 32 ]] || fail "set AGENTMESH_API_TOKEN (at least 32 characters)"
 [[ -n "$PASSPHRASE" && ${#PASSPHRASE} -ge 12 ]] || fail "set AGENTMESH_BACKUP_PASSPHRASE (at least 12 characters)"
@@ -90,11 +91,8 @@ go run ./cmd/agentmesh-backup verify --archive "$BACKUP"
 mkdir -p "$RESTORE_DIR"
 go run ./cmd/agentmesh-backup restore --archive "$BACKUP" --destination "$RESTORE_DIR"
 [[ -s "$RESTORE_DIR/manifest.json" ]] || fail "restore manifest missing"
-[[ -s "$RESTORE_DIR/database.sqlite" || -s "$RESTORE_DIR/agentmesh.db" ]] || {
-  # The archive's manifest defines the exact database filename; require at least
-  # one extracted SQLite database without assuming a platform-specific name.
-  find "$RESTORE_DIR" -type f -name '*.db' -o -name '*.sqlite' | grep -q . || fail "restored SQLite snapshot missing"
-}
+[[ -s "$RESTORE_DIR/database.sqlite" ]] || fail "restored SQLite snapshot missing"
+[[ -s "$RESTORE_DIR/credential.key" ]] || fail "restored credential encryption key missing"
 pass "Encrypted backup, archive verification and offline restore staging"
 
 echo
