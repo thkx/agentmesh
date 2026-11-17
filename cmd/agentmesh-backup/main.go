@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,7 +22,10 @@ func main() {
 		usage()
 		os.Exit(2)
 	}
-	pass := []byte(os.Getenv("AGENTMESH_BACKUP_PASSPHRASE"))
+	pass, err := readPassphrase()
+	if err != nil {
+		fatal(err.Error())
+	}
 	switch os.Args[1] {
 	case "create":
 		fs := flag.NewFlagSet("create", flag.ExitOnError)
@@ -145,7 +149,25 @@ func main() {
 		os.Exit(2)
 	}
 }
+// readPassphrase prefers the optional environment override for automation. When it
+// is absent, it reads from stdin so callers can pipe the secret without exporting
+// it or placing it in command-line arguments.
+func readPassphrase() ([]byte, error) {
+	if value := os.Getenv("AGENTMESH_BACKUP_PASSPHRASE"); value != "" {
+		return []byte(value), nil
+	}
+	value, err := io.ReadAll(io.LimitReader(os.Stdin, 4097))
+	if err != nil {
+		return nil, fmt.Errorf("read backup passphrase from stdin: %w", err)
+	}
+	value = []byte(strings.TrimRight(string(value), "\r\n"))
+	if len(value) > 4096 {
+		return nil, fmt.Errorf("backup passphrase is too long")
+	}
+	return value, nil
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|list|prune|verify|restore|apply-restore> [flags]\nPassphrase is read only from AGENTMESH_BACKUP_PASSPHRASE and is never persisted.")
+	fmt.Fprintln(os.Stderr, "Usage: agentmesh-backup <create|list|prune|verify|restore|apply-restore> [flags]\nPassphrase is read from AGENTMESH_BACKUP_PASSPHRASE or stdin and is never persisted.")
 }
 func fatal(message string) { fmt.Fprintln(os.Stderr, "agentmesh-backup:", message); os.Exit(1) }
