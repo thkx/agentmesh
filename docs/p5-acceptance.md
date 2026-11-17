@@ -8,20 +8,17 @@
 
 Start AgentMesh using the same config and database you intend to validate. Keep it bound to loopback unless remote access has been separately hardened.
 
-The API token must be the same token already configured in the running AgentMesh service. The backup passphrase is a separate password used only to encrypt this test backup. Enter both interactively so they are not written into shell history:
+The API token must be the same token already configured in the running AgentMesh service. The backup passphrase is a separate password used only to encrypt this test backup. Run the script directly: it prompts for both values with terminal echo disabled. Neither value needs to be exported or added to a config file or shell history.
 
 ```bash
-read -rsp "AgentMesh API token: " AGENTMESH_API_TOKEN; echo
-read -rsp "Backup encryption passphrase (12+ characters): " AGENTMESH_BACKUP_PASSPHRASE; echo
-export AGENTMESH_API_TOKEN AGENTMESH_BACKUP_PASSPHRASE
-# Optional overrides; defaults are shown.
-export AGENTMESH_BASE_URL='http://127.0.0.1:8080'
-export AGENTMESH_CONFIG='configs/config.yaml'
 bash scripts/accept-p5-e2e.sh
-unset AGENTMESH_API_TOKEN AGENTMESH_BACKUP_PASSPHRASE
 ```
 
-The script expects API Bearer authentication to be enabled on the running service; if the service has no API token configured, the unauthenticated-request check will intentionally fail.
+The backup CLI accepts its passphrase from standard input, so the smoke test does not export `AGENTMESH_BACKUP_PASSPHRASE`. The API token is held in the script process and used for authenticated requests. Optional overrides remain available for automation:
+- `AGENTMESH_BASE_URL` (default: `http://127.0.0.1:8080`)
+- `AGENTMESH_CONFIG` (default: `configs/config.yaml`)
+
+
 
 The script is non-destructive. It checks:
 - `/healthz` and `/readyz`;
