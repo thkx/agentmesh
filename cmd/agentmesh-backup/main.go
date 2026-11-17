@@ -155,6 +155,7 @@ func main() {
 		os.Exit(2)
 	}
 }
+
 // readPassphrase prefers the optional environment override for automation. When it
 // is absent, it reads from stdin so callers can pipe the secret without exporting
 // it or placing it in command-line arguments.
