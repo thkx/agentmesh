@@ -8,15 +8,20 @@
 
 Start AgentMesh using the same config and database you intend to validate. Keep it bound to loopback unless remote access has been separately hardened.
 
-Set the API token and backup passphrase in the current shell (do not put either value in a committed config or shell history):
+The API token must be the same token already configured in the running AgentMesh service. The backup passphrase is a separate password used only to encrypt this test backup. Enter both interactively so they are not written into shell history:
 
 ```bash
-export AGENTMESH_API_TOKEN='...at-least-32-characters...'
-export AGENTMESH_BACKUP_PASSPHRASE='...at-least-12-characters...'
+read -rsp "AgentMesh API token: " AGENTMESH_API_TOKEN; echo
+read -rsp "Backup encryption passphrase (12+ characters): " AGENTMESH_BACKUP_PASSPHRASE; echo
+export AGENTMESH_API_TOKEN AGENTMESH_BACKUP_PASSPHRASE
+# Optional overrides; defaults are shown.
 export AGENTMESH_BASE_URL='http://127.0.0.1:8080'
 export AGENTMESH_CONFIG='configs/config.yaml'
 bash scripts/accept-p5-e2e.sh
+unset AGENTMESH_API_TOKEN AGENTMESH_BACKUP_PASSPHRASE
 ```
+
+The script expects API Bearer authentication to be enabled on the running service; if the service has no API token configured, the unauthenticated-request check will intentionally fail.
 
 The script is non-destructive. It checks:
 - `/healthz` and `/readyz`;
