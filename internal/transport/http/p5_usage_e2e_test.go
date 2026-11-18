@@ -25,7 +25,7 @@ func (p5UsageAdapter) Generate(_ context.Context, req modelgateway.GenerateReque
 	return &modelgateway.GenerateResponse{
 		ID:      "provider-request-p5-1",
 		Content: "safe test completion",
-		Usage: modelgateway.Usage{InputTokens: 11, OutputTokens: 7},
+		Usage:   modelgateway.Usage{InputTokens: 11, OutputTokens: 7},
 	}, nil
 }
 func (p5UsageAdapter) Stream(context.Context, modelgateway.GenerateRequest) (<-chan modelgateway.StreamEvent, error) {
