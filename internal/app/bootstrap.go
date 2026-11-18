@@ -156,9 +156,12 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load application config: %w", err)
 	}
-	apiToken := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
+	apiToken, err := config.ResolveAPIToken(cfg.Server.APITokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("load API token: %w", err)
+	}
 	if apiToken != "" && len(apiToken) < 32 {
-		return nil, fmt.Errorf("AGENTMESH_API_TOKEN must contain at least 32 characters")
+		return nil, fmt.Errorf("API token must contain at least 32 characters")
 	}
 	host := strings.Trim(cfg.Server.Host, "[]")
 	ip := net.ParseIP(host)
