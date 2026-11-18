@@ -8,7 +8,27 @@
 
 Start AgentMesh using the same config and database you intend to validate. Keep it bound to loopback unless remote access has been separately hardened.
 
-The API token must be the same token already configured in the running AgentMesh service. The backup passphrase is a separate password used only to encrypt this test backup. Run the script directly: it prompts for both values with terminal echo disabled. Neither value needs to be exported or added to a config file or shell history.
+The API token must be configured in the running AgentMesh service. To enable the Bearer-authenticated acceptance gate without environment variables, add the following to the `server:` section of your config:
+
+```yaml
+server:
+  api_token_file: ./data/api-token
+```
+
+Create the token file (the token must be at least 32 characters). These commands prompt without echo and create a file readable only by your account:
+
+```bash
+mkdir -p data
+umask 077
+read -rsp "New AgentMesh API token: " token; echo
+printf '%s\\n' "$token" > data/api-token
+chmod 600 data/api-token
+unset token
+```
+
+Restart AgentMesh after changing the config. The service rejects symlinks, non-regular files, files accessible by group/other users, and tokens shorter than 32 characters. Existing `AGENTMESH_API_TOKEN` remains supported and takes precedence for automated deployments.
+
+The backup passphrase is a separate password used only to encrypt this test backup. Run the script directly: it prompts for both values with terminal echo disabled. Neither value needs to be exported or added to shell history.
 
 ```bash
 bash scripts/accept-p5-e2e.sh
