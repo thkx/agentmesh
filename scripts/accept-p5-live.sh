@@ -93,6 +93,10 @@ if [[ -z "$UPSTREAM_MODEL" ]]; then
 fi
 read -r -p "Provider base URL [https://api.openai.com/v1]: " BASE_PROVIDER_URL
 BASE_PROVIDER_URL="${BASE_PROVIDER_URL:-https://api.openai.com/v1}"
+if [[ "$BASE_PROVIDER_URL" != https://* && "$BASE_PROVIDER_URL" != http://127.0.0.1:* && "$BASE_PROVIDER_URL" != http://localhost:* ]]; then
+  echo "Provider base URL must use HTTPS unless it is loopback." >&2
+  exit 1
+fi
 
 echo "== Configure isolated live provider/model =="
 provider_json="$(jq -n --arg id "$PROVIDER_ID" --arg url "$BASE_PROVIDER_URL" \
