@@ -108,20 +108,48 @@ Pass criteria:
    The CLI reads the token from stdin when the environment override is absent.
 5. When ready to stop the service, use the Dashboard shutdown confirmation or `go run ./cmd/agentmesh-ops shutdown`; verify the process exits cleanly and its database can be reopened.
 
-## 6. Acceptance record
+## 6. Automated test coverage
+
+Run the complete local/CI suite with:
+
+```bash
+bash scripts/verify-p5-all.sh
+```
+
+This runs shell validation, frontend asset-boundary checks, formatting, SQLC consistency when the binary is installed, the complete Go suite under the race detector, build and vet. To include the running-instance smoke test, set `AGENTMESH_RUN_PRODUCT_SMOKE=1`; the script then prompts for the API token and backup passphrase without echo.
+
+P5-specific test coverage includes:
+
+| Area | Automated coverage |
+|---|---|
+| Provider/model catalog and credential secrecy | HTTP catalog lifecycle, concurrent catalog writes, credential response redaction |
+| Model Gateway | Generate and streaming adapters, provider/model normalization, error normalization, cancellation and observer behavior |
+| Usage | Idempotency, immutable pricing snapshots, currency-separated aggregates, HTTP summary read models |
+| Workflow engine | Sequential/parallel execution, queued worker, recovery, approval continuation, conditions and fan-out |
+| Workflow authoring | Two-agent-node YAML/graph round-trip, HTTP JSON/YAML/graph synchronization, malformed graph/YAML rejection |
+| Execution and provenance | P4 lifecycle, event ledger, unified execution and timeline handler tests |
+| Diagnostics and observability | Redaction, allow-listed metrics, report bounds, support ZIP contents, authenticated metrics endpoint |
+| Backup and restore | Encryption, wrong-passphrase rejection, archive verification, SQLite integrity, isolated extraction and offline apply safeguards |
+| Upgrade | Ed25519 signature verification, checksum rejection, staging and offline apply safeguards |
+| Service lifecycle | Shutdown closes the database and the persisted database can be reopened |
+
+The automated suite uses deterministic test adapters and isolated temporary SQLite databases. It does not spend money or require a third-party provider key. Real provider connectivity and one real Agent/Workflow invocation remain explicit live-environment acceptance gates.
+
+## 7. Acceptance record
+
 
 Do not mark P5 product-level acceptance complete until all rows are backed by observed evidence.
 
 | Gate | Evidence | Status |
 |---|---|---|
-| Automated runtime smoke | `accept-p5-e2e.sh` output | Pending |
-| Dashboard navigation | Pages loaded with authenticated session | Pending |
+| Automated runtime smoke | User-run `accept-p5-e2e.sh` output (2026-11-18) | PASS |
+| Dashboard navigation | User-run authenticated page checks (2026-11-18) | PASS |
 | Real provider connectivity | Successful provider test | Pending |
 | Real Agent/Workflow run | Execution ID + terminal status | Pending |
-| Timeline and evidence | Execution detail/history inspected | Pending |
+| Timeline and evidence | P4 handler/event-ledger unit and integration coverage; live run inspection | Pending live gate |
 | Usage accounting | Before/after usage snapshot | Pending |
-| Backup and restore | Verified archive + isolated restore | Pending |
-| Diagnostics redaction | Report and ZIP inspected | Pending |
-| Graceful shutdown | Process exit + DB reopen | Pending |
+| Backup and restore | User-run encrypted archive verification + isolated restore staging (2026-11-18) | PASS |
+| Diagnostics redaction | Report, support ZIP and metrics verified (2026-11-18); canary redaction unit tests | PASS |
+| Graceful shutdown | Automated container shutdown + DB reopen test; live process exit still to verify | Partial |
 
 **Important:** A passing smoke script is not the same as a passing real-model end-to-end test. Record skipped gates explicitly, including the reason.
