@@ -10,10 +10,10 @@ import (
 
 func TestP5TwoNodeAgentWorkflowYAMLAndGraphRoundTrip(t *testing.T) {
 	original := workflow.Definition{
-		ID: "p5-two-agent",
-		Name: "P5 two-agent integration",
+		ID:      "p5-two-agent",
+		Name:    "P5 two-agent integration",
 		Version: 3,
-		Entry: "draft",
+		Entry:   "draft",
 		Nodes: []workflow.Node{
 			{ID: "draft", Type: workflow.NodeAgent, Name: "Draft", Agent: &workflow.AgentConfig{
 				ModelID: "model-test", WorkspaceID: "workspace-test", Prompt: "Create a concise draft",
