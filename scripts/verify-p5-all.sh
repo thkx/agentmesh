@@ -14,6 +14,7 @@ bash -n scripts/verify-p5-part1.sh
 bash -n scripts/verify-p5-m53.sh
 bash -n scripts/verify-p5-part2.sh
 bash -n scripts/accept-p5-e2e.sh
+bash -n scripts/accept-p5-live.sh
 bash -n scripts/verify-p5-all.sh
 
 echo "== Frontend source boundary =="
