@@ -21,7 +21,7 @@ Create the token file (the token must be at least 32 characters). These commands
 mkdir -p data
 umask 077
 read -rsp "New AgentMesh API token: " token; echo
-printf '%s\\n' "$token" > data/api-token
+printf '%s\n' "$token" > data/api-token
 chmod 600 data/api-token
 unset token
 ```
