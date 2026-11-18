@@ -53,7 +53,7 @@ func TestRedactURLCredentialsAndQuery(t *testing.T) {
 
 func TestP5DiagnosticsRedactsSecretCanariesFromReportLogs(t *testing.T) {
 	input := Input{
-		Version:    "v1.0.0",
+		Version: "v1.0.0",
 		RecentLogs: []string{
 			"Authorization: Bearer p5-canary-bearer",
 			"api_key=p5-canary-key",
