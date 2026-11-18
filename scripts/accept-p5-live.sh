@@ -74,7 +74,7 @@ ready="$(request GET /readyz | jq -r '.status')"
 assert_eq "$ready" "ready" "runtime readiness"
 echo "PASS: service and database ready"
 
-STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%S.000000000Z')"
 STAMP="$(date +%s)-$(openssl rand -hex 3)"
 PROVIDER_ID="p5-live-$STAMP"
 MODEL_ID="p5-live-model-$STAMP"
