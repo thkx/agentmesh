@@ -38,9 +38,7 @@ func TestP5TwoNodeAgentWorkflowYAMLAndGraphRoundTrip(t *testing.T) {
 		t.Fatalf("import YAML: %v", err)
 	}
 	if !reflect.DeepEqual(fromYAML, original) {
-		t.Fatalf("YAML round trip changed workflow
-want: %#v
-got:  %#v", original, fromYAML)
+		t.Fatalf("YAML round trip changed workflow: want=%#v got=%#v", original, fromYAML)
 	}
 
 	graph, err := ToGraph(fromYAML)
@@ -52,9 +50,7 @@ got:  %#v", original, fromYAML)
 		t.Fatalf("convert from graph: %v", err)
 	}
 	if !reflect.DeepEqual(fromGraph, original) {
-		t.Fatalf("graph round trip changed workflow
-want: %#v
-got:  %#v", original, fromGraph)
+		t.Fatalf("graph round trip changed workflow: want=%#v got=%#v", original, fromGraph)
 	}
 }
 
