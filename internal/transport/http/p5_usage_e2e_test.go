@@ -23,7 +23,7 @@ type p5UsageAdapter struct{}
 
 func (p5UsageAdapter) Generate(_ context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
 	return &modelgateway.GenerateResponse{
-		ID: "provider-request-p5-1",
+		ID:      "provider-request-p5-1",
 		Content: "safe test completion",
 		Usage: modelgateway.Usage{InputTokens: 11, OutputTokens: 7},
 	}, nil
