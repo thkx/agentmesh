@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/knadh/koanf/parsers/yaml"
