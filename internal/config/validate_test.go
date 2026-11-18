@@ -1,8 +1,8 @@
 package config
 
 import (
-	"testing"
 	"os"
+	"testing"
 	"time"
 )
 
