@@ -13,7 +13,7 @@ if [[ "$BASE_URL" != https://* && "$BASE_URL" != http://127.0.0.1:* && "$BASE_UR
   echo "Refusing to send acceptance credentials to non-HTTPS or non-loopback URL: $BASE_URL" >&2
   exit 1
 fi
-for tool in curl jq; do
+for tool in curl jq openssl; do
   command -v "$tool" >/dev/null 2>&1 || { echo "Missing required command: $tool" >&2; exit 1; }
 done
 
@@ -21,7 +21,7 @@ echo "== AgentMesh P5 Live Acceptance =="
 echo "Target: $BASE_URL"
 read -r -s -p "AgentMesh API token: " API_TOKEN
 echo
-if [[ ${#API_TOKEN} -lt 32 || "$API_TOKEN" == *$'\n'* || "$API_TOKEN" == *$'\r'* ]]; then
+if [[ ! "$API_TOKEN" =~ ^[A-Za-z0-9._~-]{32,}$ ]]; then
   echo "API token must contain at least 32 characters and no line breaks." >&2
   exit 1
 fi
@@ -44,8 +44,8 @@ trap cleanup EXIT
 request() {
   local method="$1" path="$2" data="${3:-}" output="$TMP_DIR/response.json" status
   if [[ -n "$data" ]]; then
-    status="$(curl --silent --show-error --max-time 180 --config "$CURL_CONFIG" \
-      -H 'Content-Type: application/json' -X "$method" --data-binary "$data" \
+    status="$(printf '%s' "$data" | curl --silent --show-error --max-time 180 --config "$CURL_CONFIG" \
+      -H 'Content-Type: application/json' -X "$method" --data-binary @- \
       -o "$output" -w '%{http_code}' "$BASE_URL$path")"
   else
     status="$(curl --silent --show-error --max-time 180 --config "$CURL_CONFIG" \
@@ -74,6 +74,7 @@ ready="$(request GET /readyz | jq -r '.status')"
 assert_eq "$ready" "ready" "runtime readiness"
 echo "PASS: service and database ready"
 
+STARTED_AT="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 STAMP="$(date +%s)-$(openssl rand -hex 3)"
 PROVIDER_ID="p5-live-$STAMP"
 MODEL_ID="p5-live-model-$STAMP"
@@ -95,11 +96,15 @@ BASE_PROVIDER_URL="${BASE_PROVIDER_URL:-https://api.openai.com/v1}"
 
 echo "== Configure isolated live provider/model =="
 provider_json="$(jq -n --arg id "$PROVIDER_ID" --arg url "$BASE_PROVIDER_URL" \
-  '{id:$id,name:"P5 Live Acceptance",type:"openai",kind:"cloud",base_url:$url,api_key_env:"p5-live-acceptance",enabled:true}')"
+  '{id:$id,name:"P5 Live Acceptance",type:"openai",kind:"cloud",base_url:$url,api_key_env:"p5-live-acceptance",enabled:false}')"
 request POST /api/v1/providers "$provider_json" >/dev/null
-credential_json="$(jq -n --arg key "$PROVIDER_KEY" '{api_key:$key}')"
+printf '%s' "$PROVIDER_KEY" > "$TMP_DIR/provider-key"
+credential_json="$(jq -n --rawfile key "$TMP_DIR/provider-key" '{api_key:$key}')"
 request PUT "/api/v1/providers/$PROVIDER_ID/credential" "$credential_json" >/dev/null
+rm -f "$TMP_DIR/provider-key"
 unset PROVIDER_KEY credential_json
+enable_json='{"enabled":true}'
+request PATCH "/api/v1/providers/$PROVIDER_ID/enabled" "$enable_json" >/dev/null
 model_json="$(jq -n --arg id "$MODEL_ID" --arg pid "$PROVIDER_ID" --arg name "$UPSTREAM_MODEL" \
   '{id:$id,provider_id:$pid,name:$name,display_name:"P5 Live Acceptance Model",context_window:32768,max_output_tokens:512,supports_streaming:false,enabled:true}')"
 request POST /api/v1/models "$model_json" >/dev/null
@@ -181,7 +186,7 @@ echo "PASS: two real Agent nodes completed in one durable Workflow run ($RUN_ID)
 echo "PASS: workflow history contains $event_count events and $node_count node observations"
 
 echo "== Usage ledger and provenance =="
-usage_events="$(request GET "/api/v1/usage/events?since=$(date -u '+%Y-%m-%dT%H:%M:%SZ')&provider_id=$PROVIDER_ID&model_id=$MODEL_ID&limit=100")"
+usage_events="$(request GET "/api/v1/usage/events?since=$STARTED_AT&provider_id=$PROVIDER_ID&model_id=$MODEL_ID&limit=100")"
 usage_count="$(jq '.items | length' <<<"$usage_events")"
 if (( usage_count < 4 )); then
   echo "FAIL: expected at least 4 real model usage events for this provider/model; found $usage_count" >&2
@@ -194,25 +199,12 @@ if ! jq -e --arg p "$PROVIDER_ID" --arg m "$MODEL_ID" '.items | all(.[]; .provid
 fi
 echo "PASS: $usage_count real usage events persisted with provider/model provenance"
 
-cat > "$REPORT" <<EOF
-{
-  "acceptance": "P5 Live Acceptance",
-  "created_at": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
-  "base_url": "$BASE_URL",
-  "provider_id": "$PROVIDER_ID",
-  "model_id": "$MODEL_ID",
-  "upstream_model": "$UPSTREAM_MODEL",
-  "agent_definition_id": "$AGENT_ID",
-  "agent_task_id": "$AGENT_RUN_ID",
-  "workflow_id": "$WORKFLOW_ID",
-  "workflow_run_id": "$RUN_ID",
-  "workflow_status": "succeeded",
-  "workflow_event_count": $event_count,
-  "workflow_node_observation_count": $node_count,
-  "usage_event_count": $usage_count,
-  "secrets_recorded": false
-}
-EOF
+jq -n --arg created_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  --arg base_url "$BASE_URL" --arg provider "$PROVIDER_ID" --arg model "$MODEL_ID" \
+  --arg upstream "$UPSTREAM_MODEL" --arg agent "$AGENT_ID" --arg task "$AGENT_RUN_ID" \
+  --arg workflow "$WORKFLOW_ID" --arg run "$RUN_ID" \
+  --argjson events "$event_count" --argjson nodes "$node_count" --argjson usage "$usage_count" \
+  '{acceptance:"P5 Live Acceptance",created_at:$created_at,base_url:$base_url,provider_id:$provider,model_id:$model,upstream_model:$upstream,agent_definition_id:$agent,agent_task_id:$task,workflow_id:$workflow,workflow_run_id:$run,workflow_status:"succeeded",workflow_event_count:$events,workflow_node_observation_count:$nodes,usage_event_count:$usage,secrets_recorded:false}' > "$REPORT"
 mkdir -p data
 REPORT_PATH="data/p5-live-acceptance-$STAMP.json"
 cp "$REPORT" "$REPORT_PATH"
