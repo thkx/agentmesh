@@ -6,6 +6,9 @@ app:
 server:
   host: 127.0.0.1
   port: 8080
+  # Optional. Enable Bearer authentication for API, Dashboard and /metrics.
+  # Create this file with chmod 600; never commit the token.
+  # api_token_file: ./data/api-token
   read_timeout: 15s
   write_timeout: 30s
   shutdown_timeout: 15s
