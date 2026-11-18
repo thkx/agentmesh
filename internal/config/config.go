@@ -22,6 +22,7 @@ type AppConfig struct {
 type ServerConfig struct {
 	Host            string        `koanf:"host"`
 	Port            int           `koanf:"port"`
+	APITokenFile    string        `koanf:"api_token_file"`
 	ReadTimeout     time.Duration `koanf:"read_timeout"`
 	WriteTimeout    time.Duration `koanf:"write_timeout"`
 	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
