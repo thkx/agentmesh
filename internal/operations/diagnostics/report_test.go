@@ -50,3 +50,30 @@ func TestRedactURLCredentialsAndQuery(t *testing.T) {
 		t.Fatalf("URL not redacted: %s", got)
 	}
 }
+
+
+func TestP5DiagnosticsRedactsSecretCanariesFromReportLogs(t *testing.T) {
+	input := Input{
+		Version: "v1.0.0",
+		RecentLogs: []string{
+			"Authorization: Bearer p5-canary-bearer",
+			"api_key=p5-canary-key",
+			"https://user:pass@example.test/v1?token=p5-canary-url#p5-canary-fragment",
+			"/Users/alice/private/p5-canary-path",
+		},
+	}
+	report := Build(input, time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC))
+	serialized := strings.Join(report.RecentLogs, "\n")
+	for _, secret := range []string{
+		"p5-canary-bearer",
+		"p5-canary-key",
+		"user:pass",
+		"p5-canary-url",
+		"p5-canary-fragment",
+		"/Users/alice/private/p5-canary-path",
+	} {
+		if strings.Contains(serialized, secret) {
+			t.Fatalf("diagnostics report leaked canary %q: %s", secret, serialized)
+		}
+	}
+}
