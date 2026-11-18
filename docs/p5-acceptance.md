@@ -50,7 +50,7 @@ The script is non-destructive. It checks:
 
 It deliberately does not call a paid model, create Agent/Workflow runs, overwrite the active database, or shut down the service.
 
-## 2. Real provider and model call
+## 1A. Manual real provider and model inspection
 
 1. Open `/dashboard/providers` and verify the configured provider's type, endpoint and enabled state.
 2. Add or update its credential using the Dashboard credential form. Confirm the UI only shows configured/not-configured state; it must never reveal the secret again.
@@ -65,7 +65,7 @@ Pass criteria:
 - The Usage page and `GET /api/v1/usage/summary` reflect the call. Token counts may be unavailable for providers that do not return usage; unknown pricing must remain unknown, not silently become zero.
 - The execution/request correlation is traceable without exposing prompt contents or credentials in logs.
 
-## 3. Workflow orchestration
+## 2. Workflow orchestration
 
 1. Create or import a minimal two-node workflow using the Dashboard Workflow editor. Use a first node that produces a short text result and a second node that consumes it; both should use the same known-good model initially.
 2. Save the workflow and reload it. Confirm the definition survives a reload and the graph/YAML representations remain consistent.
@@ -77,6 +77,51 @@ Pass criteria:
 - One canonical run/execution is visible; no duplicate state is created by the Dashboard.
 - Node transitions and evidence have stable provenance.
 - The run reaches the expected terminal state and usage is recorded once per terminal model usage event.
+
+
+## 3. Automated live Provider → Agent → Workflow acceptance
+
+The live gate is implemented by `scripts/accept-p5-live.sh`. It uses the real configured AgentMesh process, its real SQLite database, the real Model Gateway and the running Workflow worker. It does not use test adapters.
+
+Requirements:
+- Start AgentMesh with the intended config and API token file.
+- Keep the service on loopback, or use HTTPS for a separately secured remote deployment.
+- Have `curl`, `jq` and `openssl` installed.
+- Use an OpenAI-compatible API key and an upstream model identifier available to that key. The default endpoint is `https://api.openai.com/v1`; compatible HTTPS endpoints are also supported.
+- The model/provider should permit short completion requests. This test makes several small paid (or provider-billed) calls.
+
+Run:
+
+```bash
+git pull origin p5/control-plane
+bash scripts/accept-p5-live.sh
+```
+
+The script prompts with terminal echo disabled for the AgentMesh API token and provider API key. It asks for the upstream model identifier and provider base URL. The API key is sent to AgentMesh's write-only credential endpoint and stored by the existing encrypted credential store; it is not put in shell history, process arguments, the Git repository or the evidence report. The script sends credentials only to HTTPS endpoints, except loopback HTTP.
+
+The script creates uniquely named resources prefixed with `p5-live-`:
+- a disabled provider, then its encrypted credential, then enables it after credential installation;
+- a model mapped to the selected upstream model identifier;
+- a workspace and a real Agent definition;
+- a two-Agent-node Workflow with a durable queued Run.
+
+It then verifies:
+1. provider connectivity performs a real upstream completion;
+2. Model Gateway returns a known marker from the upstream model;
+3. a real Agent run succeeds and returns its marker;
+4. a queued Workflow executes two real Agent nodes in dependency order and reaches `succeeded`;
+5. workflow history includes events and node observations;
+6. at least four real usage events exist for the created provider/model, with provider/model provenance.
+
+A successful run writes a mode-0600 JSON evidence report under `data/p5-live-acceptance-*.json`. The report contains IDs and counts only, never credentials or prompts. The script deliberately leaves acceptance resources in place so they can be inspected in the Dashboard and correlated with the report. After review, manually delete the temporary Workflow, Agent definition, workspace, model, provider and stored provider credential. Do not delete them before retaining the evidence you need.
+
+The script is an actual live gate, not a simulation. It can incur provider charges. It does not test every provider adapter, streaming, tool execution, external side effects, approval recovery, destructive restore apply or remote-access hardening.
+
+Pass criteria:
+- Script exits zero and prints `P5 Live Acceptance passed.`.
+- Evidence report records a succeeded Workflow Run, at least two node observations and at least four model usage events.
+- Dashboard inspection confirms the provider/model, Agent run, Workflow Run and usage records are visible and consistent.
+- Any provider-specific unknown token usage or unknown pricing remains explicitly unknown; do not interpret unknown as zero cost.
 
 ## 4. Backup and restore drill
 
@@ -144,10 +189,10 @@ Do not mark P5 product-level acceptance complete until all rows are backed by ob
 |---|---|---|
 | Automated runtime smoke | User-run `accept-p5-e2e.sh` output (2026-11-18) | PASS |
 | Dashboard navigation | User-run authenticated page checks (2026-11-18) | PASS |
-| Real provider connectivity | Successful provider test | Pending |
-| Real Agent/Workflow run | Execution ID + terminal status | Pending |
+| Real provider connectivity | `accept-p5-live.sh` provider test evidence | Pending user live run |
+| Real Agent/Workflow run | Live Agent task ID + Workflow Run ID and terminal status | Pending user live run |
 | Timeline and evidence | P4 handler/event-ledger unit and integration coverage; live run inspection | Pending live gate |
-| Usage accounting | Before/after usage snapshot | Pending |
+| Usage accounting | Live Usage Ledger events with provider/model provenance | Pending user live run |
 | Backup and restore | User-run encrypted archive verification + isolated restore staging (2026-11-18) | PASS |
 | Diagnostics redaction | Report, support ZIP and metrics verified (2026-11-18); canary redaction unit tests | PASS |
 | Graceful shutdown | Automated container shutdown + DB reopen test; live process exit still to verify | Partial |
