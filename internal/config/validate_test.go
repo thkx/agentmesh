@@ -96,7 +96,6 @@ func TestValidateWithAPIAuthAllowsRemoteHostOnlyWithAuth(t *testing.T) {
 	}
 }
 
-
 func TestResolveAPITokenFromSecureFile(t *testing.T) {
 	t.Setenv("AGENTMESH_API_TOKEN", "")
 	path := t.TempDir() + "/api-token"
