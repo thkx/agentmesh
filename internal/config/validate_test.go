@@ -98,8 +98,9 @@ func TestValidateWithAPIAuthAllowsRemoteHostOnlyWithAuth(t *testing.T) {
 
 
 func TestResolveAPITokenFromSecureFile(t *testing.T) {
+	t.Setenv("AGENTMESH_API_TOKEN", "")
 	path := t.TempDir() + "/api-token"
-	if err := os.WriteFile(path, []byte("01234567890123456789012345678901\\n"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("01234567890123456789012345678901\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	token, err := ResolveAPIToken(path)
@@ -112,6 +113,7 @@ func TestResolveAPITokenFromSecureFile(t *testing.T) {
 }
 
 func TestResolveAPITokenRejectsInsecurePermissions(t *testing.T) {
+	t.Setenv("AGENTMESH_API_TOKEN", "")
 	path := t.TempDir() + "/api-token"
 	if err := os.WriteFile(path, []byte("01234567890123456789012345678901"), 0644); err != nil {
 		t.Fatal(err)
