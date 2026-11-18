@@ -87,7 +87,8 @@ echo "== Diagnostics and metrics =="
 request "$BASE_URL/api/v1/diagnostics/report" | jq -e '.report_id != null and .generated_at != null' >/dev/null
 request "$BASE_URL/api/v1/diagnostics/bundle" -o "$TMP_DIR/support.zip"
 unzip -t "$TMP_DIR/support.zip" >/dev/null
-request "$BASE_URL/metrics" | grep -q 'agentmesh_'
+request "$BASE_URL/metrics" > "$TMP_DIR/metrics.prom"
+grep -q 'agentmesh_' "$TMP_DIR/metrics.prom"
 pass "Redacted diagnostics, support bundle and Prometheus metrics"
 
 echo "== Usage read model =="
