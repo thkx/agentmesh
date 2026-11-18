@@ -50,7 +50,7 @@ The script is non-destructive. It checks:
 
 It deliberately does not call a paid model, create Agent/Workflow runs, overwrite the active database, or shut down the service.
 
-## 1A. Manual real provider and model inspection
+## 2. Manual provider and model inspection
 
 1. Open `/dashboard/providers` and verify the configured provider's type, endpoint and enabled state.
 2. Add or update its credential using the Dashboard credential form. Confirm the UI only shows configured/not-configured state; it must never reveal the secret again.
@@ -65,7 +65,7 @@ Pass criteria:
 - The Usage page and `GET /api/v1/usage/summary` reflect the call. Token counts may be unavailable for providers that do not return usage; unknown pricing must remain unknown, not silently become zero.
 - The execution/request correlation is traceable without exposing prompt contents or credentials in logs.
 
-## 2. Workflow orchestration
+## 3. Workflow orchestration
 
 1. Create or import a minimal two-node workflow using the Dashboard Workflow editor. Use a first node that produces a short text result and a second node that consumes it; both should use the same known-good model initially.
 2. Save the workflow and reload it. Confirm the definition survives a reload and the graph/YAML representations remain consistent.
@@ -79,7 +79,7 @@ Pass criteria:
 - The run reaches the expected terminal state and usage is recorded once per terminal model usage event.
 
 
-## 3. Automated live Provider → Agent → Workflow acceptance
+## 4. Automated live Provider → Agent → Workflow acceptance
 
 The live gate is implemented by `scripts/accept-p5-live.sh`. It uses the real configured AgentMesh process, its real SQLite database, the real Model Gateway and the running Workflow worker. It does not use test adapters.
 
@@ -123,7 +123,7 @@ Pass criteria:
 - Dashboard inspection confirms the provider/model, Agent run, Workflow Run and usage records are visible and consistent.
 - Any provider-specific unknown token usage or unknown pricing remains explicitly unknown; do not interpret unknown as zero cost.
 
-## 4. Backup and restore drill
+## 5. Backup and restore drill
 
 The automated script verifies and extracts a backup into a new temporary directory. For the operational drill:
 
@@ -139,7 +139,7 @@ Pass criteria:
 - The credential key and database belong to the same snapshot.
 - The active database remains untouched during the non-destructive test.
 
-## 5. Diagnostics and graceful shutdown
+## 6. Diagnostics and graceful shutdown
 
 1. Open `/dashboard/operations/metrics`.
 2. Inspect `GET /api/v1/operations/health`, `GET /api/v1/diagnostics/report` and `GET /api/v1/diagnostics/bundle`.
@@ -153,7 +153,7 @@ Pass criteria:
    The CLI reads the token from stdin when the environment override is absent.
 5. When ready to stop the service, use the Dashboard shutdown confirmation or `go run ./cmd/agentmesh-ops shutdown`; verify the process exits cleanly and its database can be reopened.
 
-## 6. Automated test coverage
+## 7. Automated test coverage
 
 Run the complete local/CI suite with:
 
@@ -180,7 +180,7 @@ P5-specific test coverage includes:
 
 The automated suite uses deterministic test adapters and isolated temporary SQLite databases. It does not spend money or require a third-party provider key. Real provider connectivity and one real Agent/Workflow invocation remain explicit live-environment acceptance gates.
 
-## 7. Acceptance record
+## 8. Acceptance record
 
 
 Do not mark P5 product-level acceptance complete until all rows are backed by observed evidence.
