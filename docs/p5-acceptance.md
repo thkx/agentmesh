@@ -189,12 +189,37 @@ Do not mark P5 product-level acceptance complete until all rows are backed by ob
 |---|---|---|
 | Automated runtime smoke | User-run `accept-p5-e2e.sh` output (2026-11-18) | PASS |
 | Dashboard navigation | User-run authenticated page checks (2026-11-18) | PASS |
-| Real provider connectivity | `accept-p5-live.sh` provider test evidence | Pending user live run |
-| Real Agent/Workflow run | Live Agent task ID + Workflow Run ID and terminal status | Pending user live run |
-| Timeline and evidence | P4 handler/event-ledger unit and integration coverage; live run inspection | Pending live gate |
-| Usage accounting | Live Usage Ledger events with provider/model provenance | Pending user live run |
+| Real provider connectivity | User-run live acceptance, provider connectivity PASS (2026-11-19) | PASS |
+| Real Model Gateway generation | User-run live acceptance, upstream completion PASS (2026-11-19) | PASS |
+| Real Agent/Workflow run | Agent task `1e8f4f95cd64468da56da0fc42313326`; Workflow run `p5-live-run-1795097643-ed6879` succeeded | PASS |
+| Timeline and evidence | 11 workflow events and 3 node observations recorded; Dashboard detail/Timeline inspection remains | Partial |
+| Usage accounting | 5 live usage events with provider/model provenance | PASS |
 | Backup and restore | User-run encrypted archive verification + isolated restore staging (2026-11-18) | PASS |
 | Diagnostics redaction | Report, support ZIP and metrics verified (2026-11-18); canary redaction unit tests | PASS |
 | Graceful shutdown | Automated container shutdown + DB reopen test; live process exit still to verify | Partial |
 
 **Important:** A passing smoke script is not the same as a passing real-model end-to-end test. Record skipped gates explicitly, including the reason.
+
+### P5 Live Acceptance evidence — 2026-11-19
+
+User-run `scripts/accept-p5-live.sh` completed successfully against the local service at `http://127.0.0.1:8080`.
+
+Evidence report: `data/p5-live-acceptance-1795097643-ed6879.json`
+
+| Field | Recorded value |
+|---|---|
+| Created at | `2026-11-19T14:15:14Z` |
+| Provider | `p5-live-1795097643-ed6879` |
+| Model | `p5-live-model-1795097643-ed6879` (`glm-5.3-flash`) |
+| Agent definition | `p5-live-agent-1795097643-ed6879` |
+| Agent task | `1e8f4f95cd64468da56da0fc42313326` |
+| Workflow | `p5-live-workflow-1795097643-ed6879` |
+| Workflow run | `p5-live-run-1795097643-ed6879` |
+| Workflow status | `succeeded` |
+| Workflow events | 11 |
+| Node observations | 3 |
+| Usage events | 5 |
+| Secrets recorded in report | `false` |
+
+The live script passed provider connectivity, Model Gateway generation, real Agent execution, a two-Agent-node durable Workflow run, workflow history/observations, and Usage Ledger provenance. The JSON report records identifiers and counts only; it does not independently prove the contents of the Dashboard views.
+
