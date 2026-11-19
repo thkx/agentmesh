@@ -69,8 +69,8 @@ Pass criteria:
 
 1. Create or import a minimal two-node workflow using the Dashboard Workflow editor. Use a first node that produces a short text result and a second node that consumes it; both should use the same known-good model initially.
 2. Save the workflow and reload it. Confirm the definition survives a reload and the graph/YAML representations remain consistent.
-3. Start one run and observe its state in the Workflow page and Unified Execution Center.
-4. Inspect the run history, node observations, execution Timeline and artifacts/evidence.
+3. Start one run and observe its state in the Workflow page. The Workflow page's **Workflow runs** table lists persisted Runtime runs independently of saved templates; open **View run** for the run detail, node observations and workflow event history. The Unified Execution Center remains a separate view for records in the `executions` ledger.
+4. Inspect the run history, node observations, execution Timeline and artifacts/evidence. A Workflow Runtime run is not guaranteed to have a corresponding row in the Unified Execution Center unless it has an explicit linked unified execution record.
 5. If the workflow supports approval, test an approval pause/resume separately. Do not simulate recovery against a successful run.
 
 Pass criteria:
@@ -172,6 +172,7 @@ P5-specific test coverage includes:
 | Usage | Idempotency, immutable pricing snapshots, currency-separated aggregates, HTTP summary read models |
 | Workflow engine | Sequential/parallel execution, queued worker, recovery, approval continuation, conditions and fan-out |
 | Workflow authoring | Two-agent-node YAML/graph round-trip, HTTP JSON/YAML/graph synchronization, malformed graph/YAML rejection |
+| Workflow Dashboard | Persisted Workflow Runtime run listing, run detail, node observations and event history via the production SQLite checkpoint store |
 | Execution and provenance | P4 lifecycle, event ledger, unified execution and timeline handler tests |
 | Diagnostics and observability | Redaction, allow-listed metrics, report bounds, support ZIP contents, authenticated metrics endpoint |
 | Backup and restore | Encryption, wrong-passphrase rejection, archive verification, SQLite integrity, isolated extraction and offline apply safeguards |
@@ -192,7 +193,7 @@ Do not mark P5 product-level acceptance complete until all rows are backed by ob
 | Real provider connectivity | User-run live acceptance, provider connectivity PASS (2026-11-19) | PASS |
 | Real Model Gateway generation | User-run live acceptance, upstream completion PASS (2026-11-19) | PASS |
 | Real Agent/Workflow run | Agent task `1e8f4f95cd64468da56da0fc42313326`; Workflow run `p5-live-run-1795097643-ed6879` succeeded | PASS |
-| Timeline and evidence | 11 workflow events and 3 node observations recorded; Dashboard detail/Timeline inspection remains | Partial |
+| Timeline and evidence | 11 workflow events and 3 node observations recorded; Dashboard Workflow Run detail is now implemented; user visual inspection remains | Partial |
 | Usage accounting | 5 live usage events with provider/model provenance | PASS |
 | Backup and restore | User-run encrypted archive verification + isolated restore staging (2026-11-18) | PASS |
 | Diagnostics redaction | Report, support ZIP and metrics verified (2026-11-18); canary redaction unit tests | PASS |
