@@ -121,7 +121,7 @@ echo "PASS: actual upstream request completed ($(jq -r '.latency_ms' <<<"$connec
 
 echo "== Real Model Gateway generation =="
 generate_json="$(jq -n --arg model "$MODEL_ID" \
-  '{model_id:$model,messages:[{role:"user",content:"Reply with exactly: AGENTMESH_LIVE_MODEL_OK"}],max_output_tokens:48}')"
+  '{model_id:$model,messages:[{role:"user",content:"Reply with exactly: AGENTMESH_LIVE_MODEL_OK"}],max_output_tokens:512}')"
 generation="$(request POST /api/v1/generate "$generate_json")"
 generation_content="$(jq -r '.content // empty' <<<"$generation")"
 if [[ "$generation_content" != *"AGENTMESH_LIVE_MODEL_OK"* ]]; then
@@ -149,7 +149,7 @@ echo "== Real Agent execution =="
 workspace_json="$(jq -n --arg id "$WORKSPACE_ID" '{id:$id}')"
 request POST /api/v1/workspaces "$workspace_json" >/dev/null
 agent_json="$(jq -n --arg id "$AGENT_ID" --arg model "$MODEL_ID" \
-  '{id:$id,name:"P5 Live Acceptance Agent",description:"Temporary live acceptance agent",system_prompt:"You are a concise test agent. Follow the user instruction exactly.",model_id:$model,temperature:0,max_steps:2,max_tool_calls:0,max_output_tokens:96,timeout_seconds:120,approved_tools:[],enabled:true}')"
+  '{id:$id,name:"P5 Live Acceptance Agent",description:"Temporary live acceptance agent",system_prompt:"You are a concise test agent. Follow the user instruction exactly.",model_id:$model,temperature:0,max_steps:2,max_tool_calls:0,max_output_tokens:512,timeout_seconds:120,approved_tools:[],enabled:true}')"
 request POST /api/v1/agent-definitions "$agent_json" >/dev/null
 agent_run_json="$(jq -n --arg workspace "$WORKSPACE_ID" \
   '{workspace_id:$workspace,prompt:"Reply with exactly: AGENTMESH_LIVE_AGENT_OK"}')"
