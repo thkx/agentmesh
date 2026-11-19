@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
+	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workflow/checkpoint"
 	"github.com/gin-gonic/gin"
@@ -35,19 +35,17 @@ func TestDashboardListsAndShowsPersistedWorkflowRuns(t *testing.T) {
 	store,err:=checkpoint.NewSQLite(db); if err!=nil { t.Fatal(err) }
 	now:=time.Now().UTC()
 	if err=store.SaveDefinition(context.Background(),definition); err!=nil { t.Fatal(err) }
-	run:=wf.Run{ID:"p5-live-run-test",WorkflowID:"wf-live",WorkflowVersion:1,Status:wf.RunSucceeded,CreatedAt:now,UpdatedAt:now,FinishedAt:now,Nodes:map[string]wf.NodeState{
+	run:=wf.Run{ID:"p5-live-run-test",WorkflowID:"wf-live",WorkflowVersion:1,Status:wf.RunQueued,CreatedAt:now,UpdatedAt:now,Nodes:map[string]wf.NodeState{
 		"start":{Status:wf.NodeSucceeded,Attempt:1},
 		"agent-a":{Status:wf.NodeSucceeded,Attempt:1,DurationMillis:25},
 		"agent-b":{Status:wf.NodeSucceeded,Attempt:1,DurationMillis:30},
 	},Context:map[string]any{}}
 	if err=store.CreateRun(context.Background(),run); err!=nil { t.Fatal(err) }
+	run.Status=wf.RunSucceeded
+	run.FinishedAt=now
+	run.UpdatedAt=now
 	if err=store.SaveRun(context.Background(),run); err!=nil { t.Fatal(err) }
-	if _,err=db.Exec(`INSERT INTO workflow_events(run_id,sequence,event_type,node_id,occurred_at,data_json) VALUES
-		('p5-live-run-test',1,'run.queued',NULL,?, '{}'),
-		('p5-live-run-test',2,'node.succeeded','agent-a',?, '{}'),
-		('p5-live-run-test',3,'node.succeeded','agent-b',?, '{}'),
-		('p5-live-run-test',4,'run.succeeded',NULL,?, '{}')`,now.UnixMilli(),now.UnixMilli(),now.UnixMilli(),now.UnixMilli()); err!=nil { t.Fatal(err) }
-		gin.SetMode(gin.TestMode)
+	gin.SetMode(gin.TestMode)
 	router:=gin.New()
 	// Construct an Engine with a no-op AgentRunner; no execution is started here.
 	engine,err=workflowruntime.New(store, dashboardNoopAgent{}, nil)
