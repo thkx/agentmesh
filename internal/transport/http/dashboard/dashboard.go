@@ -179,26 +179,28 @@ type workflowView struct {
 
 type workflowRunListView struct {
 	ID, WorkflowID, WorkflowName, Status, CreatedAt, UpdatedAt string
-	Version int
+	Version                                                    int
 }
 
 type workflowNodeView struct {
 	ID, Status, StartedAt, FinishedAt string
-	Attempt int
-	DurationMillis int64
+	Attempt                           int
+	DurationMillis                    int64
 }
 
 type workflowEventView struct {
-	Sequence int64
+	Sequence                 int64
 	Type, NodeID, OccurredAt string
 }
 
 type workflowRunDetailView struct {
 	ID, WorkflowID, WorkflowName, Status, CurrentNode, CreatedAt, UpdatedAt, FinishedAt string
-	Version int
-	Nodes []workflowNodeView
-	Events []workflowEventView
-}type credentialView struct {
+	Version                                                                             int
+	Nodes                                                                               []workflowNodeView
+	Events                                                                              []workflowEventView
+}
+
+type credentialView struct {
 	Source, Status string
 	UpdatedAt      string
 }
