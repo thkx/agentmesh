@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/workflow/checkpoint"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
-	"github.com/gin-gonic/gin"
 	_ "modernc.org/sqlite"
 )
 
