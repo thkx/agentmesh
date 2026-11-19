@@ -65,7 +65,7 @@ func TestDashboardListsAndShowsPersistedWorkflowRuns(t *testing.T) {
 		ID: "p5-live-run-test", WorkflowID: "wf-live", WorkflowVersion: 1,
 		Status: wf.RunQueued, CreatedAt: now, UpdatedAt: now,
 		Nodes: map[string]wf.NodeState{
-			"start":  {Status: wf.NodeSucceeded, Attempt: 1},
+			"start":   {Status: wf.NodeSucceeded, Attempt: 1},
 			"agent-a": {Status: wf.NodeSucceeded, Attempt: 1, DurationMillis: 25},
 			"agent-b": {Status: wf.NodeSucceeded, Attempt: 1, DurationMillis: 30},
 		},
