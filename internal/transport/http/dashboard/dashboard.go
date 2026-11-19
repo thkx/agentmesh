@@ -1449,7 +1449,7 @@ func (h *Handler) workflowRun(c *gin.Context) {
 		Status: string(run.Status), CurrentNode: run.CurrentNode, Version: run.WorkflowVersion,
 		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt: run.UpdatedAt.UTC().Format(time.RFC3339),
-		Nodes: []workflowNodeView{}, Events: []workflowEventView{},
+		Nodes:     []workflowNodeView{}, Events: []workflowEventView{},
 	}
 	if !run.FinishedAt.IsZero() {
 		detail.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339)
