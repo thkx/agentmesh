@@ -123,8 +123,24 @@ echo "== Real Model Gateway generation =="
 generate_json="$(jq -n --arg model "$MODEL_ID" \
   '{model_id:$model,messages:[{role:"user",content:"Reply with exactly: AGENTMESH_LIVE_MODEL_OK"}],max_output_tokens:48}')"
 generation="$(request POST /api/v1/generate "$generate_json")"
-if [[ "$(jq -r '.content // empty' <<<"$generation")" != *"AGENTMESH_LIVE_MODEL_OK"* ]]; then
+generation_content="$(jq -r '.content // empty' <<<"$generation")"
+if [[ "$generation_content" != *"AGENTMESH_LIVE_MODEL_OK"* ]]; then
+  # Keep diagnostics bounded and metadata-only apart from a short response preview.
+  # This is an isolated acceptance prompt, not arbitrary user conversation content.
+  response_model="$(jq -r '.model // .model_name // "unknown"' <<<"$generation")"
+  finish_reason="$(jq -r '.finish_reason // "unknown"' <<<"$generation")"
+  response_id="$(jq -r '.id // "unknown"' <<<"$generation")"
+  input_tokens="$(jq -r '.usage.input_tokens // 0' <<<"$generation")"
+  output_tokens="$(jq -r '.usage.output_tokens // 0' <<<"$generation")"
+  preview="$(printf '%s' "$generation_content" | tr '\\r\\n\\t' '   ' | cut -c1-240)"
   echo "FAIL: model response did not contain the requested acceptance marker." >&2
+  echo "  response_id=$response_id model=$response_model finish_reason=$finish_reason input_tokens=$input_tokens output_tokens=$output_tokens" >&2
+  if [[ -n "$preview" ]]; then
+    printf '  content_preview=%s\\n' "$preview" >&2
+  else
+    echo "  content_preview=<empty>" >&2
+  fi
+  echo "  response_fields=$(jq -c 'keys' <<<"$generation")" >&2
   exit 1
 fi
 echo "PASS: Model Gateway returned a real upstream completion"
