@@ -1459,8 +1459,12 @@ func (h *Handler) workflowRun(c *gin.Context) {
 	}
 	for _, node := range observations {
 		view := workflowNodeView{ID: node.NodeID, Status: string(node.Status), Attempt: node.Attempt, DurationMillis: node.DurationMillis}
-		if !node.StartedAt.IsZero() { view.StartedAt = node.StartedAt.UTC().Format(time.RFC3339) }
-		if !node.FinishedAt.IsZero() { view.FinishedAt = node.FinishedAt.UTC().Format(time.RFC3339) }
+		if !node.StartedAt.IsZero() {
+			view.StartedAt = node.StartedAt.UTC().Format(time.RFC3339)
+		}
+		if !node.FinishedAt.IsZero() {
+			view.FinishedAt = node.FinishedAt.UTC().Format(time.RFC3339)
+		}
 		detail.Nodes = append(detail.Nodes, view)
 	}
 	events, err := h.workflowEngine.Events(ctx, run.ID, 0, 100)
