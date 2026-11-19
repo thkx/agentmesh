@@ -99,6 +99,8 @@ type pageData struct {
 	TaskRows         []taskView
 	WorkspaceOptions []workspaceOption
 	WorkflowRows     []workflowView
+	WorkflowRuns     []workflowRunListView
+	WorkflowRun      *workflowRunDetailView
 	Credential       *credentialView
 	FilterStatus     string
 	FilterKind       string
@@ -174,7 +176,29 @@ type workflowView struct {
 	UpdatedAt             string
 	Runs                  []workflowRunView
 }
-type credentialView struct {
+
+type workflowRunListView struct {
+	ID, WorkflowID, WorkflowName, Status, CreatedAt, UpdatedAt string
+	Version int
+}
+
+type workflowNodeView struct {
+	ID, Status, StartedAt, FinishedAt string
+	Attempt int
+	DurationMillis int64
+}
+
+type workflowEventView struct {
+	Sequence int64
+	Type, NodeID, OccurredAt string
+}
+
+type workflowRunDetailView struct {
+	ID, WorkflowID, WorkflowName, Status, CurrentNode, CreatedAt, UpdatedAt, FinishedAt string
+	Version int
+	Nodes []workflowNodeView
+	Events []workflowEventView
+}type credentialView struct {
 	Source, Status string
 	UpdatedAt      string
 }
@@ -288,6 +312,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/agents/:id/enabled", h.requireSession(), h.setAgentEnabled)
 	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
 	g.GET("/workflows", h.requireSession(), h.workflows)
+	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
@@ -1354,7 +1379,31 @@ func (h *Handler) executionForAnyTask(ctx context.Context, taskID string) string
 }
 
 func (h *Handler) workflows(c *gin.Context) {
-	data := pageData{Title: "Workflows", Active: "workflows", WorkflowRows: []workflowView{}}
+	data := pageData{Title: "Workflows", Active: "workflows", WorkflowRows: []workflowView{}, WorkflowRuns: []workflowRunListView{}}
+	if h.db != nil {
+		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT r.id,r.workflow_id,r.workflow_version,r.status,r.created_at,r.updated_at,COALESCE(w.name,r.workflow_id)
+			FROM workflow_runs r LEFT JOIN workflows w ON w.id=r.workflow_id AND w.version=r.workflow_version
+			ORDER BY r.created_at DESC LIMIT 100`)
+		if err != nil {
+			data.Error = "Could not load workflow runs"
+		} else {
+			for rows.Next() {
+				var item workflowRunListView
+				var created, updated int64
+				if err = rows.Scan(&item.ID, &item.WorkflowID, &item.Version, &item.Status, &created, &updated, &item.WorkflowName); err != nil {
+					data.Error = "Could not read workflow runs"
+					break
+				}
+				item.CreatedAt = time.Unix(created, 0).UTC().Format(time.RFC3339)
+				item.UpdatedAt = time.Unix(updated, 0).UTC().Format(time.RFC3339)
+				data.WorkflowRuns = append(data.WorkflowRuns, item)
+			}
+			if rowsErr := rows.Err(); rowsErr != nil {
+				data.Error = "Could not read workflow runs"
+			}
+			_ = rows.Close()
+		}
+	}
 	if h.workflowRepo != nil {
 		items, err := h.workflowRepo.ListTemplates(c.Request.Context())
 		if err != nil {
@@ -1375,6 +1424,55 @@ func (h *Handler) workflows(c *gin.Context) {
 		}
 	}
 	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) workflowRun(c *gin.Context) {
+	if h.workflowEngine == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	ctx := c.Request.Context()
+	run, err := h.workflowEngine.GetRun(ctx, c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	definition, err := h.workflowEngine.Definition(ctx, run.WorkflowID, run.WorkflowVersion)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	detail := &workflowRunDetailView{
+		ID: run.ID, WorkflowID: run.WorkflowID, WorkflowName: definition.Name,
+		Status: string(run.Status), CurrentNode: run.CurrentNode, Version: run.WorkflowVersion,
+		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt: run.UpdatedAt.UTC().Format(time.RFC3339),
+		Nodes: []workflowNodeView{}, Events: []workflowEventView{},
+	}
+	if !run.FinishedAt.IsZero() {
+		detail.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	observations, err := h.workflowEngine.NodeObservations(ctx, run.ID)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	for _, node := range observations {
+		view := workflowNodeView{ID: node.NodeID, Status: string(node.Status), Attempt: node.Attempt, DurationMillis: node.DurationMillis}
+		if !node.StartedAt.IsZero() { view.StartedAt = node.StartedAt.UTC().Format(time.RFC3339) }
+		if !node.FinishedAt.IsZero() { view.FinishedAt = node.FinishedAt.UTC().Format(time.RFC3339) }
+		detail.Nodes = append(detail.Nodes, view)
+	}
+	events, err := h.workflowEngine.Events(ctx, run.ID, 0, 100)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	for _, event := range events {
+		view := workflowEventView{Sequence: event.Sequence, Type: event.Type, NodeID: event.NodeID, OccurredAt: event.OccurredAt.UTC().Format(time.RFC3339Nano)}
+		detail.Events = append(detail.Events, view)
+	}
+	h.render(c, pageData{Title: "Workflow Run " + run.ID, Active: "workflows", WorkflowRun: detail}, http.StatusOK)
 }
 
 func (h *Handler) executions(c *gin.Context) {
