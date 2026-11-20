@@ -249,3 +249,17 @@ The implementation and verification scripts have been committed to this branch, 
 - No cloud control plane, multi-user tenancy or public-internet deployment work.
 - No automatic commit/push/PR/merge.
 - No replacement of SQLite, sqlc, Go templates or HTMX.
+
+## 8. Live acceptance invocation
+
+After configuring an absolute approved repository root in `coding.allowed_repository_roots`, ensure the selected Model is configured and Docker is running. Then run from the AgentMesh checkout:
+
+```bash
+export AGENTMESH_API_TOKEN_FILE=./data/api-token
+export P6_REPOSITORY_PATH=/absolute/path/to/approved/git-repository
+export P6_MODEL_ID=your-configured-model-id
+export P6_TEST_COMMAND_JSON='{"program":"go","args":["test","./..."]}'
+bash scripts/accept-p6-coding.sh
+```
+
+Use the test command appropriate for the repository. If it needs to download dependencies, explicitly set `agent.tools.sandbox_network_enabled: true` in the active AgentMesh configuration for this acceptance run; otherwise use vendored/preloaded dependencies or an offline test command. Network remains disabled by default. The script retains the Worktree and does not commit or push.
