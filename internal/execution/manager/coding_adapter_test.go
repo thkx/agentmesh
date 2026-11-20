@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/thkx/agentmesh/internal/coding"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
@@ -79,5 +80,31 @@ func TestCodingAdapterMapsInterruptedOutcome(t *testing.T) {
 	}
 	if got.Status != dom.LifecycleInterrupted || got.AttemptOutcome != "" {
 		t.Fatalf("unexpected observation: %+v", got)
+	}
+}
+
+type fakeCodingAttemptStore struct { attempts []dom.Attempt }
+func (f *fakeCodingAttemptStore) ListAttempts(_ context.Context, _ string) ([]dom.Attempt,error) { return append([]dom.Attempt(nil),f.attempts...),nil }
+func (f *fakeCodingAttemptStore) CreateAttempt(_ context.Context,a dom.Attempt) (dom.Attempt,error) { f.attempts=append(f.attempts,a);return a,nil }
+
+func TestCodingAdapterEnsuresTerminalAttemptBeforeArtifactFinalization(t *testing.T) {
+	service:=&fakeCodingAdapterService{task:coding.Task{
+		ID:"coding-task-3",ExecutionID:"execution-3",AttemptID:"execution-3-a-1",
+		Status:coding.StatusSucceeded,StartedAt:time.Now().UTC(),
+	}}
+	attempts:=&fakeCodingAttemptStore{}
+	adapter,err:=NewCodingAdapter(service,attempts)
+	if err!=nil { t.Fatal(err) }
+	observed,err:=adapter.Observe(context.Background(),dom.Entity{
+		ID:"execution-3",Runtime:dom.RuntimeCoding,RuntimeRef:"coding-task-3",
+		Input:json.RawMessage(`{"id":"coding-task-3"}`),
+	})
+	if err!=nil { t.Fatal(err) }
+	if observed.Status!=dom.LifecycleSucceeded || len(attempts.attempts)!=1 {
+		t.Fatalf("observation=%+v attempts=%+v",observed,attempts.attempts)
+	}
+	attempt:=attempts.attempts[0]
+	if attempt.ID!="execution-3-a-1" || attempt.Status!=dom.AttemptRunning || attempt.RuntimeRef!="coding-task-3" {
+		t.Fatalf("unexpected pre-finalization attempt: %+v",attempt)
 	}
 }
