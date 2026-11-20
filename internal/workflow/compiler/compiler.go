@@ -2,8 +2,8 @@ package compiler
 
 import (
 	"fmt"
-	"strings"
 	"github.com/thkx/agentmesh/internal/domain/workflow"
+	"strings"
 )
 
 type Compiled struct {
