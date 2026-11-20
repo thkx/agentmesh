@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main", "p2/**", "p2-a/**", "p3/**", "p4/**", "p5/**", "p6/**"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "p5/control-plane"]
 
 permissions:
   contents: read
