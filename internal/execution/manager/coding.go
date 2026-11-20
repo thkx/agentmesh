@@ -118,6 +118,17 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 	}
 	attemptNotStarted := task.Status == coding.StatusCanceled && task.StartedAt.IsZero()
 	if a.attempts != nil && !attemptNotStarted && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
+		attemptID := task.AttemptID
+		if attemptID == "" {
+			attemptID = fmt.Sprintf("%s-a-1", e.ID)
+			if binder, ok := a.service.(interface {
+				BindExecution(context.Context, string, string, string) error
+			}); ok {
+				if bindErr := binder.BindExecution(ctx, task.ID, e.ID, attemptID); bindErr != nil {
+					return Observation{}, bindErr
+				}
+			}
+		}
 		attempts, attemptErr := a.attempts.ListAttempts(ctx, e.ID)
 		if attemptErr != nil {
 			return Observation{}, attemptErr
