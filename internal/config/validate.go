@@ -57,7 +57,7 @@ func ValidateWithAPIAuth(c Config, apiAuthEnabled bool) error {
 	seenCodingRoots := make(map[string]struct{}, len(c.Coding.AllowedRepositoryRoots))
 	for i, root := range c.Coding.AllowedRepositoryRoots {
 		root = strings.TrimSpace(root)
-		if root == "" || strings.ContainsAny(root, "\\r\\n\\x00") {
+		if root == "" || strings.ContainsAny(root, "\r\n\x00") {
 			return fmt.Errorf("coding.allowed_repository_roots[%d] is invalid", i)
 		}
 		if _, exists := seenCodingRoots[root]; exists {
