@@ -24,6 +24,7 @@ import (
 type AgentRunner interface {
 	Run(context.Context, agentdom.Task) (agentdom.Result, error)
 }
+type CodingRunner interface { RunCoding(context.Context, string, json.RawMessage) (json.RawMessage, error) }
 type AgentResultReader interface {
 	Get(string) (agentdom.Result, error)
 }
@@ -59,6 +60,7 @@ type Engine struct {
 	agent          AgentRunner
 	policy         policy.Policy
 	capabilities   *capability.Registry
+	coding         CodingRunner
 	locks          sync.Map
 	cancels        sync.Map
 	cancelRequests sync.Map
@@ -111,6 +113,8 @@ func (e *Engine) RecoverNode(ctx context.Context, runID, nodeID, action, comment
 	}
 	return s.RecoverFailedNode(ctx, runID, nodeID, action, comment, maxAttempts)
 }
+
+func (e *Engine) SetCodingRunner(r CodingRunner) { e.coding = r }
 
 func (e *Engine) SetCapabilities(r *capability.Registry) {
 	if r != nil {
@@ -853,6 +857,20 @@ func (e *Engine) executeNode(ctx context.Context, n wf.Node, contextData map[str
 		}
 		b, err := json.Marshal(result)
 		return b, map[string]any{"content": result.Content, "status": result.Status, "task_id": result.TaskID}, "", err
+	case wf.NodeCoding:
+		if e.coding == nil { return nil, nil, "", errors.New("workflow coding runtime is not configured") }
+		cfg := n.Coding
+		request := map[string]any{
+			"id": taskID, "repository_path": cfg.RepositoryPath, "model_id": cfg.ModelID,
+			"prompt": render(cfg.Prompt, agentRenderContext(contextData, "")),
+			"max_repair_attempts": cfg.MaxRepairAttempts, "timeout_seconds": cfg.TimeoutSeconds,
+		}
+		if cfg.TestCommand.Program != "" { request["test_command"] = cfg.TestCommand }
+		input, err := json.Marshal(request)
+		if err != nil { return nil, nil, "", err }
+		output, err := e.coding.RunCoding(ctx, taskID, input)
+		if err != nil { return nil, nil, "", err }
+		return output, map[string]any{"coding": json.RawMessage(output)}, "", nil
 	case wf.NodeCondition:
 		actual := lookup(contextData, n.Condition.InputKey)
 		matched := evaluateCondition(actual, n.Condition)
