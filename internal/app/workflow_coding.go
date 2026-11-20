@@ -9,6 +9,7 @@ import (
 
 	execdom "github.com/thkx/agentmesh/internal/domain/execution"
 	execmanager "github.com/thkx/agentmesh/internal/execution/manager"
+	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 )
 
 type workflowCodingRunner struct{ manager *execmanager.Manager }
@@ -37,7 +38,9 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 	defer ticker.Stop()
 	for {
 		if ctx.Err() != nil {
-			_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+			if workflowruntime.IsCancellationRequested(ctx) {
+				_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+			}
 			return nil, ctx.Err()
 		}
 		entity, err = r.manager.Get(ctx, entity.ID)
@@ -59,7 +62,9 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 		}
 		select {
 		case <-ctx.Done():
-			_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+			if workflowruntime.IsCancellationRequested(ctx) {
+				_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+			}
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
