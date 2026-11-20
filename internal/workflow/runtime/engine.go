@@ -57,6 +57,16 @@ type Store interface {
 }
 type subworkflowDepthKey struct{}
 
+type cancellationRequestContextKey struct{}
+
+// IsCancellationRequested distinguishes an explicit user cancellation from a
+// worker/process context shutdown. External runtimes must not convert the
+// latter into a confirmed cancellation of their own durable execution.
+func IsCancellationRequested(ctx context.Context) bool {
+	check, ok := ctx.Value(cancellationRequestContextKey{}).(func() bool)
+	return ok && check()
+}
+
 type Engine struct {
 	store          Store
 	agent          AgentRunner
@@ -246,7 +256,11 @@ func (e *Engine) ProcessLeased(ctx context.Context, runID, owner string, fenceTo
 	if err = e.reconcileAgentNodes(ctx, c, &r, owner, fenceToken); err != nil {
 		return r, err
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	baseCtx := context.WithValue(ctx, cancellationRequestContextKey{}, func() bool {
+		_, requested := e.cancelRequests.Load(runID)
+		return requested
+	})
+	runCtx, cancel := context.WithCancel(baseCtx)
 	if _, loaded := e.cancels.LoadOrStore(runID, cancel); loaded {
 		cancel()
 		return r, errors.New("workflow run is already executing in this process")
