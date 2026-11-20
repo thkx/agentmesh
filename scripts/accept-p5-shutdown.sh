@@ -38,9 +38,6 @@ PID="$PIDS"
 COMMAND="$(ps -p "$PID" -o command= 2>/dev/null || true)"
 [[ "$COMMAND" == *agentmesh* ]] || fail "listener PID $PID does not look like AgentMesh; refusing to stop it"
 
-curl --silent --show-error --fail --max-time 5 "$BASE_URL/healthz" | grep -q '"status":"ok"' || fail "AgentMesh health check failed before shutdown"
-pass "identified one healthy AgentMesh listener (PID $PID)"
-
 TOKEN="${AGENTMESH_API_TOKEN:-}"
 if [[ -z "$TOKEN" ]]; then
   [[ -t 0 ]] || fail "interactive terminal required to enter API token"
@@ -48,6 +45,13 @@ if [[ -z "$TOKEN" ]]; then
   echo
 fi
 [[ "${#TOKEN}" -ge 32 ]] || fail "API token must be at least 32 characters"
+
+# Some deployments protect health endpoints with the same API-token middleware.
+# Authenticate the probe instead of assuming /healthz is publicly accessible.
+HEALTH="$(curl --silent --show-error --fail --max-time 5 \
+  -H "Authorization: Bearer $TOKEN" "$BASE_URL/healthz")" || fail "authenticated AgentMesh health check failed before shutdown"
+printf '%s' "$HEALTH" | grep -q '"status":"ok"' || fail "AgentMesh health response did not report status=ok"
+pass "identified one healthy AgentMesh listener (PID $PID)"
 
 echo "== Request authenticated graceful shutdown =="
 printf '%s' "$TOKEN" | go run ./cmd/agentmesh-ops shutdown --url "$BASE_URL" --timeout 10s
