@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"encoding/json"
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
