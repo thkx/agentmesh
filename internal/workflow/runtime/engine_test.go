@@ -7,9 +7,9 @@ import (
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/workflow/checkpoint"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"strings"
 	"testing"
 	"time"
 )
