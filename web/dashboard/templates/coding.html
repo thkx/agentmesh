@@ -12,7 +12,8 @@
   <h2>{{.CodingTask.Title}}</h2>
   <dl class="details">
     <dt>Task ID</dt><dd><code>{{.CodingTask.ID}}</code></dd>
-    <dt>Execution ID</dt><dd><code>{{.CodingTask.ExecutionID}}</code></dd>
+    <dt>Execution ID</dt><dd>{{if .CodingTask.ExecutionID}}<a href="/dashboard/executions/{{.CodingTask.ExecutionID}}"><code>{{.CodingTask.ExecutionID}}</code></a>{{end}}</dd>
+    <dt>Attempt ID</dt><dd><code>{{.CodingTask.AttemptID}}</code></dd>
     <dt>Status</dt><dd><strong>{{.CodingTask.Status}}</strong>{{if .CodingTask.OutcomeUnknown}} — outcome unknown; inspect the retained Worktree before resolving{{end}}</dd>
     <dt>Model</dt><dd>{{.CodingTask.ModelID}}</dd>
     <dt>Repository</dt><dd><code>{{.CodingTask.RepositoryPath}}</code></dd>
@@ -63,7 +64,7 @@
       <label>Maximum repair attempts<input type="number" name="max_repair_attempts" min="0" max="5" value="2"></label>
       <label>Timeout seconds<input type="number" name="timeout_seconds" min="60" max="7200" value="1800"></label>
     </div>
-    <p class="muted">Tests run in the configured Docker Sandbox. Network access follows the server's sandbox setting. AgentMesh does not commit or push changes.</p>
+    <p class="muted">Docker image: <code>{{.CodingSandboxImage}}</code>. Network mode: <strong>{{if .CodingSandboxNetworkEnabled}}bridge enabled{{else}}disabled{{end}}</strong>. AgentMesh does not commit or push changes.</p>
     <button type="submit">Create and run Coding Task</button>
   </form>
 </section>
