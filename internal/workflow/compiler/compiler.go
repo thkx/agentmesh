@@ -60,12 +60,14 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 				return nil, fmt.Errorf("%w: coding node %s has invalid repair/timeout limits", workflow.ErrInvalidDefinition, n.ID)
 			}
 			if n.Coding.TestCommand.Program != "" {
-				allowed := map[string]bool{"go":true,"npm":true,"pnpm":true,"yarn":true,"pytest":true,"python":true,"cargo":true,"make":true}
+				allowed := map[string]bool{"go": true, "npm": true, "pnpm": true, "yarn": true, "pytest": true, "python": true, "cargo": true, "make": true}
 				if !allowed[n.Coding.TestCommand.Program] || len(n.Coding.TestCommand.Args) > 32 {
 					return nil, fmt.Errorf("%w: coding node %s has an unsafe test command", workflow.ErrInvalidDefinition, n.ID)
 				}
 				for _, arg := range n.Coding.TestCommand.Args {
-					if strings.ContainsAny(arg, ";&|\x60$><\\n\\r") { return nil, fmt.Errorf("%w: coding node %s has an unsafe test argument", workflow.ErrInvalidDefinition, n.ID) }
+					if strings.ContainsAny(arg, ";&|\x60$><\\n\\r") {
+						return nil, fmt.Errorf("%w: coding node %s has an unsafe test argument", workflow.ErrInvalidDefinition, n.ID)
+					}
 				}
 			}
 		case workflow.NodeSubworkflow:
