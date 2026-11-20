@@ -159,7 +159,7 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 			if versionErr != nil {
 				return Artifact{}, ArtifactVersion{}, versionErr
 			}
-			if existingVersion.ContentSHA256 == digest && existingVersion.SourceExecution == in.SourceExecution && existingVersion.SourceAttempt == in.SourceAttempt {
+			if existing.WorkspaceID == in.WorkspaceID && existing.Kind == in.Kind && existingVersion.ContentSHA256 == digest && existingVersion.SourceExecution == in.SourceExecution && existingVersion.SourceAttempt == in.SourceAttempt {
 				return existing, existingVersion, nil
 			}
 			return Artifact{}, ArtifactVersion{}, ErrConflict
@@ -411,7 +411,7 @@ func (s *Service) AddArtifactEvidence(ctx context.Context, artifactID string, in
 	lookupErr := s.db.QueryRowContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,COALESCE(execution_id,''),COALESCE(attempt_id,''),created_at FROM collaboration_artifact_evidence WHERE id=?`, id).Scan(
 		&existing.ID, &existing.ArtifactID, &existing.VersionID, &existing.WorkspaceID, &existing.TaskID, &existing.Kind, &existing.SourceRef, &existing.ContentSHA256, &existing.Statement, &existing.CreatedBy, &existing.ExecutionID, &existing.AttemptID, &existingCreated)
 	if lookupErr == nil {
-		if existing.ArtifactID == artifactID && existing.VersionID == in.VersionID && existing.Kind == in.Kind && existing.SourceRef == in.SourceRef && existing.ExecutionID == in.ExecutionID && existing.AttemptID == in.AttemptID {
+		if existing.ArtifactID == artifactID && existing.VersionID == in.VersionID && existing.Kind == in.Kind && existing.SourceRef == in.SourceRef && existing.ContentSHA256 == in.ContentSHA256 && existing.Statement == in.Statement && existing.ExecutionID == in.ExecutionID && existing.AttemptID == in.AttemptID {
 			existing.CreatedAt = time.UnixMilli(existingCreated).UTC()
 			return existing, nil
 		}
