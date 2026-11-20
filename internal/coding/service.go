@@ -24,24 +24,24 @@ type Agent interface {
 	Run(context.Context, dom.Task) (dom.Result, error)
 }
 type Service struct {
-	repo          *Repository
-	agent         Agent
-	reviewer      Agent
+	repo              *Repository
+	agent             Agent
+	reviewer          Agent
 	artifactPublisher ArtifactPublisher
-	workspaceRoot string
-	sandbox       docker.Runner
-	worktrees     *worktree.Manager
-	taskLocks     *taskLockTable
-	closeOnce     sync.Once
-	done          chan struct{}
-	mu            sync.Mutex
-	cancels       map[string]context.CancelFunc
-	maxConcurrent chan struct{}
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	closed        bool
-	scheduled     map[string]struct{}
+	workspaceRoot     string
+	sandbox           docker.Runner
+	worktrees         *worktree.Manager
+	taskLocks         *taskLockTable
+	closeOnce         sync.Once
+	done              chan struct{}
+	mu                sync.Mutex
+	cancels           map[string]context.CancelFunc
+	maxConcurrent     chan struct{}
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	closed            bool
+	scheduled         map[string]struct{}
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
@@ -66,7 +66,11 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
 func (s *Service) SetReviewer(reviewer Agent) { s.mu.Lock(); s.reviewer = reviewer; s.mu.Unlock() }
-func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) { s.mu.Lock(); s.artifactPublisher = publisher; s.mu.Unlock() }
+func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) {
+	s.mu.Lock()
+	s.artifactPublisher = publisher
+	s.mu.Unlock()
+}
 
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
@@ -271,7 +275,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	if e != nil {
 		return fail(e)
 	}
-	if err = s.review(runCtx, t, diff); err != nil { return fail(err) }
+	if err = s.review(runCtx, t, diff); err != nil {
+		return fail(err)
+	}
 	hash, e := s.worktrees.CommitHash(runCtx, ws)
 	if e != nil {
 		return fail(e)
@@ -288,7 +294,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 		return fail(fmt.Errorf("persist succeeded task state/event: %w", e))
 	}
 	if t.ExecutionID == "" {
-		if e = s.PublishArtifacts(runCtx, id); e != nil { return fail(fmt.Errorf("publish coding artifact evidence: %w", e)) }
+		if e = s.PublishArtifacts(runCtx, id); e != nil {
+			return fail(fmt.Errorf("publish coding artifact evidence: %w", e))
+		}
 	}
 	return t, nil
 }
@@ -536,22 +544,42 @@ func (s *Service) Snapshots(ctx context.Context, id string) ([]Snapshot, error) 
 
 func (s *Service) PublishArtifacts(ctx context.Context, taskID string) error {
 	task, err := s.repo.Get(ctx, taskID)
-	if err != nil { return err }
-	if task.Status != StatusSucceeded { return ErrConflict }
+	if err != nil {
+		return err
+	}
+	if task.Status != StatusSucceeded {
+		return ErrConflict
+	}
 	s.mu.Lock()
 	publisher := s.artifactPublisher
 	s.mu.Unlock()
-	if publisher == nil { return nil }
+	if publisher == nil {
+		return nil
+	}
 	events, err := s.repo.Events(ctx, taskID)
-	if err != nil { return err }
-	for _, event := range events { if event.Type == "artifact.published" { return nil } }
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if event.Type == "artifact.published" {
+			return nil
+		}
+	}
 	snapshots, err := s.repo.Snapshots(ctx, taskID)
-	if err != nil { return err }
-	if len(snapshots) == 0 { return errors.New("coding task has no final snapshot") }
+	if err != nil {
+		return err
+	}
+	if len(snapshots) == 0 {
+		return errors.New("coding task has no final snapshot")
+	}
 	snapshot := snapshots[len(snapshots)-1]
 	steps, err := s.repo.Steps(ctx, taskID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	publication, err := publisher.PublishCodingArtifact(ctx, task, snapshot, steps)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return s.repo.Event(ctx, taskID, "artifact.published", publication)
 }
