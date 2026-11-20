@@ -363,6 +363,10 @@ func TestResolveNeedsReconciliationRequiresExplicitEvidence(t *testing.T) {
 	if resolved.Error != "operator resolution: verified the persisted artifact" {
 		t.Fatalf("resolution reason was not persisted: %q", resolved.Error)
 	}
+	again, err := m.Resolve(context.Background(), entity.ID, dom.LifecycleSucceeded, result, "verified the persisted artifact")
+	if err != nil || again.Status != dom.LifecycleSucceeded {
+		t.Fatalf("repeating the same manual resolution must be idempotent: entity=%+v err=%v", again, err)
+	}
 	if len(resolved.Attempts) != 1 || resolved.Attempts[0].Status != dom.AttemptUnknown {
 		t.Fatalf("uncertain runtime attempt must remain unknown: %+v", resolved.Attempts)
 	}
