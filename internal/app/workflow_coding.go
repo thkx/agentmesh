@@ -12,9 +12,15 @@ import (
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 )
 
-type workflowCodingRunner struct{ manager *execmanager.Manager }
+type codingExecutionManager interface {
+	Submit(context.Context, execmanager.SubmitRequest) (execdom.Entity, error)
+	Get(context.Context, string) (execdom.Entity, error)
+	Cancel(context.Context, string) error
+}
 
-func newWorkflowCodingRunner(manager *execmanager.Manager) (*workflowCodingRunner, error) {
+type workflowCodingRunner struct{ manager codingExecutionManager }
+
+func newWorkflowCodingRunner(manager codingExecutionManager) (*workflowCodingRunner, error) {
 	if manager == nil {
 		return nil, errors.New("workflow coding execution manager is nil")
 	}
