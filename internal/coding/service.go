@@ -584,20 +584,23 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	if task.Status != StatusPending {
-		return Task{}, ErrConflict
-	}
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return Task{}, ErrConflict
 	}
-	// The pending task is durable in SQLite. Schedule it once in this process;
-	// the worker waits for a concurrency slot instead of rejecting the task.
+	// A concurrent observer may call Start after the worker has already claimed
+	// this task. Treat an existing schedule as idempotent even after claim.
 	if _, exists := s.scheduled[id]; exists {
 		s.mu.Unlock()
 		return task, nil
 	}
+	if task.Status != StatusPending {
+		s.mu.Unlock()
+		return Task{}, ErrConflict
+	}
+	// The pending task is durable in SQLite. Schedule it once in this process;
+	// the worker waits for a concurrency slot instead of rejecting the task.
 	runCtx, runCancel := context.WithCancel(s.ctx)
 	s.scheduled[id] = struct{}{}
 	s.scheduledCancels[id] = runCancel
