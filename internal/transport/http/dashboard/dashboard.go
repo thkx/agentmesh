@@ -1656,6 +1656,9 @@ func (h *Handler) resolveCodingTask(c *gin.Context) {
 			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
 			return
 		}
+		// Observe the child runtime after the Coding Task decision; this may
+		// already bring the Execution to its matching terminal state.
+		_, _ = h.manager.Get(c.Request.Context(), task.ExecutionID)
 		if _, err = h.manager.Resolve(c.Request.Context(), task.ExecutionID, status, result,
 			"coding outcome manually reviewed; decision="+decision+"; reason="+reason); err != nil {
 			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve-execution")
