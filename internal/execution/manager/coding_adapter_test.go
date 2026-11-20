@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ type fakeCodingAdapterService struct {
 	boundAttempt   string
 }
 
+func (f *fakeCodingAdapterService) ValidateCreateRequest(_ context.Context, _ coding.CreateRequest) error { return f.validateErr }
 func (f *fakeCodingAdapterService) Create(_ context.Context, in coding.CreateRequest) (coding.Task, error) {
 	f.getErr = nil
 	f.task = coding.Task{ID: in.ID, ExecutionID: in.ExecutionID, AttemptID: in.AttemptID, Status: coding.StatusPending}
@@ -151,4 +153,14 @@ func TestCodingAdapterDoesNotCreateAttemptForPreStartCancellation(t *testing.T) 
 	if observed.Status != dom.LifecycleCanceled || !observed.AttemptNotStarted || len(attempts.attempts) != 0 {
 		t.Fatalf("observation=%+v attempts=%+v", observed, attempts.attempts)
 	}
+}
+
+func TestCodingAdapterRejectsDisallowedRepositoryBeforeSubmit(t *testing.T) {
+	service:=&fakeCodingAdapterService{validateErr:coding.ErrRepositoryNotAllowed}
+	adapter,err:=NewCodingAdapter(service)
+	if err!=nil { t.Fatal(err) }
+	input,_:=json.Marshal(coding.CreateRequest{ID:"coding-task-denied",RepositoryPath:"/private",ModelID:"model",Prompt:"change"})
+	err=adapter.ValidateSubmit(context.Background(),SubmitRequest{TaskID:"coding-task-denied",Input:input})
+	if !errors.Is(err,coding.ErrRepositoryNotAllowed) { t.Fatalf("validation error=%v",err) }
+	if service.startCalls!=0 || service.task.ID!="" { t.Fatal("rejected coding task reached persistence or execution") }
 }
