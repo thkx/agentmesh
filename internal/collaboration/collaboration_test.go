@@ -1242,41 +1242,55 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 	s, db := testService(t)
 	defer db.Close()
 	store, err := executionrepo.NewSQLiteStore(db.DB)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	execution := execdom.Entity{
-		ID:"p6-artifact-execution", Kind:execdom.KindCoding, Runtime:execdom.RuntimeCoding,
-		TaskID:"p6-artifact-task", Status:execdom.LifecycleQueued,
-		Input:json.RawMessage(`{"task":"write code"}`), CreatedAt:now, UpdatedAt:now,
+		ID: "p6-artifact-execution", Kind: execdom.KindCoding, Runtime: execdom.RuntimeCoding,
+		TaskID: "p6-artifact-task", Status: execdom.LifecycleQueued,
+		Input: json.RawMessage(`{"task":"write code"}`), CreatedAt: now, UpdatedAt: now,
 	}
-	if _,err=store.Create(ctx,execution);err!=nil { t.Fatal(err) }
-	attempt:=execdom.Attempt{
-		ID:execution.ID+"-a-1",ExecutionID:execution.ID,Number:1,Runtime:execution.Runtime,
-		Status:execdom.AttemptRunning,Input:execution.Input,StartedAt:now,
+	if _, err = store.Create(ctx, execution); err != nil {
+		t.Fatal(err)
 	}
-	if _,err=store.CreateAttempt(ctx,attempt);err!=nil { t.Fatal(err) }
-	workspace,err:=s.CreateWorkspace(ctx,collaboration.Workspace{Name:"Coding Evidence",Slug:"coding-evidence"})
-	if err!=nil { t.Fatal(err) }
-	artifact,version,err:=s.CreateArtifact(ctx,collaboration.CreateArtifactRequest{
-		WorkspaceID:workspace.ID,Kind:"code_patch",Title:"Coding patch",Content:[]byte("diff --git a/a b/a"),
-		MediaType:"text/x-diff",SourceExecution:execution.ID,SourceAttempt:attempt.ID,
+	attempt := execdom.Attempt{
+		ID: execution.ID + "-a-1", ExecutionID: execution.ID, Number: 1, Runtime: execution.Runtime,
+		Status: execdom.AttemptRunning, Input: execution.Input, StartedAt: now,
+	}
+	if _, err = store.CreateAttempt(ctx, attempt); err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Coding Evidence", Slug: "coding-evidence"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, version, err := s.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		WorkspaceID: workspace.ID, Kind: "code_patch", Title: "Coding patch", Content: []byte("diff --git a/a b/a"),
+		MediaType: "text/x-diff", SourceExecution: execution.ID, SourceAttempt: attempt.ID,
 	})
-	if err!=nil { t.Fatal(err) }
-	if version.SourceExecution!=execution.ID || version.SourceAttempt!=attempt.ID {
-		t.Fatalf("artifact provenance mismatch: %+v",version)
+	if err != nil {
+		t.Fatal(err)
 	}
-	evidence,err:=s.AddArtifactEvidence(ctx,artifact.ID,collaboration.AddArtifactEvidenceRequest{
-		VersionID:version.ID,Kind:"diff",SourceRef:"coding-task:p6-artifact-task:diff",
-		ContentSHA256:version.ContentSHA256,Statement:"patch generated",
-		ExecutionID:execution.ID,AttemptID:attempt.ID,
+	if version.SourceExecution != execution.ID || version.SourceAttempt != attempt.ID {
+		t.Fatalf("artifact provenance mismatch: %+v", version)
+	}
+	evidence, err := s.AddArtifactEvidence(ctx, artifact.ID, collaboration.AddArtifactEvidenceRequest{
+		VersionID: version.ID, Kind: "diff", SourceRef: "coding-task:p6-artifact-task:diff",
+		ContentSHA256: version.ContentSHA256, Statement: "patch generated",
+		ExecutionID: execution.ID, AttemptID: attempt.ID,
 	})
-	if err!=nil { t.Fatal(err) }
-	if evidence.ExecutionID!=execution.ID || evidence.AttemptID!=attempt.ID {
-		t.Fatalf("evidence provenance mismatch: %+v",evidence)
+	if err != nil {
+		t.Fatal(err)
 	}
-	items,err:=s.ListArtifactEvidence(ctx,artifact.ID)
-	if err!=nil { t.Fatal(err) }
-	if len(items)!=1 || items[0].ExecutionID!=execution.ID || items[0].AttemptID!=attempt.ID {
-		t.Fatalf("persisted evidence provenance mismatch: %+v",items)
+	if evidence.ExecutionID != execution.ID || evidence.AttemptID != attempt.ID {
+		t.Fatalf("evidence provenance mismatch: %+v", evidence)
+	}
+	items, err := s.ListArtifactEvidence(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ExecutionID != execution.ID || items[0].AttemptID != attempt.ID {
+		t.Fatalf("persisted evidence provenance mismatch: %+v", items)
 	}
 }
