@@ -634,7 +634,46 @@ func (s *Service) ResolveInterrupted(ctx context.Context, id, decision, reason s
 	return t, nil
 }
 
-func (s *Service) Recover(ctx context.Context) (int64, error) { return s.repo.RecoverInterrupted(ctx) }
+func (s *Service) Recover(ctx context.Context) (int64, error) {
+	count, err := s.repo.RecoverInterrupted(ctx)
+	if err != nil {
+		return 0, err
+	}
+	interrupted, err := s.repo.ListInterrupted(ctx)
+	if err != nil {
+		return count, err
+	}
+	for _, task := range interrupted {
+		workspaceID := task.WorkspaceID
+		if workspaceID == "" {
+			workspaceID = "coding-" + task.ID
+		}
+		ws, branch, inspectErr := s.worktrees.Inspect(ctx, task.RepositoryPath, workspaceID)
+		if inspectErr != nil {
+			if ctx.Err() != nil {
+				return count, ctx.Err()
+			}
+			if task.WorkspacePath != "" {
+				_ = s.repo.Event(ctx, task.ID, "workspace.recovery_unavailable", map[string]string{
+					"reason": "the retained Worktree could not be safely reattached",
+				})
+			}
+			continue
+		}
+		if task.WorkspaceID == ws.ID && task.WorkspacePath == ws.Path && task.BranchName == branch {
+			continue
+		}
+		task.WorkspaceID = ws.ID
+		task.WorkspacePath = ws.Path
+		task.BranchName = branch
+		if err = s.repo.UpdateWithEvent(ctx, task, "workspace.recovered", map[string]string{
+			"path": ws.Path, "branch": branch,
+		}); err != nil {
+			return count, fmt.Errorf("persist recovered Coding Worktree: %w", err)
+		}
+	}
+	return count, nil
+}
 
 func (s *Service) BindExecution(ctx context.Context, taskID, executionID, attemptID string) error {
 	return s.repo.BindExecution(ctx, taskID, executionID, attemptID)
