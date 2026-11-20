@@ -59,6 +59,9 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 			if n.Coding.MaxRepairAttempts < 0 || n.Coding.MaxRepairAttempts > 5 || n.Coding.TimeoutSeconds < 0 || n.Coding.TimeoutSeconds > 7200 {
 				return nil, fmt.Errorf("%w: coding node %s has invalid repair/timeout limits", workflow.ErrInvalidDefinition, n.ID)
 			}
+			if n.Coding.TestCommand.Program == "" && len(n.Coding.TestCommand.Args) > 0 {
+				return nil, fmt.Errorf("%w: coding node %s has test arguments without a program", workflow.ErrInvalidDefinition, n.ID)
+			}
 			if n.Coding.TestCommand.Program != "" {
 				allowed := map[string]bool{"go": true, "npm": true, "pnpm": true, "yarn": true, "pytest": true, "python": true, "cargo": true, "make": true}
 				if !allowed[n.Coding.TestCommand.Program] || len(n.Coding.TestCommand.Args) > 32 {
