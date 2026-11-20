@@ -434,35 +434,46 @@ func TestEvaluateConditionOperators(t *testing.T) {
 	}
 }
 
-type fakeWorkflowCodingRunner struct { calls int }
+type fakeWorkflowCodingRunner struct{ calls int }
+
 func (f *fakeWorkflowCodingRunner) RunCoding(_ context.Context, taskID string, input json.RawMessage) (json.RawMessage, error) {
 	f.calls++
-	return json.Marshal(map[string]string{"task_id":taskID,"status":"succeeded"})
+	return json.Marshal(map[string]string{"task_id": taskID, "status": "succeeded"})
 }
 
 func TestWorkflowCodingNodeUsesManagedCodingRunner(t *testing.T) {
 	store := newMemoryStore()
 	engine, err := New(store, &fakeAgent{}, nil)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	runner := &fakeWorkflowCodingRunner{}
 	engine.SetCodingRunner(runner)
 	definition := wf.Definition{
-		ID:"coding-workflow", Name:"Coding workflow", Version:1, Entry:"start",
+		ID: "coding-workflow", Name: "Coding workflow", Version: 1, Entry: "start",
 		Nodes: []wf.Node{
-			{ID:"start", Type:wf.NodeStart},
-			{ID:"implement", Type:wf.NodeCoding, Coding:&wf.CodingConfig{
-				RepositoryPath:"/tmp/approved-repository", ModelID:"test-model", Prompt:"Add a health endpoint",
-				MaxRepairAttempts:1, TimeoutSeconds:120,
+			{ID: "start", Type: wf.NodeStart},
+			{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{
+				RepositoryPath: "/tmp/approved-repository", ModelID: "test-model", Prompt: "Add a health endpoint",
+				MaxRepairAttempts: 1, TimeoutSeconds: 120,
 			}},
-			{ID:"finish", Type:wf.NodeEnd},
+			{ID: "finish", Type: wf.NodeEnd},
 		},
-		Edges: []wf.Edge{{From:"start",To:"implement"},{From:"implement",To:"finish"}},
+		Edges: []wf.Edge{{From: "start", To: "implement"}, {From: "implement", To: "finish"}},
 	}
-	if err = engine.PutDefinition(context.Background(), definition); err != nil { t.Fatal(err) }
-	run, err := engine.Start(context.Background(), definition.ID, "coding-run-1", map[string]any{"request":"health"})
-	if err != nil { t.Fatal(err) }
-	if run.Status != wf.RunSucceeded { t.Fatalf("run status=%s error=%s", run.Status, run.Error) }
-	if runner.calls != 1 { t.Fatalf("coding runner calls=%d, want 1", runner.calls) }
+	if err = engine.PutDefinition(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	run, err := engine.Start(context.Background(), definition.ID, "coding-run-1", map[string]any{"request": "health"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != wf.RunSucceeded {
+		t.Fatalf("run status=%s error=%s", run.Status, run.Error)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("coding runner calls=%d, want 1", runner.calls)
+	}
 	state := run.Nodes["implement"]
 	if state.Status != wf.NodeSucceeded || !strings.Contains(string(state.Output), "task_id") {
 		t.Fatalf("coding node output not checkpointed: %+v", state)
