@@ -47,7 +47,7 @@ func TestCodingTaskRepairsFailedDockerTestAndPersistsEvidence(t *testing.T) {
 
 	task, err := service.Create(context.Background(), CreateRequest{
 		ID: "repair-loop", RepositoryPath: repoPath, ModelID: "test", Prompt: "implement the requested change",
-		TestCommand: Command{Program: "go", Args: []string{"test", "./..."}},
+		TestCommand:       Command{Program: "go", Args: []string{"test", "./..."}},
 		MaxRepairAttempts: 1, TimeoutSeconds: 60,
 	})
 	if err != nil {
