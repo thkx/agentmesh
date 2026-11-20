@@ -17,13 +17,22 @@ type CodingService interface {
 	Cancel(string) error
 }
 
-type CodingAdapter struct{ service CodingService }
+type CodingAttemptStore interface {
+	ListAttempts(context.Context, string) ([]dom.Attempt, error)
+	CreateAttempt(context.Context, dom.Attempt) (dom.Attempt, error)
+}
+type CodingAdapter struct {
+	service CodingService
+	attempts CodingAttemptStore
+}
 
-func NewCodingAdapter(service CodingService) (*CodingAdapter, error) {
+func NewCodingAdapter(service CodingService, stores ...CodingAttemptStore) (*CodingAdapter, error) {
 	if service == nil {
 		return nil, errors.New("coding execution service is nil")
 	}
-	return &CodingAdapter{service: service}, nil
+	adapter := &CodingAdapter{service: service}
+	if len(stores) > 0 { adapter.attempts = stores[0] }
+	return adapter, nil
 }
 
 func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
@@ -68,6 +77,24 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 	task, err := a.service.Get(ctx, id)
 	if err != nil {
 		return Observation{}, err
+	}
+	if a.attempts != nil && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
+		attempts, attemptErr := a.attempts.ListAttempts(ctx, e.ID)
+		if attemptErr != nil { return Observation{}, attemptErr }
+		if len(attempts) == 0 {
+			started := task.StartedAt
+			if started.IsZero() { started = task.CreatedAt }
+			_, attemptErr = a.attempts.CreateAttempt(ctx, dom.Attempt{
+				ID: task.AttemptID, ExecutionID: e.ID, Number: 1, Runtime: e.Runtime,
+				RuntimeRef: task.ID, Status: dom.AttemptRunning, Input: e.Input, StartedAt: started,
+			})
+			if attemptErr != nil { return Observation{}, attemptErr }
+		}
+	}
+	if task.Status == coding.StatusSucceeded {
+		if finalizer, ok := a.service.(interface { PublishArtifacts(context.Context, string) error }); ok {
+			if err := finalizer.PublishArtifacts(ctx, task.ID); err != nil { return Observation{}, fmt.Errorf("publish coding artifact evidence: %w", err) }
+		}
 	}
 	var status dom.LifecycleStatus
 	switch task.Status {
