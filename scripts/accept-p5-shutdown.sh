@@ -58,18 +58,14 @@ echo "== Wait for the HTTP listener and process to exit =="
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 while (( SECONDS < deadline )); do
   CURRENT="$(listener_pids)"
-  if [[ -z "$CURRENT" ]]; then
+  if [[ -z "$CURRENT" ]] && ! kill -0 "$PID" 2>/dev/null; then
     break
   fi
   sleep 1
 done
 [[ -z "$(listener_pids)" ]] || fail "HTTP listener still exists after ${TIMEOUT_SECONDS}s"
-if kill -0 "$PID" 2>/dev/null; then
-  # A go-run parent can outlive its compiled child; the port being released is
-  # the authoritative HTTP-process check. Report this distinction explicitly.
-  echo "INFO: launcher PID $PID remains, but the AgentMesh listener has exited."
-fi
-pass "AgentMesh HTTP process released its listening port"
+kill -0 "$PID" 2>/dev/null && fail "AgentMesh process PID $PID has not exited after ${TIMEOUT_SECONDS}s"
+pass "AgentMesh process exited and released its listening port"
 
 echo
 echo "Graceful shutdown live acceptance passed."
