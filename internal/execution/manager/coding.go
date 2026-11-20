@@ -22,7 +22,7 @@ type CodingAttemptStore interface {
 	CreateAttempt(context.Context, dom.Attempt) (dom.Attempt, error)
 }
 type CodingAdapter struct {
-	service CodingService
+	service  CodingService
 	attempts CodingAttemptStore
 }
 
@@ -31,7 +31,9 @@ func NewCodingAdapter(service CodingService, stores ...CodingAttemptStore) (*Cod
 		return nil, errors.New("coding execution service is nil")
 	}
 	adapter := &CodingAdapter{service: service}
-	if len(stores) > 0 { adapter.attempts = stores[0] }
+	if len(stores) > 0 {
+		adapter.attempts = stores[0]
+	}
 	return adapter, nil
 }
 
@@ -58,8 +60,12 @@ func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error
 	if err != nil {
 		return "", err
 	}
-	if binder, ok := a.service.(interface { BindExecution(context.Context, string, string, string) error }); ok {
-		if err := binder.BindExecution(ctx, task.ID, e.ID, request.AttemptID); err != nil { return "", err }
+	if binder, ok := a.service.(interface {
+		BindExecution(context.Context, string, string, string) error
+	}); ok {
+		if err := binder.BindExecution(ctx, task.ID, e.ID, request.AttemptID); err != nil {
+			return "", err
+		}
 	}
 	if task.Status == coding.StatusPending {
 		if _, err = a.service.Start(ctx, task.ID); err != nil {
@@ -80,20 +86,30 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 	}
 	if a.attempts != nil && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
 		attempts, attemptErr := a.attempts.ListAttempts(ctx, e.ID)
-		if attemptErr != nil { return Observation{}, attemptErr }
+		if attemptErr != nil {
+			return Observation{}, attemptErr
+		}
 		if len(attempts) == 0 {
 			started := task.StartedAt
-			if started.IsZero() { started = task.CreatedAt }
+			if started.IsZero() {
+				started = task.CreatedAt
+			}
 			_, attemptErr = a.attempts.CreateAttempt(ctx, dom.Attempt{
 				ID: task.AttemptID, ExecutionID: e.ID, Number: 1, Runtime: e.Runtime,
 				RuntimeRef: task.ID, Status: dom.AttemptRunning, Input: e.Input, StartedAt: started,
 			})
-			if attemptErr != nil { return Observation{}, attemptErr }
+			if attemptErr != nil {
+				return Observation{}, attemptErr
+			}
 		}
 	}
 	if task.Status == coding.StatusSucceeded {
-		if finalizer, ok := a.service.(interface { PublishArtifacts(context.Context, string) error }); ok {
-			if err := finalizer.PublishArtifacts(ctx, task.ID); err != nil { return Observation{}, fmt.Errorf("publish coding artifact evidence: %w", err) }
+		if finalizer, ok := a.service.(interface {
+			PublishArtifacts(context.Context, string) error
+		}); ok {
+			if err := finalizer.PublishArtifacts(ctx, task.ID); err != nil {
+				return Observation{}, fmt.Errorf("publish coding artifact evidence: %w", err)
+			}
 		}
 	}
 	var status dom.LifecycleStatus
