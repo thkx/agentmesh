@@ -346,6 +346,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/coding", h.requireSession(), h.createCodingTask)
 	g.GET("/coding/:id", h.requireSession(), h.codingTask)
 	g.POST("/coding/:id/cancel", h.requireSession(), h.cancelCodingTask)
+	g.POST("/coding/:id/resolve", h.requireSession(), h.resolveCodingTask)
 	g.POST("/coding/:id/revert", h.requireSession(), h.revertCodingTask)
 	g.POST("/coding/:id/cleanup", h.requireSession(), h.cleanupCodingTask)
 	g.GET("/executions", h.requireSession(), h.executions)
@@ -1583,6 +1584,10 @@ func (h *Handler) codingTask(c *gin.Context) {
 		data.Message = "Worktree reset to its base commit."
 	case "cleaned":
 		data.Message = "Worktree and task branch cleaned up."
+	case "resolved-keep":
+		data.Message = "Outcome manually resolved. Changes are retained in the Worktree; the Execution is not marked successful."
+	case "resolved-discard":
+		data.Message = "Outcome manually resolved. Worktree was reset to its base commit."
 	}
 	if c.Query("error") != "" {
 		data.Error = "The requested Coding operation could not be completed. Check the current task status and event history."
@@ -1623,6 +1628,41 @@ func (h *Handler) cancelCodingTask(c *gin.Context) {
 		return
 	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=cancel-requested")
+}
+
+func (h *Handler) resolveCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil || h.manager == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	decision := strings.TrimSpace(c.PostForm("decision"))
+	reason := strings.TrimSpace(c.PostForm("reason"))
+	task, err := h.codingService.ResolveInterrupted(c.Request.Context(), c.Param("id"), decision, reason)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+		return
+	}
+	if task.ExecutionID != "" {
+		status := execdom.LifecycleFailed
+		if decision == "discard" {
+			status = execdom.LifecycleCanceled
+		}
+		result, marshalErr := json.Marshal(task)
+		if marshalErr != nil {
+			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+			return
+		}
+		if _, err = h.manager.Resolve(c.Request.Context(), task.ExecutionID, status, result,
+			"coding outcome manually reviewed; decision="+decision+"; reason="+reason); err != nil {
+			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve-execution")
+			return
+		}
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=resolved-"+decision)
 }
 
 func (h *Handler) revertCodingTask(c *gin.Context) {
