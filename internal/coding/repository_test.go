@@ -181,7 +181,7 @@ func TestRecoverInterruptedPreservesUnknownOutcomeAndEvent(t *testing.T) {
 	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err = r.BindExecution(ctx, task.ID, "execution-1"); err != nil {
+	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil {
 		t.Fatalf("idempotent bind: %v", err)
 	}
 	if err = r.BindExecution(ctx, task.ID, "execution-2", "execution-2-a-1"); err != ErrConflict {
