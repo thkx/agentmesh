@@ -402,7 +402,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("register agent execution adapter: %w", err)
 	}
-	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService)
+	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService, executionStore)
 	if err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize coding execution adapter: %w", err)
