@@ -44,16 +44,17 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 		}
 		return nil, fmt.Errorf("submit workflow coding activity: %w", err)
 	}
+	executionID := entity.ID
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if ctx.Err() != nil {
 			if workflowruntime.IsCancellationRequested(ctx) {
-				_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+				_ = r.manager.Cancel(context.WithoutCancel(ctx), executionID)
 			}
 			return nil, ctx.Err()
 		}
-		entity, err = r.manager.Get(ctx, entity.ID)
+		entity, err = r.manager.Get(ctx, executionID)
 		if err != nil {
 			if ctx.Err() != nil {
 				if workflowruntime.IsCancellationRequested(ctx) {
@@ -61,7 +62,7 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 				}
 				return nil, ctx.Err()
 			}
-			return nil, fmt.Errorf("%w: cannot observe Coding Execution %s: %v", workflowruntime.ErrCodingOutcomeIndeterminate, entity.ID, err)
+			return nil, fmt.Errorf("%w: cannot observe Coding Execution %s: %v", workflowruntime.ErrCodingOutcomeIndeterminate, executionID, err)
 		}
 		switch entity.Status {
 		case execdom.LifecycleSucceeded:
