@@ -653,7 +653,8 @@ func (s *Service) Recover(ctx context.Context) (int64, error) {
 			if ctx.Err() != nil {
 				return count, ctx.Err()
 			}
-			if task.WorkspacePath != "" {
+			_, pathErr := os.Lstat(filepath.Join(s.workspaceRoot, workspaceID))
+			if task.WorkspacePath != "" || pathErr == nil {
 				_ = s.repo.Event(ctx, task.ID, "workspace.recovery_unavailable", map[string]string{
 					"reason": "the retained Worktree could not be safely reattached",
 				})
