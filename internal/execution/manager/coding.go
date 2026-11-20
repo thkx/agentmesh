@@ -109,7 +109,7 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 				started = task.CreatedAt
 			}
 			_, attemptErr = a.attempts.CreateAttempt(ctx, dom.Attempt{
-				ID: task.AttemptID, ExecutionID: e.ID, Number: 1, Runtime: e.Runtime,
+				ID: attemptID, ExecutionID: e.ID, Number: 1, Runtime: e.Runtime,
 				RuntimeRef: task.ID, Status: dom.AttemptRunning, Input: e.Input, StartedAt: started,
 			})
 			if attemptErr != nil {
