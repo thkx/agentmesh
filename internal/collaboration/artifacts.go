@@ -119,6 +119,7 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 	if len(in.MediaType) > 128 {
 		return Artifact{}, ArtifactVersion{}, ErrInvalid
 	}
+	if in.SourceAttempt != "" && in.SourceExecution == "" { return Artifact{}, ArtifactVersion{}, ErrInvalid }
 	if len(in.Metadata) == 0 {
 		in.Metadata = json.RawMessage("{}")
 	}
