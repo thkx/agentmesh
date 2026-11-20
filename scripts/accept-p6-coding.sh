@@ -26,6 +26,7 @@ command -v docker >/dev/null || fail "Docker CLI is required"
 [[ -n "$TEST_COMMAND" ]] || fail 'P6_TEST_COMMAND_JSON is required, for example {"program":"go","args":["test","./..."]}'
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable"
 git -C "$REPOSITORY" rev-parse --show-toplevel >/dev/null 2>&1 || fail "P6_REPOSITORY_PATH is not a Git repository"
+git -C "$REPOSITORY" rev-parse --verify HEAD >/dev/null 2>&1 || fail "P6_REPOSITORY_PATH must contain at least one commit"
 
 api() {
   curl --silent --show-error --fail \
