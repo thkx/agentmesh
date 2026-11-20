@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -24,7 +25,7 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 	workspaceID := "coding-" + task.ID
 	slug := strings.ToLower(strings.ReplaceAll(task.ID,"_","-"))
 	_, err := p.service.GetWorkspace(ctx,workspaceID)
-	if err == collaboration.ErrNotFound {
+	if errors.Is(err, collaboration.ErrNotFound) {
 		_, err = p.service.CreateWorkspace(ctx,collaboration.Workspace{
 			ID:workspaceID, Name:"Coding task "+task.ID, Slug:"coding-"+slug,
 			Description:"Evidence workspace for AgentMesh Coding Task "+task.ID,
@@ -46,7 +47,7 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 	})
 	if err != nil { return coding.ArtifactPublication{}, fmt.Errorf("create coding patch artifact: %w",err) }
 
-	addEvidence := func(id,kind,source,statement string) error {
+	addEvidence := func(kind,source,statement string) error {
 		_, evidenceErr := p.service.AddArtifactEvidence(ctx,artifact.ID,collaboration.AddArtifactEvidenceRequest{
 			VersionID:version.ID, Kind:kind, SourceRef:source,
 			ContentSHA256:version.ContentSHA256, Statement:statement,
@@ -54,20 +55,20 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 		})
 		return evidenceErr
 	}
-	if err=addEvidence("","diff","coding-task:"+task.ID+":diff",
+	if err=addEvidence("diff","coding-task:"+task.ID+":diff",
 		fmt.Sprintf("Final Worktree diff based on %s on branch %s; SHA-256 %s",snapshot.CommitHash,task.BranchName,version.ContentSHA256)); err!=nil {
 		return coding.ArtifactPublication{}, fmt.Errorf("record patch evidence: %w",err)
 	}
 	for _,step := range steps {
 		switch {
 		case step.Kind=="test.run":
-			statement:=fmt.Sprintf("Command: %s; status: %s; exit code: %d; duration: %dms; output: %s",step.Input,step.Status,step.ExitCode,step.DurationMillis,limit(step.Output,1800))
-			if err=addEvidence("","test",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
+			statement:=fmt.Sprintf("Command: %s; status: %s; exit code: %d; duration: %dms; output: %s",step.Input,step.Status,step.ExitCode,step.DurationMillis,truncateCodingEvidence(step.Output,1800))
+			if err=addEvidence("test",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),truncateCodingEvidence(statement,3900));err!=nil {
 				return coding.ArtifactPublication{},fmt.Errorf("record test evidence: %w",err)
 			}
 		case step.Kind=="review.inspect":
 			statement:=fmt.Sprintf("Independent reviewer verdict: %s; findings: %s",step.Status,limit(step.Output,3000))
-			if err=addEvidence("","tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
+			if err=addEvidence("tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
 				return coding.ArtifactPublication{},fmt.Errorf("record review evidence: %w",err)
 			}
 		}
@@ -80,4 +81,9 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 		ArtifactID:artifact.ID,VersionID:version.ID,
 		VerificationID:verification.ID,VerificationOutcome:verification.Outcome,
 	},nil
+}
+
+func truncateCodingEvidence(value string, max int) string {
+	if len(value) <= max { return value }
+	return value[:max] + "...[truncated]"
 }
