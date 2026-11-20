@@ -38,6 +38,10 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 		Input: input, IdempotencyKey: "workflow-coding:" + taskID,
 	})
 	if err != nil {
+		if entity.ID != "" {
+			return nil, fmt.Errorf("%w: Execution %s for Coding Task %s has an uncertain submit outcome: %v",
+				workflowruntime.ErrCodingOutcomeIndeterminate, entity.ID, taskID, err)
+		}
 		return nil, fmt.Errorf("submit workflow coding activity: %w", err)
 	}
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -57,7 +61,7 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 				}
 				return nil, ctx.Err()
 			}
-			return nil, fmt.Errorf("observe workflow coding execution: %w", err)
+			return nil, fmt.Errorf("%w: cannot observe Coding Execution %s: %v", workflowruntime.ErrCodingOutcomeIndeterminate, entity.ID, err)
 		}
 		switch entity.Status {
 		case execdom.LifecycleSucceeded:
