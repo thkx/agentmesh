@@ -104,18 +104,18 @@ func ValidateCommand(c Command) error {
 }
 
 type Step struct {
-	ID         string    `json:"id"`
-	TaskID     string    `json:"task_id"`
-	Sequence   int       `json:"sequence"`
-	Kind       string    `json:"kind"`
-	Status     string    `json:"status"`
-	Input      string    `json:"input,omitempty"`
-	Output     string    `json:"output,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
-	ExitCode      int   `json:"exit_code"`
-	DurationMillis int64 `json:"duration_ms"`
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id"`
+	Sequence       int       `json:"sequence"`
+	Kind           string    `json:"kind"`
+	Status         string    `json:"status"`
+	Input          string    `json:"input,omitempty"`
+	Output         string    `json:"output,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at,omitempty"`
+	ExitCode       int       `json:"exit_code"`
+	DurationMillis int64     `json:"duration_ms"`
 }
 type Event struct {
 	ID        string    `json:"id"`
@@ -125,21 +125,21 @@ type Event struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Snapshot struct {
-	ID         string    `json:"id"`
-	TaskID     string    `json:"task_id"`
-	Label      string    `json:"label"`
-	CommitHash string    `json:"commit_hash"`
-	Diff       string    `json:"diff"`
-	ExecutionID string `json:"execution_id,omitempty"`
-	AttemptID string `json:"attempt_id,omitempty"`
-	ContentSHA256 string `json:"content_sha256,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	TaskID        string    `json:"task_id"`
+	Label         string    `json:"label"`
+	CommitHash    string    `json:"commit_hash"`
+	Diff          string    `json:"diff"`
+	ExecutionID   string    `json:"execution_id,omitempty"`
+	AttemptID     string    `json:"attempt_id,omitempty"`
+	ContentSHA256 string    `json:"content_sha256,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type ArtifactPublication struct {
-	ArtifactID string `json:"artifact_id"`
-	VersionID string `json:"version_id"`
-	VerificationID string `json:"verification_id"`
+	ArtifactID          string `json:"artifact_id"`
+	VersionID           string `json:"version_id"`
+	VerificationID      string `json:"verification_id"`
 	VerificationOutcome string `json:"verification_outcome"`
 }
 type ArtifactPublisher interface {
