@@ -225,7 +225,7 @@ func (r *Repository) Steps(ctx context.Context, id string) ([]Step, error) {
 }
 
 func (r *Repository) SaveSnapshot(ctx context.Context, s Snapshot) error {
-	_, e := r.db.ExecContext(ctx, `INSERT INTO coding_task_snapshots(id,task_id,label,commit_hash,diff,created_at) VALUES(?,?,?,?,?,?)`, uuid.NewString(), s.TaskID, s.Label, s.CommitHash, s.Diff, time.Now().UTC().Unix())
+	_, e := r.db.ExecContext(ctx, `INSERT INTO coding_task_snapshots(id,task_id,label,commit_hash,diff,created_at,execution_id,attempt_id,content_sha256) VALUES(?,?,?,?,?,?,?,?,?)`, uuid.NewString(), s.TaskID, s.Label, s.CommitHash, s.Diff, time.Now().UTC().Unix(), s.ExecutionID, s.AttemptID, s.ContentSHA256)
 	return e
 }
 
@@ -300,7 +300,7 @@ func (r *Repository) Claim(ctx context.Context, id string) (bool, error) {
 }
 
 func (r *Repository) Snapshots(ctx context.Context, taskID string) ([]Snapshot, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT id,task_id,label,commit_hash,diff,created_at FROM coding_task_snapshots WHERE task_id=? ORDER BY created_at,id`, taskID)
+	rows, err := r.db.QueryContext(ctx, `SELECT id,task_id,label,commit_hash,diff,created_at,COALESCE(execution_id,''),COALESCE(attempt_id,''),COALESCE(content_sha256,'') FROM coding_task_snapshots WHERE task_id=? ORDER BY created_at,id`, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -309,7 +309,7 @@ func (r *Repository) Snapshots(ctx context.Context, taskID string) ([]Snapshot, 
 	for rows.Next() {
 		var v Snapshot
 		var ts int64
-		if err = rows.Scan(&v.ID, &v.TaskID, &v.Label, &v.CommitHash, &v.Diff, &ts); err != nil {
+		if err = rows.Scan(&v.ID, &v.TaskID, &v.Label, &v.CommitHash, &v.Diff, &ts, &v.ExecutionID, &v.AttemptID, &v.ContentSHA256); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = time.Unix(ts, 0).UTC()
