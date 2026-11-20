@@ -21,7 +21,7 @@ func testRepository(t *testing.T) *Repository {
       max_repair_attempts INTEGER NOT NULL DEFAULT 2,repair_attempts INTEGER NOT NULL DEFAULT 0,timeout_seconds INTEGER NOT NULL DEFAULT 1800,
       result_json TEXT NOT NULL DEFAULT '{}',error TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,started_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER NOT NULL DEFAULT 0,execution_id TEXT NOT NULL DEFAULT '',outcome_unknown INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE coding_task_events(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,event_type TEXT NOT NULL,payload_json TEXT NOT NULL,created_at INTEGER NOT NULL);
-      CREATE TABLE coding_task_steps(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,sequence INTEGER NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input_json TEXT NOT NULL,output_json TEXT NOT NULL,error TEXT NOT NULL,started_at INTEGER NOT NULL,finished_at INTEGER NOT NULL,UNIQUE(task_id,sequence));
+      CREATE TABLE coding_task_steps(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,sequence INTEGER NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input_json TEXT NOT NULL,output_json TEXT NOT NULL,error TEXT NOT NULL,started_at INTEGER NOT NULL,finished_at INTEGER NOT NULL,exit_code INTEGER NOT NULL DEFAULT 0,duration_ms INTEGER NOT NULL DEFAULT 0,UNIQUE(task_id,sequence));
       CREATE TABLE coding_task_snapshots(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,label TEXT NOT NULL,commit_hash TEXT NOT NULL,diff TEXT NOT NULL,created_at INTEGER NOT NULL);`
 	if _, err = db.Exec(schema); err != nil {
 		t.Fatal(err)
