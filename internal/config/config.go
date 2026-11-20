@@ -10,6 +10,7 @@ type Config struct {
 	Providers []ProviderConfig `koanf:"providers"`
 	Models    []ModelConfig    `koanf:"models"`
 	Agent     AgentConfig      `koanf:"agent"`
+	Coding    CodingConfig     `koanf:"coding"`
 	Scheduler SchedulerConfig  `koanf:"scheduler"`
 	Tracing   TracingConfig    `koanf:"tracing"`
 }
@@ -72,6 +73,10 @@ type AgentConfig struct {
 	Tools         ToolConfig         `koanf:"tools"`
 	Runtime       AgentRuntimeConfig `koanf:"runtime"`
 }
+type CodingConfig struct {
+	AllowedRepositoryRoots []string `koanf:"allowed_repository_roots"`
+}
+
 type AgentRuntimeConfig struct {
 	MaxSteps         int `koanf:"max_steps"`
 	MaxToolCalls     int `koanf:"max_tool_calls"`
