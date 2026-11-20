@@ -1639,6 +1639,10 @@ func (h *Handler) resolveCodingTask(c *gin.Context) {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
+	if c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
 	decision := strings.TrimSpace(c.PostForm("decision"))
 	reason := strings.TrimSpace(c.PostForm("reason"))
 	task, err := h.codingService.ResolveInterrupted(c.Request.Context(), c.Param("id"), decision, reason)
