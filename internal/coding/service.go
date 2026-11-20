@@ -667,6 +667,12 @@ func (s *Service) Recover(ctx context.Context) (int64, error) {
 			}
 			continue
 		}
+		if branch != "agentmesh/"+task.ID {
+			_ = s.repo.Event(ctx, task.ID, "workspace.recovery_unavailable", map[string]string{
+				"reason": "the retained Worktree branch does not match the Coding Task identity",
+			})
+			continue
+		}
 		if task.WorkspaceID == ws.ID && task.WorkspacePath == ws.Path && task.BranchName == branch {
 			continue
 		}
