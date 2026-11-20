@@ -43,6 +43,88 @@ func (m *Manager) Create(ctx context.Context, repo, id string) (workspace.Worksp
 	}
 	return workspace.Workspace{ID: id, Path: path, Repository: repoAbs}, nil
 }
+// Inspect safely reattaches a deterministic Worktree path after a process
+// restart. It verifies the path remains beneath the managed root and belongs
+// to the expected repository before returning its branch.
+func (m *Manager) Inspect(ctx context.Context, repo, id string) (workspace.Workspace, string, error) {
+	if !validID(id) {
+		return workspace.Workspace{}, "", workspace.ErrInvalidWorkspaceID
+	}
+	rootResolved, err := filepath.EvalSymlinks(m.root)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	candidate := filepath.Join(m.root, id)
+	actual, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	expected := filepath.Join(rootResolved, id)
+	if actual != expected {
+		return workspace.Workspace{}, "", fmt.Errorf("worktree path is outside the managed root")
+	}
+	repoAbs, err := filepath.Abs(repo)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	repoAbs, err = filepath.EvalSymlinks(repoAbs)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	worktreeRoot, err := gitOutput(ctx, actual, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	worktreeRoot, err = filepath.EvalSymlinks(worktreeRoot)
+	if err != nil || worktreeRoot != actual {
+		return workspace.Workspace{}, "", fmt.Errorf("worktree root does not match its managed path")
+	}
+	worktreeCommon, err := gitCommonDir(ctx, actual)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	repoCommon, err := gitCommonDir(ctx, repoAbs)
+	if err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	if worktreeCommon != repoCommon {
+		return workspace.Workspace{}, "", fmt.Errorf("worktree belongs to a different repository")
+	}
+	branch, err := gitOutput(ctx, actual, "branch", "--show-current")
+	if err != nil || branch == "" {
+		return workspace.Workspace{}, "", fmt.Errorf("worktree branch could not be verified")
+	}
+	ws := workspace.Workspace{ID: id, Path: actual, Repository: repoAbs}
+	if err = m.validateWorkspace(ws); err != nil {
+		return workspace.Workspace{}, "", err
+	}
+	return ws, branch, nil
+}
+
+func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git %v: %w: %s", args, err, strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func gitCommonDir(ctx context.Context, dir string) (string, error) {
+	common, err := gitOutput(ctx, dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(dir, common)
+	}
+	resolved, err := filepath.EvalSymlinks(common)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(resolved), nil
+}
+
 func (m *Manager) Remove(ctx context.Context, w workspace.Workspace) error {
 	if err := m.validateWorkspace(w); err != nil {
 		return err
