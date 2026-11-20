@@ -61,7 +61,9 @@ func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	}
 	t.Status = Status(status)
 	t.OutcomeUnknown = unknown != 0
-	if t.OutcomeUnknown { t.Status = StatusInterrupted }
+	if t.OutcomeUnknown {
+		t.Status = StatusInterrupted
+	}
 	_ = json.Unmarshal([]byte(cmd), &t.TestCommand)
 	if json.Unmarshal([]byte(result), &t.Result) != nil {
 		t.Result = result
@@ -107,8 +109,18 @@ func (r *Repository) Update(ctx context.Context, t Task) error {
 	_, e := r.db.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=?,execution_id=?,outcome_unknown=?,attempt_id=? WHERE id=?`, persistedStatus(t), t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ExecutionID, boolInt(t.OutcomeUnknown), t.AttemptID, t.ID)
 	return e
 }
-func persistedStatus(t Task) Status { if t.OutcomeUnknown { return StatusFailed }; return t.Status }
-func boolInt(v bool) int { if v { return 1 }; return 0 }
+func persistedStatus(t Task) Status {
+	if t.OutcomeUnknown {
+		return StatusFailed
+	}
+	return t.Status
+}
+func boolInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
+}
 func unix(t time.Time) int64 {
 	if t.IsZero() {
 		return 0
@@ -257,35 +269,71 @@ func (r *Repository) Events(ctx context.Context, id string) ([]Event, error) {
 // exposes the logical interrupted state without rewriting the original schema.
 func (r *Repository) RecoverInterrupted(ctx context.Context) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	defer tx.Rollback()
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM coding_tasks WHERE status IN ('running','testing','repairing') AND outcome_unknown=0`)
-	if err != nil { return 0, err }
+	if err != nil {
+		return 0, err
+	}
 	ids := []string{}
-	for rows.Next() { var id string; if err = rows.Scan(&id); err != nil { rows.Close(); return 0, err }; ids = append(ids, id) }
-	if err = rows.Err(); err != nil { rows.Close(); return 0, err }
-	if err = rows.Close(); err != nil { return 0, err }
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err = rows.Close(); err != nil {
+		return 0, err
+	}
 	now := time.Now().UTC().Unix()
 	for _, id := range ids {
-		if _, err = tx.ExecContext(ctx, `UPDATE coding_tasks SET status='failed',outcome_unknown=1,error='interrupted by AgentMesh restart; inspect retained worktree before resolving',updated_at=?,finished_at=? WHERE id=?`, now, now, id); err != nil { return 0, err }
-		if err = insertEvent(ctx, tx, id, "task.interrupted", map[string]string{"reason":"process restarted before outcome was confirmed"}); err != nil { return 0, err }
+		if _, err = tx.ExecContext(ctx, `UPDATE coding_tasks SET status='failed',outcome_unknown=1,error='interrupted by AgentMesh restart; inspect retained worktree before resolving',updated_at=?,finished_at=? WHERE id=?`, now, now, id); err != nil {
+			return 0, err
+		}
+		if err = insertEvent(ctx, tx, id, "task.interrupted", map[string]string{"reason": "process restarted before outcome was confirmed"}); err != nil {
+			return 0, err
+		}
 	}
-	if err = tx.Commit(); err != nil { return 0, err }
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
 	return int64(len(ids)), nil
 }
 
 // BindExecution makes the Coding Task ↔ canonical Execution relation durable.
 func (r *Repository) BindExecution(ctx context.Context, taskID, executionID, attemptID string) error {
-	if taskID == "" || executionID == "" || attemptID == "" { return ErrInvalidTask }
+	if taskID == "" || executionID == "" || attemptID == "" {
+		return ErrInvalidTask
+	}
 	result, err := r.db.ExecContext(ctx, `UPDATE coding_tasks SET execution_id=?,attempt_id=?,updated_at=? WHERE id=? AND (execution_id='' OR execution_id=?) AND (attempt_id='' OR attempt_id=?)`, executionID, attemptID, time.Now().UTC().Unix(), taskID, executionID, attemptID)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	n, err := result.RowsAffected()
-	if err != nil { return err }
-	if n == 1 { return nil }
+	if err != nil {
+		return err
+	}
+	if n == 1 {
+		return nil
+	}
 	var existingExecution, existingAttempt string
-	if err = r.db.QueryRowContext(ctx, `SELECT execution_id,attempt_id FROM coding_tasks WHERE id=?`, taskID).Scan(&existingExecution,&existingAttempt); errors.Is(err, sql.ErrNoRows) { return ErrNotFound }
-	if err != nil { return err }
-	if existingExecution != executionID || existingAttempt != attemptID { return ErrConflict }
+	if err = r.db.QueryRowContext(ctx, `SELECT execution_id,attempt_id FROM coding_tasks WHERE id=?`, taskID).Scan(&existingExecution, &existingAttempt); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if existingExecution != executionID || existingAttempt != attemptID {
+		return ErrConflict
+	}
 	return nil
 }
 
