@@ -3,9 +3,11 @@ package coding
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
+	dom "github.com/thkx/agentmesh/internal/domain/agent"
 	"github.com/thkx/agentmesh/internal/workspace"
 )
 
