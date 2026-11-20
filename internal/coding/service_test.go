@@ -185,6 +185,12 @@ func TestStartReservesBoundedSlotsAndCloseCancelsRuns(t *testing.T) {
 	}
 	queued, err := service.Get(context.Background(), "start-3")
 	if err != nil || queued.Status != StatusPending { t.Fatalf("third task should remain durably pending: task=%#v err=%v", queued, err) }
+	if err = service.CancelContext(context.Background(), "start-1"); err != nil { t.Fatalf("cancel first task to release a slot: %v", err) }
+	select {
+	case <-agent.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("queued third task did not start after a slot was released")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err = service.CloseContext(ctx); err != nil {
