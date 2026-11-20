@@ -485,7 +485,7 @@ func (s *Service) ApplyPatch(ctx context.Context, id, patch string) error {
 	if e != nil {
 		return e
 	}
-	if isActive(t.Status) {
+	if isActive(t.Status) || t.OutcomeUnknown || t.Status == StatusInterrupted {
 		return ErrConflict
 	}
 	if t.WorkspacePath == "" || len(patch) == 0 || len(patch) > 2<<20 {
@@ -507,7 +507,7 @@ func (s *Service) Revert(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
-	if isActive(t.Status) {
+	if isActive(t.Status) || t.OutcomeUnknown || t.Status == StatusInterrupted {
 		return ErrConflict
 	}
 	if t.WorkspacePath == "" {
@@ -529,7 +529,7 @@ func (s *Service) Cleanup(ctx context.Context, id string) error {
 	if e != nil {
 		return e
 	}
-	if isActive(t.Status) {
+	if isActive(t.Status) || t.OutcomeUnknown || t.Status == StatusInterrupted {
 		return ErrConflict
 	}
 	if t.WorkspacePath == "" {
