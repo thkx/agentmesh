@@ -58,6 +58,7 @@ func TestCodingTaskEndToEndWithoutDockerTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repo}); err != nil { t.Fatal(err) }
 	defer service.Close()
 	task, err := service.Create(context.Background(), CreateRequest{ID: "task-e2e", RepositoryPath: repo, ModelID: "test-model", Prompt: "create a file"})
 	if err != nil {
@@ -159,6 +160,7 @@ func TestStartReservesBoundedSlotsAndCloseCancelsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil { t.Fatal(err) }
 	for i := 1; i <= 3; i++ {
 		if _, err = service.Create(context.Background(), CreateRequest{ID: fmt.Sprintf("start-%d", i), RepositoryPath: repoPath, ModelID: "test", Prompt: "test"}); err != nil {
 			t.Fatal(err)
@@ -277,6 +279,7 @@ func TestGracefulShutdownPreservesUnknownCodingOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil { t.Fatal(err) }
 	task, err := service.Create(context.Background(), CreateRequest{
 		ID: "shutdown-interrupted", RepositoryPath: repoPath, ModelID: "test", Prompt: "modify repository",
 	})
