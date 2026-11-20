@@ -114,6 +114,10 @@ func pathWithinRoot(path, root string) bool {
 }
 
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
+	// Canonical provenance is assigned only by CodingAdapter after the
+	// Execution Manager accepts this task; never trust client-supplied IDs.
+	in.ExecutionID = ""
+	in.AttemptID = ""
 	if e := in.Validate(); e != nil {
 		return Task{}, e
 	}
