@@ -373,12 +373,6 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize coding task service: %w", err)
 	}
 	codingService.SetReviewer(agentRuntime)
-	codingArtifactPublisher, err := newCodingArtifactPublisher(collaborationService)
-	if err != nil {
-		_ = sqliteDB.Close()
-		return nil, fmt.Errorf("initialize coding artifact publisher: %w", err)
-	}
-	codingService.SetArtifactPublisher(codingArtifactPublisher)
 	if _, err := codingService.Recover(ctx); err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("recover interrupted coding tasks: %w", err)
@@ -703,6 +697,15 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize collaboration service: %w", err)
 	}
+
+	codingArtifactPublisher, err := newCodingArtifactPublisher(collaborationService)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize coding artifact publisher: %w", err)
+	}
+	codingService.SetArtifactPublisher(codingArtifactPublisher)
 	collaborationDispatcher, err := collaboration.NewDispatcher(sqliteDB.DB, time.Second)
 	if err != nil {
 		workerCancel()
