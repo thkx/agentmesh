@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Live P6 gate: real Coding Execution + real model + Docker Sandbox + tests + reviewer.
+# Live P6 gate: durable Workflow -> Coding Execution -> real model -> Docker Sandbox
+# -> tests -> independent review -> P4 Artifact/Evidence provenance.
 # The repository is changed only inside AgentMesh's task Worktree; this script never commits or pushes.
 set -euo pipefail
 
@@ -22,7 +23,7 @@ command -v docker >/dev/null || fail "Docker CLI is required"
 [[ -n "$TOKEN" ]] || fail "set AGENTMESH_API_TOKEN or AGENTMESH_API_TOKEN_FILE"
 [[ -n "$REPOSITORY" && -d "$REPOSITORY" ]] || fail "P6_REPOSITORY_PATH must point to a repository visible to the AgentMesh server"
 [[ -n "$MODEL_ID" ]] || fail "P6_MODEL_ID is required"
-[[ -n "$TEST_COMMAND" ]] || fail "P6_TEST_COMMAND_JSON is required, for example {\"program\":\"go\",\"args\":[\"test\",\"./...\"]}"
+[[ -n "$TEST_COMMAND" ]] || fail "P6_TEST_COMMAND_JSON is required, for example {"program":"go","args":["test","./..."]}"
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable"
 git -C "$REPOSITORY" rev-parse --show-toplevel >/dev/null 2>&1 || fail "P6_REPOSITORY_PATH is not a Git repository"
 
@@ -32,39 +33,53 @@ api() {
     -H "Content-Type: application/json" "$@"
 }
 
-TASK_ID="p6-live-$(date +%s)-$$"
-INPUT="$(jq -cn \
-  --arg id "$TASK_ID" \
-  --arg title "P6 live Coding acceptance" \
+STAMP="$(date +%s)-$$"
+WORKFLOW_ID="p6-live-workflow-$STAMP"
+RUN_ID="p6-live-run-$STAMP"
+WORKFLOW="$(jq -cn \
+  --arg id "$WORKFLOW_ID" \
   --arg repository_path "$REPOSITORY" \
   --arg model_id "$MODEL_ID" \
   --arg prompt "$TASK_PROMPT" \
   --argjson test_command "$TEST_COMMAND" \
-  --argjson max_repair_attempts 1 \
   --argjson timeout_seconds "$TIMEOUT_SECONDS" \
-  '{id:$id,title:$title,repository_path:$repository_path,model_id:$model_id,prompt:$prompt,test_command:$test_command,max_repair_attempts:$max_repair_attempts,timeout_seconds:$timeout_seconds}')"
+  '{id:$id,name:"P6 live Coding Workflow",version:1,entry:"start",
+    nodes:[
+      {id:"start",type:"start"},
+      {id:"implement",type:"coding",coding:{
+        repository_path:$repository_path,model_id:$model_id,prompt:$prompt,
+        test_command:$test_command,max_repair_attempts:1,timeout_seconds:$timeout_seconds
+      }},
+      {id:"finish",type:"end"}
+    ],
+    edges:[{from:"start",to:"implement"},{from:"implement",to:"finish"}]}')"
 
-SUBMITTED="$(api -X POST "$BASE_URL/api/v1/managed-executions" \
-  -d "$(jq -cn --arg task_id "$TASK_ID" --argjson input "$INPUT" \
-    '{kind:"coding",runtime:"coding",task_id:$task_id,input:$input,idempotency_key:("p6-live:"+$task_id)}')")"
-EXECUTION_ID="$(jq -r '.id' <<<"$SUBMITTED")"
-[[ -n "$EXECUTION_ID" && "$EXECUTION_ID" != "null" ]] || fail "managed execution was not created: $SUBMITTED"
-echo "PASS: canonical Coding Execution created ($EXECUTION_ID)"
+api -X PUT "$BASE_URL/api/v1/workflows/$WORKFLOW_ID" -d "$WORKFLOW" >/dev/null
+echo "PASS: durable Coding Workflow definition saved ($WORKFLOW_ID)"
 
-deadline=$(( $(date +%s) + TIMEOUT_SECONDS + 180 ))
+api -X POST "$BASE_URL/api/v1/workflows/$WORKFLOW_ID/runs" \
+  -d "$(jq -cn --arg run_id "$RUN_ID" '{run_id:$run_id,input:{source:"p6-live-acceptance"}}')" >/dev/null
+echo "PASS: durable Workflow Run queued ($RUN_ID)"
+
+deadline=$(( $(date +%s) + TIMEOUT_SECONDS + 240 ))
 while true; do
-  EXECUTION="$(api "$BASE_URL/api/v1/managed-executions/$EXECUTION_ID")"
-  STATUS="$(jq -r '.status' <<<"$EXECUTION")"
-  case "$STATUS" in
+  RUN="$(api "$BASE_URL/api/v1/workflows/runs/$RUN_ID")"
+  RUN_STATUS="$(jq -r '.status' <<<"$RUN")"
+  case "$RUN_STATUS" in
     succeeded) break ;;
-    failed|canceled|timed_out|interrupted|needs_reconciliation)
-      fail "Coding Execution ended as $STATUS: $(jq -r '.error // ""' <<<"$EXECUTION")" ;;
+    failed|rejected|canceled)
+      fail "Workflow Run ended as $RUN_STATUS: $(jq -r '.error // ""' <<<"$RUN")" ;;
   esac
-  (( $(date +%s) < deadline )) || fail "timed out waiting for Coding Execution"
+  (( $(date +%s) < deadline )) || fail "timed out waiting for Coding Workflow"
   sleep "$POLL_SECONDS"
 done
-echo "PASS: Coding Execution succeeded"
+TASK_ID="$(jq -r '.context.implement.coding.task_id // empty' <<<"$RUN")"
+EXECUTION_ID="$(jq -r '.context.implement.coding.execution_id // empty' <<<"$RUN")"
+[[ -n "$TASK_ID" && -n "$EXECUTION_ID" ]] || fail "successful Workflow did not return its Coding Task and Execution references"
+echo "PASS: Workflow Coding node completed ($TASK_ID / $EXECUTION_ID)"
 
+EXECUTION="$(api "$BASE_URL/api/v1/managed-executions/$EXECUTION_ID")"
+[[ "$(jq -r '.status' <<<"$EXECUTION")" == "succeeded" ]] || fail "canonical Coding Execution did not succeed"
 TASK="$(api "$BASE_URL/api/v1/coding/tasks/$TASK_ID")"
 [[ "$(jq -r '.status' <<<"$TASK")" == "succeeded" ]] || fail "Coding Task is not succeeded"
 [[ "$(jq -r '.execution_id' <<<"$TASK")" == "$EXECUTION_ID" ]] || fail "Coding Task is not bound to the canonical Execution"
@@ -87,7 +102,9 @@ jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.ev
 jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.evidence[]; .execution_id==$execution and .attempt_id==$attempt and .kind=="test")' <<<"$DETAIL" >/dev/null || fail "test Evidence provenance is missing"
 jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.evidence[]; .execution_id==$execution and .attempt_id==$attempt and .kind=="tool_log")' <<<"$DETAIL" >/dev/null || fail "review Evidence provenance is missing"
 
-echo "PASS: final diff, snapshot, canonical Attempt and P4 Artifact/Evidence provenance verified"
+echo "PASS: Workflow, Coding Execution, Attempt, final diff and P4 Artifact/Evidence provenance verified"
+echo "Workflow: $WORKFLOW_ID"
+echo "Workflow Run: $RUN_ID"
 echo "Coding Task: $TASK_ID"
 echo "Execution: $EXECUTION_ID"
 echo "Worktree retained for manual inspection; no commit or push was performed."
