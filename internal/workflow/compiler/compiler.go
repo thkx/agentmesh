@@ -68,7 +68,7 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 					return nil, fmt.Errorf("%w: coding node %s has an unsafe test command", workflow.ErrInvalidDefinition, n.ID)
 				}
 				for _, arg := range n.Coding.TestCommand.Args {
-					if strings.ContainsAny(arg, ";&|\x60$><\\n\\r") {
+					if strings.ContainsAny(arg, ";&|\x60$><\n\r") {
 						return nil, fmt.Errorf("%w: coding node %s has an unsafe test argument", workflow.ErrInvalidDefinition, n.ID)
 					}
 				}
