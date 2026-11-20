@@ -118,3 +118,36 @@ func TestCodingAdapterEnsuresTerminalAttemptBeforeArtifactFinalization(t *testin
 		t.Fatalf("unexpected pre-finalization attempt: %+v", attempt)
 	}
 }
+
+func TestCodingAdapterReschedulesPendingTaskAfterRestart(t *testing.T) {
+	service := &fakeCodingAdapterService{task: coding.Task{ID: "coding-pending", Status: coding.StatusPending}}
+	adapter, err := NewCodingAdapter(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := adapter.Observe(context.Background(), dom.Entity{ID: "execution-pending", RuntimeRef: "coding-pending"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleQueued || service.startCalls != 1 {
+		t.Fatalf("observation=%+v start_calls=%d", observed, service.startCalls)
+	}
+}
+
+func TestCodingAdapterDoesNotCreateAttemptForPreStartCancellation(t *testing.T) {
+	service := &fakeCodingAdapterService{task: coding.Task{
+		ID: "coding-canceled", Status: coding.StatusCanceled,
+	}}
+	attempts := &fakeCodingAttemptStore{}
+	adapter, err := NewCodingAdapter(service, attempts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := adapter.Observe(context.Background(), dom.Entity{ID: "execution-canceled", RuntimeRef: "coding-canceled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.Status != dom.LifecycleCanceled || !observed.AttemptNotStarted || len(attempts.attempts) != 0 {
+		t.Fatalf("observation=%+v attempts=%+v", observed, attempts.attempts)
+	}
+}
