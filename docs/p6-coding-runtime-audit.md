@@ -40,6 +40,7 @@ The P6 code is present on this branch. A green GitHub Actions run and the user's
 ### Implemented
 
 - Coding Tasks persist their canonical `execution_id` and `attempt_id`; the adapter binds those values after the Execution Manager accepts the request.
+- The Coding HTTP API's create, run and cancel operations now use the same Execution Manager; no public Coding API path creates or starts a managed task outside P4 Execution/Attempt lifecycle.
 - Adapter preflight validates the request and canonical repository path before creating the canonical Execution, avoiding orphan Executions for invalid repository paths.
 - `CodingAdapter.Observe` creates the canonical Attempt before publishing P4 Artifact/Evidence provenance when a task completed before its first observation.
 - Repeated Submit is idempotent. A previously bound pending task is re-scheduled by Observe after process restart.
