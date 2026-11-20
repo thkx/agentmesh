@@ -12,10 +12,10 @@ import (
 	"time"
 
 	dom "github.com/thkx/agentmesh/internal/domain/agent"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/workspace"
 	"github.com/thkx/agentmesh/internal/workspace/sandbox/docker"
 	"github.com/thkx/agentmesh/internal/workspace/worktree"
-	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type Agent interface {
