@@ -19,7 +19,8 @@ type fakeCodingAdapterService struct {
 }
 
 func (f *fakeCodingAdapterService) Create(_ context.Context, in coding.CreateRequest) (coding.Task, error) {
-	f.task = coding.Task{ID: in.ID, Status: coding.StatusPending}
+	f.getErr = nil
+	f.task = coding.Task{ID: in.ID, ExecutionID: in.ExecutionID, AttemptID: in.AttemptID, Status: coding.StatusPending}
 	return f.task, nil
 }
 func (f *fakeCodingAdapterService) Get(_ context.Context, _ string) (coding.Task, error) {
