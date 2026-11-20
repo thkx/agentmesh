@@ -102,3 +102,70 @@ func TestResolveInterruptedDiscardResetsWorktree(t *testing.T) {
 		t.Fatalf("discard did not reset the Worktree: stat err=%v", err)
 	}
 }
+
+func TestRecoverReattachesWorktreeCreatedBeforeTaskMetadataPersisted(t *testing.T) {
+	ctx := context.Background()
+	repoPath := makeGitRepo(t)
+	root := t.TempDir()
+	service, err := NewService(testRepository(t), fakeCodingAgent{}, root, "golang:1.27.3", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+	task, err := service.Create(ctx, CreateRequest{
+		ID: "recover-worktree", RepositoryPath: repoPath, ModelID: "test", Prompt: "inspect partial work",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceID := "coding-" + task.ID
+	branch := "agentmesh/" + task.ID
+	ws, err := service.worktrees.CreateBranch(ctx, repoPath, workspaceID, branch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := filepath.Join(ws.Path, "partial-change.txt")
+	if err = os.WriteFile(partial, []byte("partial work\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	task.Status = StatusRunning
+	task.StartedAt = time.Now().UTC()
+	if err = service.repo.Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := service.Recover(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered count=%d, want 1", recovered)
+	}
+	got, err := service.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.WorkspaceID != workspaceID || got.WorkspacePath != ws.Path || got.BranchName != branch {
+		t.Fatalf("interrupted task Worktree was not reattached: %+v", got)
+	}
+	diff, err := service.Diff(ctx, task.ID)
+	if err != nil || !strings.Contains(diff, "partial-change.txt") {
+		t.Fatalf("recovered Worktree diff missing: err=%v diff=%s", err, diff)
+	}
+	events, err := service.Events(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type == "workspace.recovered" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("workspace.recovered event was not persisted")
+	}
+}
