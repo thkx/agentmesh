@@ -65,7 +65,7 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 		return nil, err
 	}
 	serviceCtx, serviceCancel := context.WithCancel(context.Background())
-	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
+	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, scheduledCancels: map[string]context.CancelFunc{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
 func (s *Service) SetReviewer(reviewer Agent) { s.mu.Lock(); s.reviewer = reviewer; s.mu.Unlock() }
 func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) {
@@ -443,9 +443,15 @@ func (s *Service) Cancel(id string) error {
 func (s *Service) CancelContext(ctx context.Context, id string) error {
 	s.mu.Lock()
 	cancel, active := s.cancels[id]
+	if !active {
+		cancel, active = s.scheduledCancels[id]
+	}
 	s.mu.Unlock()
 	if active {
 		cancel()
+		if task, getErr := s.repo.Get(ctx, id); getErr == nil && task.Status == StatusPending {
+			return s.repo.CancelPending(ctx, id)
+		}
 		return nil
 	}
 
@@ -591,13 +597,16 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 		s.mu.Unlock()
 		return task, nil
 	}
+	runCtx, runCancel := context.WithCancel(s.ctx)
 	s.scheduled[id] = struct{}{}
+	s.scheduledCancels[id] = runCancel
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
-		defer func() { s.mu.Lock(); delete(s.scheduled, id); s.mu.Unlock() }()
-		_, _ = s.run(s.ctx, id, false)
+		defer runCancel()
+		defer func() { s.mu.Lock(); delete(s.scheduled, id); delete(s.scheduledCancels, id); s.mu.Unlock() }()
+		_, _ = s.run(runCtx, id, false)
 	}()
 	return task, nil
 }
