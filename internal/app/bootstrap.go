@@ -372,6 +372,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize coding task service: %w", err)
 	}
+	codingService.SetReviewer(agentRuntime)
 	if _, err := codingService.Recover(ctx); err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("recover interrupted coding tasks: %w", err)
