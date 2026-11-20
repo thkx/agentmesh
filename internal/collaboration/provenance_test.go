@@ -100,3 +100,33 @@ func TestArtifactExecutionAttemptProvenanceIsQueryableAndIdempotent(t *testing.T
 		t.Fatalf("unexpected evidence provenance: %+v", got.Evidence)
 	}
 }
+
+func TestAddArtifactVersionPersistsAttemptProvenance(t *testing.T) {
+	ctx := context.Background()
+	service, db := testService(t)
+	defer db.Close()
+
+	workspace, err := service.CreateWorkspace(ctx, collaboration.Workspace{Name: "Version provenance", Slug: "version-provenance"})
+	if err != nil { t.Fatal(err) }
+	now := time.Now().UTC().UnixNano()
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO executions
+		(id,kind,runtime,status,error_text,created_at,updated_at)
+		VALUES('version-exec','agent','agent','succeeded','',?,?)`, now, now); err != nil { t.Fatal(err) }
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO execution_attempts
+		(id,execution_id,attempt_number,runtime,status,error_text,started_at,finished_at,created_at,updated_at)
+		VALUES('version-attempt','version-exec',1,'agent','succeeded','',?,?,?,?)`, now, now, now, now); err != nil { t.Fatal(err) }
+
+	artifact, _, err := service.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		WorkspaceID: workspace.ID, Kind: "patch", Title: "Initial patch", Content: []byte("v1"),
+	})
+	if err != nil { t.Fatal(err) }
+	version, err := service.AddArtifactVersion(ctx, artifact.ID, collaboration.CreateArtifactRequest{
+		Content: []byte("v2"), SourceExecution: "version-exec", SourceAttempt: "version-attempt",
+	})
+	if err != nil { t.Fatalf("add artifact version with attempt provenance: %v", err) }
+	persisted, err := service.GetArtifactVersion(ctx, artifact.ID, version.Version)
+	if err != nil { t.Fatal(err) }
+	if persisted.SourceExecution != "version-exec" || persisted.SourceAttempt != "version-attempt" {
+		t.Fatalf("attempt provenance was not persisted: %+v", persisted)
+	}
+}
