@@ -57,7 +57,7 @@
   <h2>Start a coding task</h2>
   <form method="post" action="/dashboard/coding" class="stack">
     <label>Title<input name="title" required maxlength="160" placeholder="Fix the API pagination bug"></label>
-    <label>Local Git repository path<input name="repository_path" required placeholder="/Users/me/src/my-project"></label>
+    <label>Local Git repository path (must be under a configured coding.allowed_repository_roots directory)<input name="repository_path" required placeholder="/Users/me/src/my-project"></label>
     <label>Model ID<input name="model_id" required placeholder="your-enabled-model-id"></label>
     <label>Task description<textarea name="prompt" rows="6" required placeholder="Describe the required change and acceptance criteria"></textarea></label>
     <div class="form-row">
