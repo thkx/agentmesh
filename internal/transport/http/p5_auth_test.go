@@ -57,3 +57,35 @@ func TestP5RejectsMalformedBearerAuthorization(t *testing.T) {
 		}
 	}
 }
+
+func TestP5GracefulShutdownEndpointSignalsApplication(t *testing.T) {
+	token := strings.Repeat("shutdown-token-", 3)
+	requests := make(chan struct{}, 1)
+	router := httptransport.NewRouter(httptransport.Dependencies{
+		APIToken: token, RequestShutdown: requests,
+	})
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v1/operations/shutdown", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized shutdown status=%d want=%d", unauthorized.Code, http.StatusUnauthorized)
+	}
+	select {
+	case <-requests:
+		t.Fatal("unauthorized request triggered shutdown")
+	default:
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/operations/shutdown", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("authorized shutdown status=%d want=%d body=%s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+	select {
+	case <-requests:
+	default:
+		t.Fatal("authorized shutdown request did not signal application")
+	}
+}
