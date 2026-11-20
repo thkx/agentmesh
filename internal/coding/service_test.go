@@ -180,9 +180,11 @@ func TestStartReservesBoundedSlotsAndCloseCancelsRuns(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("second agent did not start")
 	}
-	if _, err = service.Start(context.Background(), "start-3"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("third task should be rejected at capacity: %v", err)
+	if _, err = service.Start(context.Background(), "start-3"); err != nil {
+		t.Fatalf("third task should remain queued at capacity: %v", err)
 	}
+	queued, err := service.Get(context.Background(), "start-3")
+	if err != nil || queued.Status != StatusPending { t.Fatalf("third task should remain durably pending: task=%#v err=%v", queued, err) }
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err = service.CloseContext(ctx); err != nil {
