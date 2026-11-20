@@ -70,7 +70,7 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 		case execdom.LifecycleTimedOut:
 			return nil, fmt.Errorf("coding task %s timed out: %s", taskID, entity.Error)
 		case execdom.LifecycleInterrupted, execdom.LifecycleNeedsReconciliation:
-			return nil, fmt.Errorf("coding task %s has an indeterminate outcome (%s); refusing automatic replay", taskID, entity.Status)
+			return nil, fmt.Errorf("%w: task %s has status %s; refusing automatic replay", workflowruntime.ErrCodingOutcomeIndeterminate, taskID, entity.Status)
 		}
 		select {
 		case <-ctx.Done():
