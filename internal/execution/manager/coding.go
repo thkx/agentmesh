@@ -31,6 +31,7 @@ func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error
 	if err := json.Unmarshal(e.Input, &request); err != nil {
 		return "", fmt.Errorf("decode coding execution input: %w", err)
 	}
+	request.ExecutionID = e.ID
 	if request.ID == "" {
 		request.ID = e.TaskID
 	}
@@ -46,6 +47,9 @@ func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error
 	}
 	if err != nil {
 		return "", err
+	}
+	if binder, ok := a.service.(interface { BindExecution(context.Context, string, string) error }); ok {
+		if err := binder.BindExecution(ctx, task.ID, e.ID); err != nil { return "", err }
 	}
 	if task.Status == coding.StatusPending {
 		if _, err = a.service.Start(ctx, task.ID); err != nil {
@@ -76,6 +80,8 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 		status = dom.LifecycleFailed
 	case coding.StatusCanceled:
 		status = dom.LifecycleCanceled
+	case coding.StatusInterrupted:
+		status = dom.LifecycleInterrupted
 	default:
 		return Observation{}, fmt.Errorf("unknown coding task status %q", task.Status)
 	}
