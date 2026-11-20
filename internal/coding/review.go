@@ -21,19 +21,35 @@ type ReviewVerdict struct {
 func parseReviewVerdict(content string) (ReviewVerdict, error) {
 	content = strings.TrimSpace(content)
 	start, end := strings.Index(content, "{"), strings.LastIndex(content, "}")
-	if start < 0 || end < start { return ReviewVerdict{}, errors.New("reviewer did not return a JSON verdict") }
+	if start < 0 || end < start {
+		return ReviewVerdict{}, errors.New("reviewer did not return a JSON verdict")
+	}
 	var verdict ReviewVerdict
-	if err := json.Unmarshal([]byte(content[start:end+1]), &verdict); err != nil { return ReviewVerdict{}, fmt.Errorf("decode reviewer verdict: %w", err) }
-	if verdict.Verdict != "approve" && verdict.Verdict != "request_changes" { return ReviewVerdict{}, errors.New("reviewer verdict must be approve or request_changes") }
-	if len(verdict.Findings) > 50 { verdict.Findings = verdict.Findings[:50] }
-	for i := range verdict.Findings { if len(verdict.Findings[i]) > 2000 { verdict.Findings[i] = verdict.Findings[i][:2000] } }
+	if err := json.Unmarshal([]byte(content[start:end+1]), &verdict); err != nil {
+		return ReviewVerdict{}, fmt.Errorf("decode reviewer verdict: %w", err)
+	}
+	if verdict.Verdict != "approve" && verdict.Verdict != "request_changes" {
+		return ReviewVerdict{}, errors.New("reviewer verdict must be approve or request_changes")
+	}
+	if len(verdict.Findings) > 50 {
+		verdict.Findings = verdict.Findings[:50]
+	}
+	for i := range verdict.Findings {
+		if len(verdict.Findings[i]) > 2000 {
+			verdict.Findings[i] = verdict.Findings[i][:2000]
+		}
+	}
 	return verdict, nil
 }
 
 func commandExitCode(err error) int {
-	if err == nil { return 0 }
+	if err == nil {
+		return 0
+	}
 	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) { return exitErr.ExitCode() }
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
 	return -1
 }
 
@@ -43,7 +59,9 @@ func (s *Service) review(ctx context.Context, task Task, diff string) error {
 	s.mu.Lock()
 	reviewer := s.reviewer
 	s.mu.Unlock()
-	if reviewer == nil { return nil }
+	if reviewer == nil {
+		return nil
+	}
 	started := time.Now().UTC()
 	step := Step{TaskID: task.ID, Sequence: 100, Kind: "review.inspect", Status: "running", StartedAt: started}
 	_ = s.repo.Event(ctx, task.ID, "review.started", map[string]any{"diff_bytes": len(diff)})
@@ -69,8 +87,12 @@ func (s *Service) review(ctx context.Context, task Task, diff string) error {
 		return err
 	}
 	step.Status = verdict.Verdict
-	if err = s.repo.AddStep(ctx, step); err != nil { return fmt.Errorf("persist reviewer evidence: %w", err) }
-	if err = s.repo.Event(ctx, task.ID, "review.finished", verdict); err != nil { return fmt.Errorf("persist reviewer verdict: %w", err) }
+	if err = s.repo.AddStep(ctx, step); err != nil {
+		return fmt.Errorf("persist reviewer evidence: %w", err)
+	}
+	if err = s.repo.Event(ctx, task.ID, "review.finished", verdict); err != nil {
+		return fmt.Errorf("persist reviewer verdict: %w", err)
+	}
 	if verdict.Verdict != "approve" {
 		return fmt.Errorf("review requested changes: %s", strings.Join(verdict.Findings, "; "))
 	}
