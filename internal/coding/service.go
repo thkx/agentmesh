@@ -36,6 +36,7 @@ type Service struct {
 	cancel        context.CancelFunc
 	wg            sync.WaitGroup
 	closed        bool
+	scheduled     map[string]struct{}
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
@@ -57,7 +58,7 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 		return nil, err
 	}
 	serviceCtx, serviceCancel := context.WithCancel(context.Background())
-	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
+	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
@@ -438,9 +439,9 @@ func (s *Service) Cleanup(ctx context.Context, id string) error {
 	return s.repo.UpdateWithEvent(ctx, t, "workspace.cleaned", nil)
 }
 
-func (s *Service) Recover(ctx context.Context) (int64, error) {
-	return s.repo.RecoverInterrupted(ctx)
-}
+func (s *Service) Recover(ctx context.Context) (int64, error) { return s.repo.RecoverInterrupted(ctx) }
+
+func (s *Service) BindExecution(ctx context.Context, taskID, executionID string) error { return s.repo.BindExecution(ctx, taskID, executionID) }
 
 // Start schedules a task in the background so HTTP request timeouts do not
 // truncate long-running coding sessions. Run remains available for controlled
@@ -461,15 +462,20 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 		s.mu.Unlock()
 		return Task{}, ErrConflict
 	}
-	select {
-	case s.maxConcurrent <- struct{}{}:
-	default:
+	// The pending task is durable in SQLite. Schedule it once in this process;
+	// the worker waits for a concurrency slot instead of rejecting the task.
+	if _, exists := s.scheduled[id]; exists {
 		s.mu.Unlock()
-		return Task{}, ErrConflict
+		return task, nil
 	}
+	s.scheduled[id] = struct{}{}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go func() { defer s.wg.Done(); _, _ = s.run(s.ctx, id, true) }()
+	go func() {
+		defer s.wg.Done()
+		defer func() { s.mu.Lock(); delete(s.scheduled, id); s.mu.Unlock() }()
+		_, _ = s.run(s.ctx, id, false)
+	}()
 	return task, nil
 }
 
