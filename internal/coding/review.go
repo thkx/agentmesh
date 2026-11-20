@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type ReviewVerdict struct {
@@ -47,7 +48,8 @@ func (s *Service) review(ctx context.Context, task Task, diff string) error {
 	step := Step{TaskID: task.ID, Sequence: 100, Kind: "review.inspect", Status: "running", StartedAt: started}
 	_ = s.repo.Event(ctx, task.ID, "review.started", map[string]any{"diff_bytes": len(diff)})
 	prompt := "You are the independent code reviewer. Review only the actual patch below. Identify correctness, security, regression, and test-coverage risks. Do not modify files. Return exactly one JSON object: {\"verdict\":\"approve\" or \"request_changes\",\"findings\":[\"...\"]}. Approve only if no blocking issue remains.\n\nTask: " + task.Prompt + "\n\nTest summary:\n" + limit(task.Result, 12000) + "\n\nPatch:\n" + limit(diff, 40000)
-	result, err := reviewer.Run(ctx, agentdom.Task{ID: "coding-" + task.ID + "-review", ModelID: task.ModelID, WorkspaceID: task.WorkspaceID, Prompt: prompt, MaxSteps: 8, MaxToolCalls: 12, TimeoutSeconds: task.TimeoutSeconds})
+	reviewCtx := modelgateway.WithExecutionProvenance(ctx, task.ExecutionID, task.AttemptID)
+	result, err := reviewer.Run(reviewCtx, agentdom.Task{ID: "coding-" + task.ID + "-review", ModelID: task.ModelID, WorkspaceID: task.WorkspaceID, Prompt: prompt, MaxSteps: 8, MaxToolCalls: 12, TimeoutSeconds: task.TimeoutSeconds})
 	step.FinishedAt = time.Now().UTC()
 	step.DurationMillis = step.FinishedAt.Sub(started).Milliseconds()
 	if err != nil {
