@@ -563,12 +563,6 @@ func (s *Service) Start(ctx context.Context, id string) (Task, error) {
 		s.mu.Unlock()
 		return task, nil
 	}
-	// Keep goroutine pressure bounded. The durable pending row remains in SQLite;
-	// the existing Execution reconciler will retry Start when capacity is available.
-	if len(s.scheduled) >= 100 {
-		s.mu.Unlock()
-		return task, nil
-	}
 	s.scheduled[id] = struct{}{}
 	s.wg.Add(1)
 	s.mu.Unlock()
