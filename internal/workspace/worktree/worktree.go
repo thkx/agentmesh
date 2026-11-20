@@ -43,6 +43,7 @@ func (m *Manager) Create(ctx context.Context, repo, id string) (workspace.Worksp
 	}
 	return workspace.Workspace{ID: id, Path: path, Repository: repoAbs}, nil
 }
+
 // Inspect safely reattaches a deterministic Worktree path after a process
 // restart. It verifies the path remains beneath the managed root and belongs
 // to the expected repository before returning its branch.
