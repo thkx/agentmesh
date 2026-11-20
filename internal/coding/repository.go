@@ -22,7 +22,7 @@ func NewRepository(db *sql.DB) (*Repository, error) {
 func (r *Repository) Create(ctx context.Context, req CreateRequest) (Task, error) {
 	now := time.Now().UTC()
 	cmd, _ := json.Marshal(req.TestCommand)
-	t := Task{ID: req.ID, Title: req.Title, RepositoryPath: req.RepositoryPath, ModelID: req.ModelID, Prompt: req.Prompt, Status: StatusPending, TestCommand: req.TestCommand, MaxRepairAttempts: req.MaxRepairAttempts, TimeoutSeconds: req.TimeoutSeconds, CreatedAt: now, UpdatedAt: now}
+	t := Task{ID: req.ID, ExecutionID: req.ExecutionID, Title: req.Title, RepositoryPath: req.RepositoryPath, ModelID: req.ModelID, Prompt: req.Prompt, Status: StatusPending, TestCommand: req.TestCommand, MaxRepairAttempts: req.MaxRepairAttempts, TimeoutSeconds: req.TimeoutSeconds, CreatedAt: now, UpdatedAt: now}
 	if t.MaxRepairAttempts == 0 {
 		t.MaxRepairAttempts = 2
 	}
@@ -34,7 +34,7 @@ func (r *Repository) Create(ctx context.Context, req CreateRequest) (Task, error
 		return Task{}, err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO coding_tasks(id,title,repository_path,model_id,prompt,status,test_command_json,max_repair_attempts,timeout_seconds,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Title, t.RepositoryPath, t.ModelID, t.Prompt, t.Status, string(cmd), t.MaxRepairAttempts, t.TimeoutSeconds, now.Unix(), now.Unix())
+	_, err = tx.ExecContext(ctx, `INSERT INTO coding_tasks(id,title,repository_path,model_id,prompt,status,test_command_json,max_repair_attempts,timeout_seconds,created_at,updated_at,execution_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, t.ID, t.Title, t.RepositoryPath, t.ModelID, t.Prompt, t.Status, string(cmd), t.MaxRepairAttempts, t.TimeoutSeconds, now.Unix(), now.Unix(), t.ExecutionID)
 	if err != nil {
 		return Task{}, fmt.Errorf("create coding task: %w", err)
 	}
@@ -47,18 +47,21 @@ func (r *Repository) Create(ctx context.Context, req CreateRequest) (Task, error
 	return t, nil
 }
 
-const taskColumns = `id,title,repository_path,model_id,prompt,status,workspace_id,workspace_path,branch_name,test_command_json,max_repair_attempts,repair_attempts,timeout_seconds,result_json,error,created_at,updated_at,started_at,finished_at`
+const taskColumns = `id,title,repository_path,model_id,prompt,status,workspace_id,workspace_path,branch_name,test_command_json,max_repair_attempts,repair_attempts,timeout_seconds,result_json,error,created_at,updated_at,started_at,finished_at,execution_id,outcome_unknown`
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
 	var status string
 	var cmd, result string
 	var created, updated, started, finished int64
-	err := row.Scan(&t.ID, &t.Title, &t.RepositoryPath, &t.ModelID, &t.Prompt, &status, &t.WorkspaceID, &t.WorkspacePath, &t.BranchName, &cmd, &t.MaxRepairAttempts, &t.RepairAttempts, &t.TimeoutSeconds, &result, &t.Error, &created, &updated, &started, &finished)
+	var unknown int
+	err := row.Scan(&t.ID, &t.Title, &t.RepositoryPath, &t.ModelID, &t.Prompt, &status, &t.WorkspaceID, &t.WorkspacePath, &t.BranchName, &cmd, &t.MaxRepairAttempts, &t.RepairAttempts, &t.TimeoutSeconds, &result, &t.Error, &created, &updated, &started, &finished, &t.ExecutionID, &unknown)
 	if err != nil {
 		return Task{}, err
 	}
 	t.Status = Status(status)
+	t.OutcomeUnknown = unknown != 0
+	if t.OutcomeUnknown { t.Status = StatusInterrupted }
 	_ = json.Unmarshal([]byte(cmd), &t.TestCommand)
 	if json.Unmarshal([]byte(result), &t.Result) != nil {
 		t.Result = result
@@ -101,9 +104,11 @@ func (r *Repository) List(ctx context.Context, limit int) ([]Task, error) {
 }
 func (r *Repository) Update(ctx context.Context, t Task) error {
 	resultJSON, _ := json.Marshal(t.Result)
-	_, e := r.db.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=? WHERE id=?`, t.Status, t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ID)
+	_, e := r.db.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=?,execution_id=?,outcome_unknown=? WHERE id=?`, persistedStatus(t), t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ExecutionID, boolInt(t.OutcomeUnknown), t.ID)
 	return e
 }
+func persistedStatus(t Task) Status { if t.OutcomeUnknown { return StatusFailed }; return t.Status }
+func boolInt(v bool) int { if v { return 1 }; return 0 }
 func unix(t time.Time) int64 {
 	if t.IsZero() {
 		return 0
@@ -247,15 +252,41 @@ func (r *Repository) Events(ctx context.Context, id string) ([]Event, error) {
 	return out, rows.Err()
 }
 
-// RecoverInterrupted marks in-flight tasks as failed after an unclean process stop.
-// Worktrees are intentionally retained for inspection and manual recovery.
+// RecoverInterrupted preserves uncertainty and appends a task event atomically.
+// The legacy CHECK constraint stores physical status as failed; outcome_unknown
+// exposes the logical interrupted state without rewriting the original schema.
 func (r *Repository) RecoverInterrupted(ctx context.Context) (int64, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil { return 0, err }
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM coding_tasks WHERE status IN ('running','testing','repairing') AND outcome_unknown=0`)
+	if err != nil { return 0, err }
+	ids := []string{}
+	for rows.Next() { var id string; if err = rows.Scan(&id); err != nil { rows.Close(); return 0, err }; ids = append(ids, id) }
+	if err = rows.Err(); err != nil { rows.Close(); return 0, err }
+	if err = rows.Close(); err != nil { return 0, err }
 	now := time.Now().UTC().Unix()
-	result, err := r.db.ExecContext(ctx, `UPDATE coding_tasks SET status='failed',error='interrupted by AgentMesh restart',updated_at=?,finished_at=? WHERE status IN ('running','testing','repairing')`, now, now)
-	if err != nil {
-		return 0, err
+	for _, id := range ids {
+		if _, err = tx.ExecContext(ctx, `UPDATE coding_tasks SET status='failed',outcome_unknown=1,error='interrupted by AgentMesh restart; inspect retained worktree before resolving',updated_at=?,finished_at=? WHERE id=?`, now, now, id); err != nil { return 0, err }
+		if err = insertEvent(ctx, tx, id, "task.interrupted", map[string]string{"reason":"process restarted before outcome was confirmed"}); err != nil { return 0, err }
 	}
-	return result.RowsAffected()
+	if err = tx.Commit(); err != nil { return 0, err }
+	return int64(len(ids)), nil
+}
+
+// BindExecution makes the Coding Task ↔ canonical Execution relation durable.
+func (r *Repository) BindExecution(ctx context.Context, taskID, executionID string) error {
+	if taskID == "" || executionID == "" { return ErrInvalidTask }
+	result, err := r.db.ExecContext(ctx, `UPDATE coding_tasks SET execution_id=?,updated_at=? WHERE id=? AND (execution_id='' OR execution_id=?)`, executionID, time.Now().UTC().Unix(), taskID, executionID)
+	if err != nil { return err }
+	n, err := result.RowsAffected()
+	if err != nil { return err }
+	if n == 1 { return nil }
+	var existing string
+	if err = r.db.QueryRowContext(ctx, `SELECT execution_id FROM coding_tasks WHERE id=?`, taskID).Scan(&existing); errors.Is(err, sql.ErrNoRows) { return ErrNotFound }
+	if err != nil { return err }
+	if existing != executionID { return ErrConflict }
+	return nil
 }
 
 func (r *Repository) Claim(ctx context.Context, id string) (bool, error) {
