@@ -35,6 +35,22 @@
   </div>
 </section>
 
+
+<section class="card">
+  <h2>Final Diff</h2>
+  {{if .CodingDiff}}<pre class="code-block">{{.CodingDiff}}</pre>{{else}}<p>No diff is currently available. Check the saved snapshots and event history before resolving the task.</p>{{end}}
+  {{range .CodingSnapshots}}<p>Snapshot: <code>{{.CommitHash}}</code> · {{.CreatedAt}}</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>Steps · Tests · Review</h2>
+  {{if .CodingSteps}}
+  <table><thead><tr><th>Sequence</th><th>Step</th><th>Status</th><th>Exit</th><th>Duration</th><th>Output / Error</th></tr></thead><tbody>
+  {{range .CodingSteps}}<tr><td>{{.Sequence}}</td><td>{{.Kind}}</td><td>{{.Status}}</td><td>{{.ExitCode}}</td><td>{{.DurationMillis}} ms</td><td><pre>{{if .Error}}{{.Error}}{{else}}{{.Output}}{{end}}</pre></td></tr>{{end}}
+  </tbody></table>
+  {{else}}<p>No steps recorded yet.</p>{{end}}
+</section>
+
 {{if .CodingTask.OutcomeUnknown}}
 <section class="card">
   <h2>Resolve interrupted outcome</h2>
@@ -52,22 +68,6 @@
   </form>
 </section>
 {{end}}
-
-<section class="card">
-  <h2>Final Diff</h2>
-  {{if .CodingDiff}}<pre class="code-block">{{.CodingDiff}}</pre>{{else}}<p>No inspectable diff is available yet. An interrupted task intentionally remains unavailable for mutation until its outcome is resolved.</p>{{end}}
-  {{range .CodingSnapshots}}<p>Snapshot: <code>{{.CommitHash}}</code> · {{.CreatedAt}}</p>{{end}}
-</section>
-
-<section class="card">
-  <h2>Steps · Tests · Review</h2>
-  {{if .CodingSteps}}
-  <table><thead><tr><th>Sequence</th><th>Step</th><th>Status</th><th>Exit</th><th>Duration</th><th>Output / Error</th></tr></thead><tbody>
-  {{range .CodingSteps}}<tr><td>{{.Sequence}}</td><td>{{.Kind}}</td><td>{{.Status}}</td><td>{{.ExitCode}}</td><td>{{.DurationMillis}} ms</td><td><pre>{{if .Error}}{{.Error}}{{else}}{{.Output}}{{end}}</pre></td></tr>{{end}}
-  </tbody></table>
-  {{else}}<p>No steps recorded yet.</p>{{end}}
-</section>
-
 <section class="card">
   <h2>Event History</h2>
   {{range .CodingEvents}}<p><code>{{.CreatedAt}}</code> · <strong>{{.Type}}</strong> <pre>{{.Payload}}</pre></p>{{else}}<p>No events recorded.</p>{{end}}
