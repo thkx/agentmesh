@@ -11,22 +11,28 @@ import (
 	execmanager "github.com/thkx/agentmesh/internal/execution/manager"
 )
 
-type workflowCodingRunner struct { manager *execmanager.Manager }
+type workflowCodingRunner struct{ manager *execmanager.Manager }
 
 func newWorkflowCodingRunner(manager *execmanager.Manager) (*workflowCodingRunner, error) {
-	if manager == nil { return nil, errors.New("workflow coding execution manager is nil") }
+	if manager == nil {
+		return nil, errors.New("workflow coding execution manager is nil")
+	}
 	return &workflowCodingRunner{manager: manager}, nil
 }
 
 // RunCoding submits a durable Coding Execution and observes its terminal state.
 // The stable task ID prevents duplicate Coding Tasks when a workflow delivery repeats.
 func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, input json.RawMessage) (json.RawMessage, error) {
-	if taskID == "" || len(input) == 0 || !json.Valid(input) { return nil, errors.New("invalid workflow coding activity") }
+	if taskID == "" || len(input) == 0 || !json.Valid(input) {
+		return nil, errors.New("invalid workflow coding activity")
+	}
 	entity, err := r.manager.Submit(ctx, execmanager.SubmitRequest{
 		Kind: execdom.KindCoding, Runtime: execdom.RuntimeCoding, TaskID: taskID,
 		Input: input, IdempotencyKey: "workflow-coding:" + taskID,
 	})
-	if err != nil { return nil, fmt.Errorf("submit workflow coding activity: %w", err) }
+	if err != nil {
+		return nil, fmt.Errorf("submit workflow coding activity: %w", err)
+	}
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -35,7 +41,9 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 			return nil, ctx.Err()
 		}
 		entity, err = r.manager.Get(ctx, entity.ID)
-		if err != nil { return nil, fmt.Errorf("observe workflow coding execution: %w", err) }
+		if err != nil {
+			return nil, fmt.Errorf("observe workflow coding execution: %w", err)
+		}
 		switch entity.Status {
 		case execdom.LifecycleSucceeded:
 			out, marshalErr := json.Marshal(map[string]any{"execution_id": entity.ID, "task_id": taskID, "coding_result": json.RawMessage(entity.Result)})
