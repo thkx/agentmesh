@@ -62,8 +62,11 @@
     <label>Test command program (optional if project manifest is detected)<input name="test_program" placeholder="go, npm, pytest, cargo"></label>
     <label>Test command arguments (space-separated, no shell syntax)<input name="test_args" placeholder="test ./..."></label>
     <label>Task description<textarea name="prompt" rows="6" required placeholder="Describe the required change and acceptance criteria"></textarea></label>
-    <label>Explicit test command (optional JSON)<textarea name="test_command" rows="2" placeholder='{"program":"go","args":["test","./..."]}'></textarea></label>
-    <p class="muted">Leave empty to detect Go, Node.js, Python or Rust tests from the repository manifest. Reviewed Coding success requires test evidence.</p>
+    <div class="form-row">
+      <label>Test program (optional)<input name="test_program" placeholder="go"></label>
+      <label>Test arguments (optional)<input name="test_args" placeholder="test ./..."></label>
+    </div>
+    <p class="muted">Leave both empty to detect Go, Node.js, Python or Rust tests from the repository manifest. Reviewed Coding success requires test evidence.</p>
     <div class="form-row">
       <label>Maximum repair attempts<input type="number" name="max_repair_attempts" min="0" max="5" value="2"></label>
       <label>Timeout seconds<input type="number" name="timeout_seconds" min="60" max="7200" value="1800"></label>
