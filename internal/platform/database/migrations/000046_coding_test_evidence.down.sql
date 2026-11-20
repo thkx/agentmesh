@@ -1,2 +1,2 @@
--- SQLite does not support DROP COLUMN on every version supported by AgentMesh.
--- These additive evidence columns are retained during downgrade to avoid table rebuild data loss.
+ALTER TABLE coding_task_steps DROP COLUMN duration_ms;
+ALTER TABLE coding_task_steps DROP COLUMN exit_code;
