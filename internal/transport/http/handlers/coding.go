@@ -117,8 +117,13 @@ func (h *CodingHandler) run(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"code": "coding_task_not_managed"})
 		return
 	}
-	if _, err = h.manager.Get(c.Request.Context(), task.ExecutionID); err != nil {
+	entity, err := h.manager.Get(c.Request.Context(), task.ExecutionID)
+	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"code": "coding_task_start_failed", "message": err.Error()})
+		return
+	}
+	if entity.Status != execdom.LifecycleQueued && entity.Status != execdom.LifecycleRunning {
+		c.JSON(http.StatusConflict, gin.H{"code": "coding_task_not_runnable", "execution_status": entity.Status})
 		return
 	}
 	task, err = h.service.Get(c.Request.Context(), task.ID)
