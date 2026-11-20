@@ -138,6 +138,9 @@ func (s *Service) normalizeRepositoryPath(ctx context.Context, in CreateRequest)
 	if err != nil {
 		return "", fmt.Errorf("resolve git repository root: %w", err)
 	}
+	if _, err = git(ctx, top, "rev-parse", "--verify", "HEAD"); err != nil {
+		return "", fmt.Errorf("%w: repository must contain at least one commit", ErrInvalidTask)
+	}
 	s.mu.Lock()
 	restricted := s.restrictRepositoryAccess
 	roots := append([]string(nil), s.allowedRepositoryRoots...)
