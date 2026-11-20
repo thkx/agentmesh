@@ -35,6 +35,24 @@
   </div>
 </section>
 
+{{if .CodingTask.OutcomeUnknown}}
+<section class="card">
+  <h2>Resolve interrupted outcome</h2>
+  <p>Inspect the retained Worktree diff and test history above before choosing. This records a human decision; it never marks the Coding Task successful.</p>
+  <form method="post" action="/dashboard/coding/{{.CodingTask.ID}}/resolve" class="stack" onsubmit="return confirm('Record this manual resolution? Discard will reset the Worktree to its base commit.')">
+    <label>Decision
+      <select name="decision" required>
+        <option value="keep">Keep the current Worktree changes and mark the task failed</option>
+        <option value="discard">Discard changes by resetting the Worktree and mark the task canceled</option>
+      </select>
+    </label>
+    <label>Reason<textarea name="reason" rows="3" required maxlength="1000" placeholder="I inspected the diff and test history; explain why this is safe."></textarea></label>
+    <input type="hidden" name="confirm" value="yes">
+    <button type="submit">Record manual resolution</button>
+  </form>
+</section>
+{{end}}
+
 <section class="card">
   <h2>Final Diff</h2>
   {{if .CodingDiff}}<pre class="code-block">{{.CodingDiff}}</pre>{{else}}<p>No inspectable diff is available yet. An interrupted task intentionally remains unavailable for mutation until its outcome is resolved.</p>{{end}}
@@ -64,10 +82,6 @@
     <label>Test command program (optional if project manifest is detected)<input name="test_program" placeholder="go, npm, pytest, cargo"></label>
     <label>Test command arguments (space-separated, no shell syntax)<input name="test_args" placeholder="test ./..."></label>
     <label>Task description<textarea name="prompt" rows="6" required placeholder="Describe the required change and acceptance criteria"></textarea></label>
-    <div class="form-row">
-      <label>Test program (optional)<input name="test_program" placeholder="go"></label>
-      <label>Test arguments (optional)<input name="test_args" placeholder="test ./..."></label>
-    </div>
     <p class="muted">Leave both empty to detect Go, Node.js, Python or Rust tests from the repository manifest. Reviewed Coding success requires test evidence.</p>
     <div class="form-row">
       <label>Maximum repair attempts<input type="number" name="max_repair_attempts" min="0" max="5" value="2"></label>
