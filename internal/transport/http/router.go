@@ -234,7 +234,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		handlers.NewUsageHandler(deps.DB).RegisterRoutes(api)
 	}
 	if deps.CodingService != nil {
-		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
+		handlers.NewCodingHandler(deps.CodingService, deps.ExecutionManager).RegisterRoutes(api)
 	}
 	h := handlers.NewCatalogHandler(deps.Providers, deps.Models, deps.Adapters, deps.ProviderRuntime, deps.Repository, deps.Gateway)
 	if deps.AIResources != nil {
