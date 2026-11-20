@@ -57,6 +57,10 @@ type Store interface {
 }
 type subworkflowDepthKey struct{}
 
+// ErrCodingOutcomeIndeterminate signals that a durable Coding Execution
+// cannot be safely resumed or replayed after its outcome became uncertain.
+var ErrCodingOutcomeIndeterminate = errors.New("coding execution outcome is indeterminate")
+
 type cancellationRequestContextKey struct{}
 
 // IsCancellationRequested distinguishes an explicit user cancellation from a
@@ -344,6 +348,40 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 			r.FinishedAt = time.Now().UTC()
 			_ = e.persistRun(context.WithoutCancel(ctx), *r, owner, fenceToken)
 			return errors.New(state.Error)
+		}
+		if node.Type == wf.NodeCoding {
+			output, contextValue, _, codingErr := e.executeNode(ctx, node, r.Context, stableTaskID(r.ID, nodeID))
+			if codingErr != nil {
+				state.Status = wf.NodeFailed
+				if errors.Is(codingErr, ErrCodingOutcomeIndeterminate) {
+					state.Status = wf.NodeInterrupted
+				}
+				state.Error = codingErr.Error()
+				state.FinishedAt = time.Now().UTC()
+				r.Nodes[nodeID] = state
+				r.Status = wf.RunFailed
+				r.Error = state.Error
+				r.FinishedAt = state.FinishedAt
+				_ = e.persistRun(context.WithoutCancel(ctx), *r, owner, fenceToken)
+				return codingErr
+			}
+			if ledgerStatus == "running" || ledgerStatus == "failed" {
+				if err = ledger.RecoverNode(ctx, r.ID, nodeID, output); err != nil {
+					return err
+				}
+			}
+			state.Status = wf.NodeSucceeded
+			state.Output = output
+			state.Error = ""
+			state.FinishedAt = time.Now().UTC()
+			r.Nodes[nodeID] = state
+			if contextValue != nil {
+				r.Context[nodeID] = contextValue
+			}
+			for _, edge := range c.Outgoing[nodeID] {
+				r.PendingNodes = append(r.PendingNodes, edge.To)
+			}
+			continue
 		}
 		if node.Type != wf.NodeAgent || !canRead {
 			state.Status = wf.NodeInterrupted
@@ -805,6 +843,9 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 			}
 			if res.err != nil {
 				state.Status = wf.NodeFailed
+				if errors.Is(res.err, ErrCodingOutcomeIndeterminate) {
+					state.Status = wf.NodeInterrupted
+				}
 				state.Error = res.err.Error()
 				state.FinishedAt = time.Now().UTC()
 				if !state.StartedAt.IsZero() {
