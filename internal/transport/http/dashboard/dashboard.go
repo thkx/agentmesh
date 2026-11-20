@@ -1537,6 +1537,7 @@ func (h *Handler) createCodingTask(c *gin.Context) {
 		RepositoryPath:    strings.TrimSpace(c.PostForm("repository_path")),
 		ModelID:           strings.TrimSpace(c.PostForm("model_id")),
 		Prompt:            strings.TrimSpace(c.PostForm("prompt")),
+		TestCommand:       coding.Command{Program: strings.TrimSpace(c.PostForm("test_program")), Args: strings.Fields(c.PostForm("test_args"))},
 		MaxRepairAttempts: maxRepair, TimeoutSeconds: timeout,
 	}
 	if err := request.Validate(); err != nil {
