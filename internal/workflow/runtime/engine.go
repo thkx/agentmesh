@@ -318,6 +318,8 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 					return err
 				}
 				r.Context[nodeID] = map[string]any{"content": result.Content, "status": result.Status, "task_id": result.TaskID}
+			} else if node.Type == wf.NodeCoding {
+				r.Context[nodeID] = map[string]any{"coding": json.RawMessage(ledgerOutput)}
 			}
 			for _, edge := range c.Outgoing[nodeID] {
 				if node.Type != wf.NodeCondition || edgeIsActive(node, state, edge) {
@@ -358,6 +360,9 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 				}
 				state.Error = codingErr.Error()
 				state.FinishedAt = time.Now().UTC()
+				if ledgerStatus == "running" {
+					_ = ledger.CompleteNode(ctx, r.ID, nodeID, owner, fenceToken, nil, codingErr)
+				}
 				r.Nodes[nodeID] = state
 				r.Status = wf.RunFailed
 				r.Error = state.Error
