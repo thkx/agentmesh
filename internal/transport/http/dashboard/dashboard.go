@@ -29,10 +29,10 @@ import (
 	"github.com/thkx/agentmesh/internal/agentcatalog"
 	"github.com/thkx/agentmesh/internal/coding"
 	"github.com/thkx/agentmesh/internal/collaboration"
-	execdom "github.com/thkx/agentmesh/internal/domain/execution"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
+	execdom "github.com/thkx/agentmesh/internal/domain/execution"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
 	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/execution/manager"
@@ -46,108 +46,108 @@ import (
 const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
-	Metrics             *observability.Metrics
-	Alerts              *observability.AlertEvaluator
-	DB                  *sql.DB
-	APIToken            string
-	RequestShutdown     chan<- struct{}
-	ExecutionManager    *manager.Manager
-	CodingService       *coding.Service
-	SandboxImage        string
+	Metrics               *observability.Metrics
+	Alerts                *observability.AlertEvaluator
+	DB                    *sql.DB
+	APIToken              string
+	RequestShutdown       chan<- struct{}
+	ExecutionManager      *manager.Manager
+	CodingService         *coding.Service
+	SandboxImage          string
 	SandboxNetworkEnabled bool
-	Providers           *domainprovider.ProviderRegistry
-	Models              *domainprovider.ModelRegistry
-	Credentials         appcredential.Manager
-	AgentDefinitions    *agentcatalog.Service
-	Collaboration       *collaboration.Service
-	WorkflowEngine      *workflowruntime.Engine
-	WorkflowMaxAttempts int
-	Catalog             *handlers.CatalogHandler
+	Providers             *domainprovider.ProviderRegistry
+	Models                *domainprovider.ModelRegistry
+	Credentials           appcredential.Manager
+	AgentDefinitions      *agentcatalog.Service
+	Collaboration         *collaboration.Service
+	WorkflowEngine        *workflowruntime.Engine
+	WorkflowMaxAttempts   int
+	Catalog               *handlers.CatalogHandler
 }
 
 type Handler struct {
-	metrics             *observability.Metrics
-	alerts              *observability.AlertEvaluator
-	db                  *sql.DB
-	token               string
-	requestShutdown     chan<- struct{}
-	manager             *manager.Manager
-	codingService       *coding.Service
-	sandboxImage        string
+	metrics               *observability.Metrics
+	alerts                *observability.AlertEvaluator
+	db                    *sql.DB
+	token                 string
+	requestShutdown       chan<- struct{}
+	manager               *manager.Manager
+	codingService         *coding.Service
+	sandboxImage          string
 	sandboxNetworkEnabled bool
-	providerRegistry    *domainprovider.ProviderRegistry
-	modelRegistry       *domainprovider.ModelRegistry
-	credentials         appcredential.Manager
-	agentCatalog        *agentcatalog.Service
-	collaboration       *collaboration.Service
-	workflowEngine      *workflowruntime.Engine
-	workflowMaxAttempts int
-	workflowRepo        *authoring.Repository
-	catalogAPI          http.Handler
-	executionAPI        http.Handler
-	tmpl                *template.Template
-	loginMu             sync.Mutex
-	loginAttempts       map[string][]time.Time
+	providerRegistry      *domainprovider.ProviderRegistry
+	modelRegistry         *domainprovider.ModelRegistry
+	credentials           appcredential.Manager
+	agentCatalog          *agentcatalog.Service
+	collaboration         *collaboration.Service
+	workflowEngine        *workflowruntime.Engine
+	workflowMaxAttempts   int
+	workflowRepo          *authoring.Repository
+	catalogAPI            http.Handler
+	executionAPI          http.Handler
+	tmpl                  *template.Template
+	loginMu               sync.Mutex
+	loginAttempts         map[string][]time.Time
 }
 
 type workspaceOption struct{ ID, Name string }
 
 type pageData struct {
-	Title            string
-	Active           string
-	Error            string
-	Message          string
-	Readiness        string
-	Counts           map[string]int64
-	Executions       []executionRow
-	CodingRows       []coding.Task
-	CodingTask       *coding.Task
-	CodingSteps      []coding.Step
-	CodingEvents     []coding.Event
-	CodingSnapshots  []coding.Snapshot
-	CodingDiff       string
-	CodingSandboxImage string
+	Title                       string
+	Active                      string
+	Error                       string
+	Message                     string
+	Readiness                   string
+	Counts                      map[string]int64
+	Executions                  []executionRow
+	CodingRows                  []coding.Task
+	CodingTask                  *coding.Task
+	CodingSteps                 []coding.Step
+	CodingEvents                []coding.Event
+	CodingSnapshots             []coding.Snapshot
+	CodingDiff                  string
+	CodingSandboxImage          string
 	CodingSandboxNetworkEnabled bool
-	Execution        *executionDetail
-	ProviderRows     []providerView
-	ModelRows        []modelView
-	AgentRows        []agentView
-	IdentityRows     []identityView
-	TaskRows         []taskView
-	WorkspaceOptions []workspaceOption
-	WorkflowRows     []workflowView
-	WorkflowRuns     []workflowRunListView
-	WorkflowRun      *workflowRunDetailView
-	Credential       *credentialView
-	FilterStatus     string
-	FilterKind       string
-	FilterRuntime    string
-	FilterTask       string
-	Offset           int
-	Limit            int
-	PrevOffset       int
-	NextOffset       int
-	HasPrevious      bool
-	HasNext          bool
-	Attempts         []attemptView
-	Artifacts        []artifactView
-	Evidence         []evidenceView
-	Events           []eventView
-	UsageRows        []usageView
-	UsageEvents      []usageEventView
-	UsageSince       string
-	UsageUntil       string
-	UsageLimit       int
-	UsageOffset      int
-	UsageNextOffset  int
-	UsagePrevOffset  int
-	UsageHasMore     bool
-	TimelineHasMore  bool
-	TimelineNextURL  string
-	RunResult        string
-	ActiveAlerts     []observability.Alert
-	AlertHistory     []observability.Alert
-	OpsHealth        operationsHealthView
+	Execution                   *executionDetail
+	ProviderRows                []providerView
+	ModelRows                   []modelView
+	AgentRows                   []agentView
+	IdentityRows                []identityView
+	TaskRows                    []taskView
+	WorkspaceOptions            []workspaceOption
+	WorkflowRows                []workflowView
+	WorkflowRuns                []workflowRunListView
+	WorkflowRun                 *workflowRunDetailView
+	Credential                  *credentialView
+	FilterStatus                string
+	FilterKind                  string
+	FilterRuntime               string
+	FilterTask                  string
+	Offset                      int
+	Limit                       int
+	PrevOffset                  int
+	NextOffset                  int
+	HasPrevious                 bool
+	HasNext                     bool
+	Attempts                    []attemptView
+	Artifacts                   []artifactView
+	Evidence                    []evidenceView
+	Events                      []eventView
+	UsageRows                   []usageView
+	UsageEvents                 []usageEventView
+	UsageSince                  string
+	UsageUntil                  string
+	UsageLimit                  int
+	UsageOffset                 int
+	UsageNextOffset             int
+	UsagePrevOffset             int
+	UsageHasMore                bool
+	TimelineHasMore             bool
+	TimelineNextURL             string
+	RunResult                   string
+	ActiveAlerts                []observability.Alert
+	AlertHistory                []observability.Alert
+	OpsHealth                   operationsHealthView
 }
 
 type operationsHealthView struct {
@@ -265,24 +265,24 @@ func New(d Dependencies) *Handler {
 	}
 	t := template.Must(template.ParseFS(webassets.Assets, "dashboard/templates/*.html"))
 	h := &Handler{
-		db:                  d.DB,
-		metrics:             metrics,
-		alerts:              d.Alerts,
-		token:               d.APIToken,
-		requestShutdown:     d.RequestShutdown,
-		manager:             d.ExecutionManager,
-		codingService:       d.CodingService,
-		sandboxImage:        d.SandboxImage,
+		db:                    d.DB,
+		metrics:               metrics,
+		alerts:                d.Alerts,
+		token:                 d.APIToken,
+		requestShutdown:       d.RequestShutdown,
+		manager:               d.ExecutionManager,
+		codingService:         d.CodingService,
+		sandboxImage:          d.SandboxImage,
 		sandboxNetworkEnabled: d.SandboxNetworkEnabled,
-		providerRegistry:    d.Providers,
-		modelRegistry:       d.Models,
-		credentials:         d.Credentials,
-		agentCatalog:        d.AgentDefinitions,
-		collaboration:       d.Collaboration,
-		workflowEngine:      d.WorkflowEngine,
-		workflowMaxAttempts: d.WorkflowMaxAttempts,
-		tmpl:                t,
-		loginAttempts:       make(map[string][]time.Time),
+		providerRegistry:      d.Providers,
+		modelRegistry:         d.Models,
+		credentials:           d.Credentials,
+		agentCatalog:          d.AgentDefinitions,
+		collaboration:         d.Collaboration,
+		workflowEngine:        d.WorkflowEngine,
+		workflowMaxAttempts:   d.WorkflowMaxAttempts,
+		tmpl:                  t,
+		loginAttempts:         make(map[string][]time.Time),
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -1511,22 +1511,32 @@ func (h *Handler) codingTasks(c *gin.Context) {
 	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
 	if h.codingService != nil {
 		items, err := h.codingService.List(c.Request.Context(), 100)
-		if err != nil { data.Error = "Could not load coding tasks" } else { data.CodingRows = items }
+		if err != nil {
+			data.Error = "Could not load coding tasks"
+		} else {
+			data.CodingRows = items
+		}
 	}
 	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) createCodingTask(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.manager == nil || h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.manager == nil || h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	maxRepair, _ := strconv.Atoi(c.DefaultPostForm("max_repair_attempts", "2"))
 	timeout, _ := strconv.Atoi(c.DefaultPostForm("timeout_seconds", "1800"))
 	request := coding.CreateRequest{
-		ID: fmt.Sprintf("dashboard-%d", time.Now().UTC().UnixNano()),
-		Title: strings.TrimSpace(c.PostForm("title")),
-		RepositoryPath: strings.TrimSpace(c.PostForm("repository_path")),
-		ModelID: strings.TrimSpace(c.PostForm("model_id")),
-		Prompt: strings.TrimSpace(c.PostForm("prompt")),
+		ID:                fmt.Sprintf("dashboard-%d", time.Now().UTC().UnixNano()),
+		Title:             strings.TrimSpace(c.PostForm("title")),
+		RepositoryPath:    strings.TrimSpace(c.PostForm("repository_path")),
+		ModelID:           strings.TrimSpace(c.PostForm("model_id")),
+		Prompt:            strings.TrimSpace(c.PostForm("prompt")),
 		MaxRepairAttempts: maxRepair, TimeoutSeconds: timeout,
 	}
 	if err := request.Validate(); err != nil {
@@ -1534,26 +1544,47 @@ func (h *Handler) createCodingTask(c *gin.Context) {
 		return
 	}
 	input, err := json.Marshal(request)
-	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create"); return }
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
 	_, err = h.manager.Submit(c.Request.Context(), manager.SubmitRequest{
 		Kind: execdom.KindCoding, Runtime: execdom.RuntimeCoding, TaskID: request.ID,
 		Input: input, IdempotencyKey: "dashboard-coding:" + request.ID,
 	})
-	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create"); return }
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(request.ID)+"?message=coding-queued")
 }
 
 func (h *Handler) codingTask(c *gin.Context) {
-	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	task, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
-	if err != nil { c.AbortWithStatus(http.StatusNotFound); return }
+	if err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
 	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
 	data.CodingSteps, err = h.codingService.Steps(c.Request.Context(), task.ID)
-	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 	data.CodingEvents, err = h.codingService.Events(c.Request.Context(), task.ID)
-	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 	data.CodingSnapshots, err = h.codingService.Snapshots(c.Request.Context(), task.ID)
-	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 	if task.WorkspacePath != "" && task.Status != coding.StatusRunning && task.Status != coding.StatusTesting && task.Status != coding.StatusRepairing {
 		data.CodingDiff, _ = h.codingService.Diff(c.Request.Context(), task.ID)
 	}
@@ -1562,8 +1593,14 @@ func (h *Handler) codingTask(c *gin.Context) {
 }
 
 func (h *Handler) cancelCodingTask(c *gin.Context) {
-	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.codingService.CancelContext(c.Request.Context(), c.Param("id")); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cancel")
 		return
@@ -1572,8 +1609,14 @@ func (h *Handler) cancelCodingTask(c *gin.Context) {
 }
 
 func (h *Handler) revertCodingTask(c *gin.Context) {
-	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.codingService.Revert(c.Request.Context(), c.Param("id")); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=revert")
 		return
@@ -1582,8 +1625,14 @@ func (h *Handler) revertCodingTask(c *gin.Context) {
 }
 
 func (h *Handler) cleanupCodingTask(c *gin.Context) {
-	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" { c.AbortWithStatus(http.StatusForbidden); return }
-	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.codingService.Cleanup(c.Request.Context(), c.Param("id")); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cleanup")
 		return
