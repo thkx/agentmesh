@@ -2,6 +2,8 @@ package coding
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -25,6 +27,7 @@ type Service struct {
 	repo          *Repository
 	agent         Agent
 	reviewer      Agent
+	artifactPublisher ArtifactPublisher
 	workspaceRoot string
 	sandbox       docker.Runner
 	worktrees     *worktree.Manager
@@ -63,6 +66,7 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
 func (s *Service) SetReviewer(reviewer Agent) { s.mu.Lock(); s.reviewer = reviewer; s.mu.Unlock() }
+func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) { s.mu.Lock(); s.artifactPublisher = publisher; s.mu.Unlock() }
 
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
@@ -272,7 +276,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	if e != nil {
 		return fail(e)
 	}
-	if e = s.repo.SaveSnapshot(runCtx, Snapshot{TaskID: id, Label: "final", CommitHash: hash, Diff: diff}); e != nil {
+	sum := sha256.Sum256([]byte(diff))
+	snapshot := Snapshot{TaskID: id, Label: "final", CommitHash: hash, Diff: diff, ExecutionID: t.ExecutionID, AttemptID: t.AttemptID, ContentSHA256: hex.EncodeToString(sum[:])}
+	if e = s.repo.SaveSnapshot(runCtx, snapshot); e != nil {
 		return fail(e)
 	}
 	t.Status = StatusSucceeded
@@ -280,6 +286,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	t.FinishedAt = time.Now().UTC()
 	if e = s.repo.UpdateWithEvent(runCtx, t, "task.succeeded", map[string]any{"repair_attempts": t.RepairAttempts, "diff_bytes": len(diff)}); e != nil {
 		return fail(fmt.Errorf("persist succeeded task state/event: %w", e))
+	}
+	if t.ExecutionID == "" {
+		if e = s.PublishArtifacts(runCtx, id); e != nil { return fail(fmt.Errorf("publish coding artifact evidence: %w", e)) }
 	}
 	return t, nil
 }
@@ -523,4 +532,26 @@ func (s *Service) Snapshots(ctx context.Context, id string) ([]Snapshot, error) 
 		return nil, err
 	}
 	return s.repo.Snapshots(ctx, id)
+}
+
+func (s *Service) PublishArtifacts(ctx context.Context, taskID string) error {
+	task, err := s.repo.Get(ctx, taskID)
+	if err != nil { return err }
+	if task.Status != StatusSucceeded { return ErrConflict }
+	s.mu.Lock()
+	publisher := s.artifactPublisher
+	s.mu.Unlock()
+	if publisher == nil { return nil }
+	events, err := s.repo.Events(ctx, taskID)
+	if err != nil { return err }
+	for _, event := range events { if event.Type == "artifact.published" { return nil } }
+	snapshots, err := s.repo.Snapshots(ctx, taskID)
+	if err != nil { return err }
+	if len(snapshots) == 0 { return errors.New("coding task has no final snapshot") }
+	snapshot := snapshots[len(snapshots)-1]
+	steps, err := s.repo.Steps(ctx, taskID)
+	if err != nil { return err }
+	publication, err := publisher.PublishCodingArtifact(ctx, task, snapshot, steps)
+	if err != nil { return err }
+	return s.repo.Event(ctx, taskID, "artifact.published", publication)
 }
