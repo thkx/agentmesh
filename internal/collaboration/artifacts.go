@@ -162,9 +162,9 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 		if !errors.Is(lookupErr, ErrNotFound) { return Artifact{}, ArtifactVersion{}, lookupErr }
 	}
 	artifactID := strings.TrimSpace(in.ID)
-	if artifactID == "" { artifactID, err = newID(); if err != nil { return Artifact{}, ArtifactVersion{}, err } }
+	if artifactID == "" { var idErr error; artifactID, idErr = newID(); if idErr != nil { return Artifact{}, ArtifactVersion{}, idErr } }
 	versionID := strings.TrimSpace(in.VersionID)
-	if versionID == "" { versionID, err = newID(); if err != nil { return Artifact{}, ArtifactVersion{}, err } }
+	if versionID == "" { var idErr error; versionID, idErr = newID(); if idErr != nil { return Artifact{}, ArtifactVersion{}, idErr } }
 	if len(artifactID) > 128 || len(versionID) > 128 { return Artifact{}, ArtifactVersion{}, ErrInvalid }
 	now := s.clock().UTC()
 	artifact := Artifact{
