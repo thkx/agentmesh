@@ -1,104 +1,161 @@
-# P6 — Coding Runtime Source Audit
+# P6 — Coding Runtime Source Audit and Implementation Record
 
-**Audit baseline:** `p5/control-plane`  
-**Audit scope:** M35–M41 Coding Runtime, P2 Coding Adapter, P4 Execution/Attempt and provenance, Workflow Runtime, Dashboard, Worktree, Docker Runner, bootstrap and shutdown wiring.  
-**Status:** Source inspection completed. This document is an audit record, not a claim that a new implementation or live Coding acceptance has passed.
+**Baseline:** `p5/control-plane`  
+**Implementation branch:** `p6/coding-runtime`  
+**Scope:** Coding Task lifecycle, Unified Execution adapter, Workflow Coding node, Worktree, Docker Sandbox, Artifact/Evidence provenance, Dashboard, migrations and acceptance gates.
 
 ## 1. Executive conclusion
 
-Coding Runtime is a real, implemented subsystem, not a placeholder. It already creates isolated Git Worktrees, invokes the Agent Runtime, runs tests in Docker, performs bounded test-failure repair, stores task steps/events/snapshots, and exposes HTTP/CLI operations.
+P6 extends the existing Coding Runtime. It does not add another execution manager, queue, event ledger, workflow engine or artifact store.
 
-It is also registered with the P2/P4 Unified Execution Manager through `internal/execution/manager.CodingAdapter`. P6 must therefore close semantic and product gaps around this integration rather than introduce another Execution Manager, queue, lifecycle, or event ledger.
+The implementation now connects the existing components into one path:
 
-The most important correctness gap is restart semantics: interrupted Coding Tasks are currently rewritten to `failed`, then observed by the Coding Adapter as an ordinary failed outcome. This loses P4's distinction between a confirmed failure and an unknown/interrupted result. The second major gap is provenance: the final diff is stored in the Coding-specific snapshot table but is not automatically published as a P4 Artifact Version/Evidence record tied to the canonical Execution and Attempt.
+```text
+Dashboard / Workflow
+        |
+        v
+Unified Execution Manager (Execution + Attempt)
+        |
+        v
+CodingAdapter
+        |
+        v
+Coding Service
+  |       |         |
+  |       |         +--> Docker Sandbox tests
+  |       +------------> Agent Runtime / Model Gateway
+  +--------------------> Git Worktree + durable Steps/Events/Snapshots
+        |
+        v
+Collaboration Artifact Version + Evidence
+        |
+        v
+Unified Execution Detail / Timeline
+```
 
-## 2. What exists in the current source
+The P6 code is present on this branch. A green GitHub Actions run and the user's live Docker/model acceptance are still required before P6 can be called accepted.
 
-| Area | Current implementation | Audit result |
-|---|---|---|
-| Coding Task persistence | `internal/coding/repository.go`, migration `000021_coding_tasks` | Real SQLite task, step, event and snapshot persistence |
-| Task lifecycle | `internal/coding/service.go` | Pending/running/testing/repairing/succeeded/failed/canceled; bounded concurrency of two |
-| Worktree | `internal/workspace/worktree/worktree.go` | Real `git worktree add -b`, diff, patch check/apply, reset and removal |
-| Coding Agent | `internal/coding/service.go` | Calls the existing `Agent.Run` interface backed by Agent Runtime / Model Gateway; scopes its Agent task to the Coding Worktree |
-| Docker tests | `internal/workspace/sandbox/docker/docker.go` | Real Docker CLI invocation; no host-shell interpolation; argv execution |
-| Repair | `internal/coding/service.go` | Repeats test → Agent repair → test, bounded by `max_repair_attempts` (0–5) |
-| Unified Execution | `internal/execution/manager/coding.go` | Real `CodingAdapter`; registered as `RuntimeCoding` during bootstrap |
-| Shutdown | `internal/app/container.go` | Calls `CodingService.CloseContext` before database close |
-| HTTP API | `internal/transport/http/handlers/coding.go` | Create/list/get/start/cancel/steps/events/snapshots/diff/patch/revert/cleanup |
-| Dashboard | `internal/transport/http/dashboard/dashboard.go` | Unified Execution views exist, but no Coding Task management or Coding-specific detail view |
-| Workflow | `internal/workflow/runtime/engine.go` | Durable workflow worker and node ledger exist; current engine executes Agent, Condition, Approval, Subworkflow and structural nodes, but has no Coding node |
+## 2. M57 — Durable Coding Execution
 
-## 3. Unified Execution integration: present, with gaps
+### Implemented
 
-The Coding Adapter is not merely a declared interface:
+- Coding Tasks persist their canonical `execution_id` and `attempt_id`; the adapter binds those values after the Execution Manager accepts the request.
+- Adapter preflight validates the request and canonical repository path before creating the canonical Execution, avoiding orphan Executions for invalid repository paths.
+- `CodingAdapter.Observe` creates the canonical Attempt before publishing P4 Artifact/Evidence provenance when a task completed before its first observation.
+- Repeated Submit is idempotent. A previously bound pending task is re-scheduled by Observe after process restart.
+- A task canceled before it starts is reported as `AttemptNotStarted`; it does not receive a fictitious Attempt.
+- Explicit user cancellation remains `canceled`. Service shutdown records `interrupted` with `outcome_unknown=1`; it is not misreported as a user cancellation.
+- Interrupted tasks retain their Worktree and are not automatically replayed.
+- Coding Task events and snapshots are append-only/immutable at the SQLite layer.
+- Coding model calls carry Execution/Attempt provenance into the Usage Ledger.
+- Test and reviewer output are bounded before persistence; patch size is capped before artifact publication.
 
-- `Bootstrap` constructs `CodingService`, creates `NewCodingAdapter(codingService)`, and registers it with `ExecutionManager.Register(RuntimeCoding, ...)`.
-- `Submit` decodes the accepted Execution input, idempotently finds or creates the Coding Task, starts a pending task, and returns the Coding Task ID as the runtime reference.
-- `Observe` maps Coding Task states to canonical Execution states and reports Attempt number 1.
-- `Cancel` delegates to the Coding Service.
+### Migrations
 
-The current fixed Attempt number of 1 is consistent with the present Coding Service model: its repair loops are internal steps of one Coding Task execution, not separate P4 Attempts. P6 should preserve this distinction. A new P4 Attempt should only be created when a new runtime execution attempt is genuinely started, not for every internal test/repair iteration.
+| Version | Purpose |
+|---|---|
+| 000045 | Coding Execution linkage, unknown outcome and append-only event/update protection |
+| 000046 | Test exit code and duration |
+| 000047 | Coding Attempt linkage |
+| 000048 | Snapshot Execution/Attempt provenance and content digest |
+| 000049 | Snapshot delete protection |
+| 000050 | Coding Step immutability |
+| 000051 | Model Usage Attempt index |
 
-### Gaps
+Migration versions are unique on this branch.
 
-1. `RecoverInterrupted` updates active Coding Tasks to `failed` with the text `interrupted by AgentMesh restart`; it does not append a corresponding Coding Task event in the same transaction.
-2. The Adapter maps every `StatusFailed` task to canonical `LifecycleFailed`. It cannot preserve an uncertain outcome as `LifecycleInterrupted` / `AttemptUnknown`.
-3. The Adapter starts the Coding Task synchronously through `Start`. If the two local concurrency slots are full, `Start` returns `ErrConflict`; the Manager treats any Submit error as uncertain and transitions the canonical Execution to `needs_reconciliation`. The Manager's reconciler scans queued/running executions, not this state. Known local capacity pressure can therefore strand a task/execution instead of waiting in a recoverable queued state.
-4. Coding Task / Agent Runtime calls do not currently receive the canonical Execution and Attempt provenance context used by the Model Gateway Usage Ledger. Coding model usage can therefore be missing the canonical Execution/Attempt association.
-5. The Coding Task has no explicit persisted canonical Execution ID field. The common Execution references its Coding Task through `task_id` / `runtime_ref`, but the relationship is not available directly from the Coding Task record.
+## 3. M58 — Durable Workflow Coding node
 
-## 4. Worktree and Docker security boundary
+### Implemented
 
-### Worktree protections already present
+- Workflow definitions support a typed `coding` node with repository, model, prompt, test command, repair budget and timeout.
+- The compiler validates the node contract.
+- Workflow execution invokes Coding through the existing Execution Manager using a stable Workflow Run + Node task identity.
+- The Workflow node output persists the Coding Task and canonical Execution references.
+- When a worker lease expires, a running Coding node is rejoined through the same idempotency key. A completed Coding Execution is consumed; an interrupted/unknown outcome is surfaced and is not blindly replayed.
+- Explicit Workflow cancellation cancels the child Coding Execution. Worker/process shutdown does not convert that child Execution into a confirmed user cancellation.
+- Recovered Coding node output is restored into Workflow context so downstream nodes can continue.
 
-- Task IDs are restricted to alphanumeric, hyphen and underscore characters.
-- Worktrees are created beneath the configured workspace root, on a task-specific branch.
-- Branch names are checked with `git check-ref-format`.
-- Mutating operations validate the resolved Worktree path against the managed Worktree root and task ID.
-- Patch application runs `git apply --check` before `git apply`; patch payloads are capped at 2 MiB.
-- Revert resets only the task Worktree and removes untracked files.
+The Workflow Runtime continues to own its existing durable run queue, lease, checkpoint and node ledger.
 
-### Remaining trust boundaries / hardening requirements
+## 4. M59 — Test, repair, review and provenance gate
 
-- `repository_path` is currently an arbitrary existing local Git directory supplied in the Coding Task request. The service verifies it is a Git repository, but there is no configured repository-root allowlist or user-confirmed repository capability boundary.
-- The Docker container receives the Worktree as a writable host bind mount. Container isolation protects the rest of the host only to the extent that Docker and its daemon are trusted.
-- Network isolation defaults to `none`; enabling the existing network option changes it to Docker `bridge`. This must remain an explicit operator decision and be visible in the UI.
-- The runner applies read-only container root, dropped capabilities, no-new-privileges, PID/memory/CPU limits and temporary filesystems. It does not currently pin images by digest or set an explicit non-root container UID.
-- P6 must not describe Docker as a complete hostile-code security boundary. It is a constrained execution environment whose trust still depends on the host Docker daemon, configured image and mounted repository.
+### Implemented
 
-## 5. Patch, test and provenance findings
+- Tests run through the configured Docker Runner, not through a host shell.
+- Test exit code, duration, bounded output and each repair iteration are persisted as Coding Steps.
+- Repair attempts remain bounded by the configured 0–5 limit.
+- A separate read-only Reviewer invocation inspects the actual patch and test evidence. It returns a structured approval/rejection verdict.
+- A managed Coding success requires test evidence and reviewer evidence. No detected test command is a failure for a reviewed managed task; the Dashboard/API can provide an explicit test program and arguments.
+- A successful result publishes a deterministic Collaboration Artifact Version with `text/x-diff` content and canonical Execution/Attempt provenance.
+- Diff, test and reviewer evidence are published through the existing Collaboration service and verified before the Execution is reported succeeded.
+- Artifact and Evidence IDs are deterministic per Coding Task, making retries idempotent.
+- Artifact Version insertion persists both `source_execution_id` and `source_attempt_id`.
 
-- The Coding Service saves a final diff and base commit hash in `coding_task_snapshots` on successful completion.
-- Test output and Agent/repair output are stored in Coding Task Steps; events record lifecycle milestones and test pass/fail facts.
-- The final diff is not currently published as a Collaboration Artifact Version. No Artifact Version is automatically bound to the canonical Execution/Attempt.
-- Test output is not automatically represented as P4 Evidence. The existing P4 Artifact Version/Evidence provenance model and Collaboration Artifact service should be reused; P6 must not create a parallel generic artifact table.
-- The Coding event table is append-only by current repository usage convention, but migration `000021` does not install database-level update/delete guards. Do not claim database-enforced immutability until that is added and tested.
-- The current successful snapshot path does not establish a complete evidence-backed release decision. A diff existing is not proof that tests passed or that a reviewer accepted the change.
+No second artifact table or parallel provenance system was introduced.
 
-## 6. Dashboard findings
+## 5. M60 — Coding Dashboard and acceptance
 
-The P5 Dashboard's `/dashboard/executions` page can list canonical Coding Executions and show common Attempts, Timeline, Artifact Versions and Evidence. However:
+### Dashboard
 
-- Dashboard dependencies do not include `CodingService`.
-- No Coding Task create/start/cancel/detail routes are registered in the Dashboard.
-- Coding Task Steps, task events, repair iterations, test output, Worktree state and final diff are not rendered there.
-- The current Dashboard therefore exposes the common execution shell but not the Coding Runtime product workflow.
+The existing HTMX Dashboard includes `/dashboard/coding`:
 
-P6 should add a Coding surface under the existing Dashboard and reuse the current Coding Service and Execution Manager. It must not write Coding or Execution tables directly from templates.
+- Create and list Coding Tasks
+- Repository path, model, prompt, optional test command, repair budget and timeout
+- Task detail, canonical Execution link, Attempt, Worktree/branch, Steps, test output, reviewer output, events, snapshots and final diff
+- Cancel, revert and cleanup controls using POST and confirmation
+- Docker image and network mode disclosure
+- User-visible operation feedback
 
-## 7. Existing verification evidence and limits
+All browser assets remain under repository-root `web/`.
 
-Current source includes a Git-backed Coding Service test using a fake Agent, plus Worktree diff/patch/reset tests. The historical `scripts/m35-m41-acceptance.sh` runs formatting, sqlc generation, build, race tests and vet.
+### Live acceptance
 
-The repository's P5 full verification was accepted by the user, but that does not prove a real Coding Agent + Docker Sandbox + repair + artifact provenance run. No live Coding acceptance was executed as part of this source audit. P6 must add a separate, explicit live acceptance gate and report any Docker/model prerequisites.
+`scripts/accept-p6-coding.sh` now exercises a durable Workflow containing a real Coding node. It verifies:
 
-## 8. P6 implementation constraints
+1. Workflow definition and run
+2. Real Coding Task and canonical Execution/Attempt
+3. Docker test success
+4. Reviewer approval
+5. Final Worktree diff and snapshot
+6. P4 Artifact Version and diff/test/reviewer Evidence provenance
 
-1. Reuse the current Coding Service, Coding Task tables, P2/P4 Execution Manager, Workflow Engine, Agent Runtime, Collaboration Artifact/Evidence and P5 Usage Ledger.
-2. Do not introduce another general-purpose queue, scheduler, Execution state machine, event ledger or artifact store.
-3. Keep Coding repair iterations as Coding Steps under the same runtime Attempt unless a new runtime Attempt is explicitly started.
-4. Preserve unknown outcomes. A process restart must never turn an unverified partial code change into a confirmed failure or success.
-5. Keep repository access, network-enabled sandbox execution, patch application, revert and cleanup explicit and auditable.
-6. Keep all browser-facing assets under repository-root `web/`; Dashboard handlers remain under `internal/transport/http/dashboard/`.
-7. Do not automatically commit or push changes. The deliverable is a reviewable Worktree diff plus test/review evidence; the human owns commit/PR approval.
-8. No migration by default, but an additive migration is justified for the interrupted-state and durable provenance gaps identified above.
+The script never commits or pushes. It retains the Worktree for inspection.
+
+## 6. Repository authorization and sandbox boundary
+
+Coding Task creation is deny-by-default in the application bootstrap:
+
+```yaml
+coding:
+  allowed_repository_roots:
+    - /absolute/path/to/trusted/repositories
+```
+
+An empty list disables Coding Task creation. Configured roots must exist. Repository paths and Git top-level paths are canonicalized; symlinks cannot escape an approved root. The same check runs during Execution preflight and again when the Coding Task is created.
+
+Docker remains a constrained execution environment, not a perfect hostile-code boundary:
+
+- Network is disabled by default; enabling it uses Docker bridge networking and is shown in the Dashboard.
+- Container root filesystem is read-only.
+- Capabilities are dropped and no-new-privileges is enabled.
+- PID, memory and CPU limits are applied.
+- Only the task Worktree is mounted writable.
+- The host Docker daemon and configured image remain trusted components.
+
+AgentMesh does not mount provider credentials, its database, encryption keys or the Docker socket into the task container. P6 does not automatically commit, push, create PRs or merge.
+
+## 7. Verification state and remaining gates
+
+- P5 baseline was accepted separately; P5 acceptance is not evidence of live Coding acceptance.
+- P6 CI runs formatting, shell checks, the complete P5 verification suite and P6 verification.
+- The opt-in live gate requires a running AgentMesh instance, a configured provider/model, Docker daemon access, an approved repository root and an explicit test command if the project manifest cannot be detected.
+- No claim of live Docker/model success is made until the user runs `scripts/accept-p6-coding.sh` and the script passes.
+- Docker daemon/image trust, single-host execution and local filesystem access remain explicit deployment boundaries.
+
+## 8. Non-goals retained
+
+- No new generic queue, Execution Manager, event ledger, Workflow engine or artifact store.
+- No change to SQLite-first, sqlc, Go templates or HTMX.
+- No automatic commit, push, PR or merge.
+- No public multi-tenant control plane or multi-machine Runner in P6.
