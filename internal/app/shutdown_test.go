@@ -81,7 +81,7 @@ func TestContainerCloseWaitsForWorkersBeforeClosingDatabase(t *testing.T) {
 	}()
 
 	container := &Container{
-		DB:          db,
+		DB:           db,
 		workerCancel: cancelWorker,
 		workerDone:   workerDone,
 	}
