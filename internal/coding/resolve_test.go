@@ -31,6 +31,9 @@ func TestResolveInterruptedKeepIsExplicitAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repo}); err != nil {
+		t.Fatal(err)
+	}
 	defer service.Close()
 	task, err := service.Create(context.Background(), CreateRequest{
 		ID: "resolve-keep", RepositoryPath: repo, ModelID: "test", Prompt: "inspect",
@@ -61,6 +64,9 @@ func TestResolveInterruptedDiscardResetsWorktree(t *testing.T) {
 	root := t.TempDir()
 	service, err := NewService(testRepository(t), fakeCodingAgent{}, root, "golang:1.27.3", false)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetAllowedRepositoryRoots([]string{repo}); err != nil {
 		t.Fatal(err)
 	}
 	defer service.Close()
