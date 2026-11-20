@@ -280,6 +280,14 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 		command = detectCommand(workspacePath)
 	}
 	if command.Program == "" {
+		s.mu.Lock()
+		reviewerConfigured := s.reviewer != nil
+		s.mu.Unlock()
+		if reviewerConfigured {
+			return fail(errors.New("no supported test command detected; configure an explicit test_command before requesting a reviewed Coding success"))
+		}
+	}
+	if command.Program == "" {
 		if e = s.repo.Event(runCtx, id, "test.skipped", map[string]string{"reason": "no supported project manifest or explicit test command"}); e != nil {
 			return fail(fmt.Errorf("persist test skipped event: %w", e))
 		}
