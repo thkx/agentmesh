@@ -114,34 +114,18 @@ func pathWithinRoot(path, root string) bool {
 	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
-	// Canonical provenance is assigned only by CodingAdapter after the
-	// Execution Manager accepts this task; never trust client-supplied IDs.
-	in.ExecutionID = ""
-	in.AttemptID = ""
-	if e := in.Validate(); e != nil {
-		return Task{}, e
-	}
-	repo, e := filepath.Abs(in.RepositoryPath)
-	if e != nil {
-		return Task{}, e
-	}
-	repo, e = filepath.EvalSymlinks(repo)
-	if e != nil {
-		return Task{}, fmt.Errorf("resolve repository path: %w", e)
-	}
-	info, e := os.Stat(repo)
-	if e != nil || !info.IsDir() {
-		return Task{}, fmt.Errorf("repository path must be an existing directory")
-	}
-	top, e := git(ctx, repo, "rev-parse", "--show-toplevel")
-	if e != nil {
-		return Task{}, fmt.Errorf("repository is not a valid git repository: %w", e)
-	}
-	top, e = filepath.EvalSymlinks(top)
-	if e != nil {
-		return Task{}, fmt.Errorf("resolve git repository root: %w", e)
-	}
+func (s *Service) normalizeRepositoryPath(ctx context.Context, in CreateRequest) (string, error) {
+	if err := in.Validate(); err != nil { return "", err }
+	repo, err := filepath.Abs(in.RepositoryPath)
+	if err != nil { return "", err }
+	repo, err = filepath.EvalSymlinks(repo)
+	if err != nil { return "", fmt.Errorf("resolve repository path: %w", err) }
+	info, err := os.Stat(repo)
+	if err != nil || !info.IsDir() { return "", fmt.Errorf("repository path must be an existing directory") }
+	top, err := git(ctx, repo, "rev-parse", "--show-toplevel")
+	if err != nil { return "", fmt.Errorf("repository is not a valid git repository: %w", err) }
+	top, err = filepath.EvalSymlinks(top)
+	if err != nil { return "", fmt.Errorf("resolve git repository root: %w", err) }
 	s.mu.Lock()
 	restricted := s.restrictRepositoryAccess
 	roots := append([]string(nil), s.allowedRepositoryRoots...)
@@ -149,16 +133,29 @@ func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if restricted {
 		allowed := false
 		for _, root := range roots {
-			if pathWithinRoot(top, root) {
-				allowed = true
-				break
-			}
+			if pathWithinRoot(top, root) { allowed = true; break }
 		}
-		if !allowed {
-			return Task{}, ErrRepositoryNotAllowed
-		}
+		if !allowed { return "", ErrRepositoryNotAllowed }
 	}
-	in.RepositoryPath = filepath.Clean(top)
+	return filepath.Clean(top), nil
+}
+
+// ValidateCreateRequest performs the same path, Git and allowlist checks as
+// Create without persisting a task. Unified Execution calls it before creating
+// the canonical Execution row, so rejected paths never become orphan executions.
+func (s *Service) ValidateCreateRequest(ctx context.Context, in CreateRequest) error {
+	in.ExecutionID, in.AttemptID = "", ""
+	_, err := s.normalizeRepositoryPath(ctx, in)
+	return err
+}
+
+func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
+	// Canonical provenance is assigned only by CodingAdapter after the
+	// Execution Manager accepts this task; never trust client-supplied IDs.
+	in.ExecutionID, in.AttemptID = "", ""
+	repositoryPath, err := s.normalizeRepositoryPath(ctx, in)
+	if err != nil { return Task{}, err }
+	in.RepositoryPath = repositoryPath
 	return s.repo.Create(ctx, in)
 }
 func git(ctx context.Context, dir string, args ...string) (string, error) {
