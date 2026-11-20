@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
 	"github.com/thkx/agentmesh/internal/domain/workflow"
 )
 
@@ -50,6 +51,22 @@ func Compile(d workflow.Definition) (*Compiled, error) {
 		case workflow.NodeApproval:
 			if n.Approval == nil {
 				return nil, fmt.Errorf("%w: approval node %s requires approval config", workflow.ErrInvalidDefinition, n.ID)
+			}
+		case workflow.NodeCoding:
+			if n.Coding == nil || n.Coding.RepositoryPath == "" || n.Coding.ModelID == "" || n.Coding.Prompt == "" {
+				return nil, fmt.Errorf("%w: coding node %s requires repository_path, model_id and prompt", workflow.ErrInvalidDefinition, n.ID)
+			}
+			if n.Coding.MaxRepairAttempts < 0 || n.Coding.MaxRepairAttempts > 5 || n.Coding.TimeoutSeconds < 0 || n.Coding.TimeoutSeconds > 7200 {
+				return nil, fmt.Errorf("%w: coding node %s has invalid repair/timeout limits", workflow.ErrInvalidDefinition, n.ID)
+			}
+			if n.Coding.TestCommand.Program != "" {
+				allowed := map[string]bool{"go":true,"npm":true,"pnpm":true,"yarn":true,"pytest":true,"python":true,"cargo":true,"make":true}
+				if !allowed[n.Coding.TestCommand.Program] || len(n.Coding.TestCommand.Args) > 32 {
+					return nil, fmt.Errorf("%w: coding node %s has an unsafe test command", workflow.ErrInvalidDefinition, n.ID)
+				}
+				for _, arg := range n.Coding.TestCommand.Args {
+					if strings.ContainsAny(arg, ";&|\x60$><\\n\\r") { return nil, fmt.Errorf("%w: coding node %s has an unsafe test argument", workflow.ErrInvalidDefinition, n.ID) }
+				}
 			}
 		case workflow.NodeSubworkflow:
 			if n.Subworkflow == nil || n.Subworkflow.WorkflowID == "" {
