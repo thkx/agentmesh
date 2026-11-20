@@ -85,6 +85,9 @@ func (r CreateRequest) Validate() error {
 	if r.MaxRepairAttempts < 0 || r.MaxRepairAttempts > 5 || r.TimeoutSeconds < 0 || r.TimeoutSeconds > 7200 {
 		return ErrInvalidTask
 	}
+	if r.TestCommand.Program == "" && len(r.TestCommand.Args) > 0 {
+		return ErrInvalidTask
+	}
 	if r.TestCommand.Program != "" {
 		if err := ValidateCommand(r.TestCommand); err != nil {
 			return err
