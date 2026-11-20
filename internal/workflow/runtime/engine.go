@@ -621,10 +621,18 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 	ledger, hasLedger := e.store.(NodeLedger)
 	for {
 		if err := ctx.Err(); err != nil {
-			if _, requested := e.cancelRequests.Load(r.ID); requested {
+			if IsCancellationRequested(ctx) {
 				r.Status = wf.RunCanceled
 			} else {
 				r.Status = wf.RunFailed
+				for nodeID, state := range r.Nodes {
+					if state.Status == wf.NodeRunning {
+						state.Status = wf.NodeInterrupted
+						state.Error = "worker stopped while node outcome was unknown"
+						state.FinishedAt = time.Now().UTC()
+						r.Nodes[nodeID] = state
+					}
+				}
 			}
 			r.Error = err.Error()
 			r.FinishedAt = time.Now().UTC()
@@ -843,7 +851,8 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 			}
 			if res.err != nil {
 				state.Status = wf.NodeFailed
-				if errors.Is(res.err, ErrCodingOutcomeIndeterminate) {
+				if errors.Is(res.err, ErrCodingOutcomeIndeterminate) ||
+					(errors.Is(res.err, context.Canceled) && !IsCancellationRequested(ctx)) {
 					state.Status = wf.NodeInterrupted
 				}
 				state.Error = res.err.Error()
