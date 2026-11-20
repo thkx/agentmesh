@@ -307,7 +307,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
-	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, CodingService: deps.CodingService, Catalog: h}).RegisterRoutes(router)
 	return otelhttp.NewHandler(router, "agentmesh.http")
 }
 
