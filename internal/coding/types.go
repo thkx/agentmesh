@@ -22,10 +22,10 @@ const (
 )
 
 var (
-	ErrNotFound      = errors.New("coding task not found")
-	ErrInvalidTask   = errors.New("invalid coding task")
-	ErrConflict      = errors.New("coding task state conflict")
-	ErrUnsafeCommand = errors.New("test command is not allowed")
+	ErrNotFound             = errors.New("coding task not found")
+	ErrInvalidTask          = errors.New("invalid coding task")
+	ErrConflict             = errors.New("coding task state conflict")
+	ErrUnsafeCommand        = errors.New("test command is not allowed")
 	ErrRepositoryNotAllowed = errors.New("coding repository is outside the configured allowed roots")
 )
 
