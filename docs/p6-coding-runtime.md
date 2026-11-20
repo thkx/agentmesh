@@ -253,7 +253,7 @@ The implementation and verification scripts have been committed to this branch, 
 
 ## 8. Live acceptance invocation
 
-After configuring an absolute approved repository root in `coding.allowed_repository_roots`, ensure the selected Model is configured and Docker is running. Then run from the AgentMesh checkout:
+After configuring an absolute approved repository root in `coding.allowed_repository_roots`, ensure the selected Model is configured, Docker is running, and the selected Git repository has at least one commit. Then run from the AgentMesh checkout:
 
 ```bash
 export AGENTMESH_API_TOKEN_FILE=./data/api-token
