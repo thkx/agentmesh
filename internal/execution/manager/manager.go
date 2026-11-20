@@ -97,8 +97,12 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 			return dom.Entity{}, err
 		}
 	}
-	if validator, ok := adapter.(interface { ValidateSubmit(context.Context, SubmitRequest) error }); ok {
-		if err := validator.ValidateSubmit(ctx, in); err != nil { return dom.Entity{}, err }
+	if validator, ok := adapter.(interface {
+		ValidateSubmit(context.Context, SubmitRequest) error
+	}); ok {
+		if err := validator.ValidateSubmit(ctx, in); err != nil {
+			return dom.Entity{}, err
+		}
 	}
 	now := time.Now().UTC()
 	e := dom.Entity{
