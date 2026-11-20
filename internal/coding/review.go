@@ -60,6 +60,12 @@ func (s *Service) review(ctx context.Context, task Task, diff string) error {
 	reviewer := s.reviewer
 	s.mu.Unlock()
 	if reviewer == nil {
+		s.mu.Lock()
+		requireEvidence := s.artifactPublisher != nil
+		s.mu.Unlock()
+		if requireEvidence {
+			return errors.New("coding reviewer is not configured")
+		}
 		return nil
 	}
 	started := time.Now().UTC()
