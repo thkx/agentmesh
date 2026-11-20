@@ -559,7 +559,8 @@ func TestReconcileCodingNodeKeepsIndeterminateOutcomeInterrupted(t *testing.T) {
 	engine.SetCodingRunner(&fakeCodingRunner{err: ErrCodingOutcomeIndeterminate})
 	definition := wf.Definition{
 		ID: "coding-unknown", Name: "Coding unknown", Version: 1, Entry: "implement",
-		Nodes: []wf.Node{{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{RepositoryPath: "/approved/repo", ModelID: "model", Prompt: "implement"}}},
+		Nodes: []wf.Node{{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{RepositoryPath: "/approved/repo", ModelID: "model", Prompt: "implement"}}, {ID: "end", Type: wf.NodeEnd}},
+		Edges: []wf.Edge{{From: "implement", To: "end"}},
 	}
 	if err = engine.PutDefinition(ctx, definition); err != nil {
 		t.Fatal(err)
