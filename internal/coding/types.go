@@ -114,7 +114,7 @@ type Step struct {
 	Error      string    `json:"error,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at,omitempty"`
-	ExitCode int `json:"exit_code"`
+	ExitCode      int   `json:"exit_code"`
 	DurationMillis int64 `json:"duration_ms"`
 }
 type Event struct {
