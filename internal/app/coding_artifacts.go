@@ -41,21 +41,22 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 		"repair_attempts":task.RepairAttempts,"diff_sha256":snapshot.ContentSHA256,
 	})
 	artifact,version,err := p.service.CreateArtifact(ctx,collaboration.CreateArtifactRequest{
+		ID:"coding-artifact-"+task.ID, VersionID:"coding-version-"+task.ID,
 		WorkspaceID:workspaceID, Kind:"code_patch", Title:task.Title+" — code patch",
 		Content:[]byte(snapshot.Diff), MediaType:"text/x-diff", Metadata:metadata,
 		SourceExecution:task.ExecutionID, SourceAttempt:task.AttemptID,
 	})
 	if err != nil { return coding.ArtifactPublication{}, fmt.Errorf("create coding patch artifact: %w",err) }
 
-	addEvidence := func(kind,source,statement string) error {
+	addEvidence := func(id,kind,source,statement string) error {
 		_, evidenceErr := p.service.AddArtifactEvidence(ctx,artifact.ID,collaboration.AddArtifactEvidenceRequest{
-			VersionID:version.ID, Kind:kind, SourceRef:source,
+			ID:id, VersionID:version.ID, Kind:kind, SourceRef:source,
 			ContentSHA256:version.ContentSHA256, Statement:statement,
 			CreatedBy:"agentmesh-coding-runtime", ExecutionID:task.ExecutionID, AttemptID:task.AttemptID,
 		})
 		return evidenceErr
 	}
-	if err=addEvidence("diff","coding-task:"+task.ID+":diff",
+	if err=addEvidence("coding-evidence-"+task.ID+"-diff","diff","coding-task:"+task.ID+":diff",
 		fmt.Sprintf("Final Worktree diff based on %s on branch %s; SHA-256 %s",snapshot.CommitHash,task.BranchName,version.ContentSHA256)); err!=nil {
 		return coding.ArtifactPublication{}, fmt.Errorf("record patch evidence: %w",err)
 	}
@@ -63,12 +64,12 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 		switch {
 		case step.Kind=="test.run":
 			statement:=fmt.Sprintf("Command: %s; status: %s; exit code: %d; duration: %dms; output: %s",step.Input,step.Status,step.ExitCode,step.DurationMillis,truncateCodingEvidence(step.Output,1800))
-			if err=addEvidence("test",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),truncateCodingEvidence(statement,3900));err!=nil {
+			if err=addEvidence(fmt.Sprintf("coding-evidence-%s-test-%d",task.ID,step.Sequence),"test",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),truncateCodingEvidence(statement,3900));err!=nil {
 				return coding.ArtifactPublication{},fmt.Errorf("record test evidence: %w",err)
 			}
 		case step.Kind=="review.inspect":
 			statement:=fmt.Sprintf("Independent reviewer verdict: %s; findings: %s",step.Status,limit(step.Output,3000))
-			if err=addEvidence("tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
+			if err=addEvidence(fmt.Sprintf("coding-evidence-%s-review-%d",task.ID,step.Sequence),"tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
 				return coding.ArtifactPublication{},fmt.Errorf("record review evidence: %w",err)
 			}
 		}
