@@ -44,6 +44,7 @@ type Service struct {
 	wg                       sync.WaitGroup
 	closed                   bool
 	scheduled                map[string]struct{}
+	scheduledCancels         map[string]context.CancelFunc
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
