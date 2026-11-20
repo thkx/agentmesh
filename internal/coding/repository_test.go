@@ -175,27 +175,49 @@ func TestRecoverInterruptedPreservesUnknownOutcomeAndEvent(t *testing.T) {
 	r := testRepository(t)
 	ctx := context.Background()
 	task, err := r.Create(ctx, CreateRequest{ID: "restart-unknown", ExecutionID: "execution-1", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
-	if err != nil { t.Fatal(err) }
-	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil { t.Fatal(err) }
-	if err = r.BindExecution(ctx, task.ID, "execution-1"); err != nil { t.Fatalf("idempotent bind: %v", err) }
-	if err = r.BindExecution(ctx, task.ID, "execution-2", "execution-2-a-1"); err != ErrConflict { t.Fatalf("conflicting bind error=%v", err) }
-	if claimed, err := r.ClaimWithEvent(ctx, task.ID, "task.started", nil); err != nil || !claimed { t.Fatalf("claim=%v err=%v", claimed, err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-1"); err != nil {
+		t.Fatalf("idempotent bind: %v", err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-2", "execution-2-a-1"); err != ErrConflict {
+		t.Fatalf("conflicting bind error=%v", err)
+	}
+	if claimed, err := r.ClaimWithEvent(ctx, task.ID, "task.started", nil); err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
 	task, err = r.Get(ctx, task.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	task.Status = StatusTesting
-	if err = r.Update(ctx, task); err != nil { t.Fatal(err) }
+	if err = r.Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
 	count, err := r.RecoverInterrupted(ctx)
-	if err != nil || count != 1 { t.Fatalf("recovered=%d err=%v", count, err) }
+	if err != nil || count != 1 {
+		t.Fatalf("recovered=%d err=%v", count, err)
+	}
 	got, err := r.Get(ctx, task.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.ExecutionID != "execution-1" || got.AttemptID != "execution-1-a-1" {
 		t.Fatalf("unexpected recovered task: %+v", got)
 	}
 	events, err := r.Events(ctx, task.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(events) != 3 || events[2].Type != "task.interrupted" {
 		t.Fatalf("interruption event missing: %+v", events)
 	}
 	count, err = r.RecoverInterrupted(ctx)
-	if err != nil || count != 0 { t.Fatalf("repeated recovery should be idempotent: count=%d err=%v", count, err) }
+	if err != nil || count != 0 {
+		t.Fatalf("repeated recovery should be idempotent: count=%d err=%v", count, err)
+	}
 }
