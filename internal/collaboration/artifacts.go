@@ -252,11 +252,11 @@ func (s *Service) AddArtifactVersion(ctx context.Context, artifactID string, in 
 		CreatorAgentID: creatorID, SourceExecution: in.SourceExecution, SourceAttempt: in.SourceAttempt, CreatedAt: now,
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_artifact_versions
-		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,source_attempt_id,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 		version.ID, version.ArtifactID, version.Version, version.Content, version.ContentSHA256,
 		version.MediaType, version.SizeBytes, string(version.Metadata), null(version.CreatorAgentID),
-		null(version.SourceExecution), now.UnixMilli())
+		null(version.SourceExecution), null(version.SourceAttempt), now.UnixMilli())
 	if err != nil {
 		return ArtifactVersion{}, err
 	}
