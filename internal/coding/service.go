@@ -273,6 +273,12 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 		if e = s.repo.Event(runCtx, id, "test.skipped", map[string]string{"reason": "no supported project manifest or explicit test command"}); e != nil {
 			return fail(fmt.Errorf("persist test skipped event: %w", e))
 		}
+		s.mu.Lock()
+		requireEvidence := s.artifactPublisher != nil
+		s.mu.Unlock()
+		if requireEvidence {
+			return fail(errors.New("no supported test command was detected; configure an explicit test command before coding execution"))
+		}
 	}
 	if command.Program != "" {
 		for attempt := 0; attempt <= t.MaxRepairAttempts; attempt++ {
