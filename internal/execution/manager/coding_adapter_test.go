@@ -14,6 +14,7 @@ import (
 type fakeCodingAdapterService struct {
 	task           coding.Task
 	getErr         error
+	validateErr    error
 	startCalls     int
 	boundExecution string
 	boundAttempt   string
