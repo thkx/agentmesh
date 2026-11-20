@@ -207,7 +207,7 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 			if e = s.repo.UpdateWithEvent(runCtx, t, "test.started", map[string]any{"attempt": attempt + 1, "program": command.Program, "args": command.Args}); e != nil {
 				return fail(fmt.Errorf("persist test state/event: %w", e))
 			}
-			testStep := Step{TaskID: id, Sequence: 2 + attempt*2, Kind: "test.run", Status: "running", StartedAt: time.Now().UTC()}
+			testStep := Step{TaskID: id, Sequence: 2 + attempt*2, Kind: "test.run", Status: "running", Input: command.Program + " " + strings.Join(command.Args, " "), StartedAt: time.Now().UTC()}
 			output, testErr := s.sandbox.Run(runCtx, workspacePath, command.Program, command.Args...)
 			testStep.Status = "succeeded"
 			if testErr != nil {
@@ -242,18 +242,20 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 			repairTask := agentTask
 			repairTask.ID = fmt.Sprintf("coding-%s-repair-%d", t.ID, attempt+1)
 			repairTask.Prompt = fmt.Sprintf("The previous implementation failed tests. Fix the failures below. Do not weaken or delete tests.\n\nCommand: %s %s\nOutput:\n%s", command.Program, strings.Join(command.Args, " "), limit(string(output), 18000))
-			repairStep := Step{TaskID: id, Sequence: 3 + attempt*2, Kind: "agent.repair", Status: "running", StartedAt: time.Now().UTC()}
-			if _, e = s.agent.Run(modelgateway.WithExecutionProvenance(runCtx, t.ExecutionID, t.AttemptID), repairTask); e != nil {
+			repairStep := Step{TaskID: id, Sequence: 3 + attempt*2, Kind: "agent.repair", Status: "running", Input: limit(string(output), 12000), StartedAt: time.Now().UTC()}
+			repairResult, repairErr := s.agent.Run(modelgateway.WithExecutionProvenance(runCtx, t.ExecutionID, t.AttemptID), repairTask)
+			repairStep.FinishedAt = time.Now().UTC()
+			repairStep.DurationMillis = repairStep.FinishedAt.Sub(repairStep.StartedAt).Milliseconds()
+			if repairErr != nil {
 				repairStep.Status = "failed"
-				repairStep.Error = e.Error()
-				repairStep.FinishedAt = time.Now().UTC()
+				repairStep.Error = repairErr.Error()
 				if persistErr := s.repo.AddStep(context.Background(), repairStep); persistErr != nil {
-					e = errors.Join(e, fmt.Errorf("persist failed repair step: %w", persistErr))
+					repairErr = errors.Join(repairErr, fmt.Errorf("persist failed repair step: %w", persistErr))
 				}
-				return fail(fmt.Errorf("self repair attempt %d: %w", attempt+1, e))
+				return fail(fmt.Errorf("self repair attempt %d: %w", attempt+1, repairErr))
 			}
 			repairStep.Status = "succeeded"
-			repairStep.FinishedAt = time.Now().UTC()
+			repairStep.Output = repairResult.Content
 			if e = s.repo.AddStep(runCtx, repairStep); e != nil {
 				return fail(fmt.Errorf("persist repair step: %w", e))
 			}
