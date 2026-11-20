@@ -1266,6 +1266,7 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	artifact, version, err := s.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		ID: "p6-coding-artifact", VersionID: "p6-coding-version",
 		WorkspaceID: workspace.ID, Kind: "code_patch", Title: "Coding patch", Content: []byte("diff --git a/a b/a"),
 		MediaType: "text/x-diff", SourceExecution: execution.ID, SourceAttempt: attempt.ID,
 	})
@@ -1275,8 +1276,16 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 	if version.SourceExecution != execution.ID || version.SourceAttempt != attempt.ID {
 		t.Fatalf("artifact provenance mismatch: %+v", version)
 	}
+	artifactAgain, versionAgain, err := s.CreateArtifact(ctx, collaboration.CreateArtifactRequest{
+		ID: "p6-coding-artifact", VersionID: "p6-coding-version",
+		WorkspaceID: workspace.ID, Kind: "code_patch", Title: "Coding patch", Content: []byte("diff --git a/a b/a"),
+		MediaType: "text/x-diff", SourceExecution: execution.ID, SourceAttempt: attempt.ID,
+	})
+	if err != nil || artifactAgain.ID != artifact.ID || versionAgain.ID != version.ID {
+		t.Fatalf("artifact publication is not idempotent: artifact=%+v version=%+v err=%v", artifactAgain, versionAgain, err)
+	}
 	evidence, err := s.AddArtifactEvidence(ctx, artifact.ID, collaboration.AddArtifactEvidenceRequest{
-		VersionID: version.ID, Kind: "diff", SourceRef: "coding-task:p6-artifact-task:diff",
+		ID: "p6-coding-evidence", VersionID: version.ID, Kind: "diff", SourceRef: "coding-task:p6-artifact-task:diff",
 		ContentSHA256: version.ContentSHA256, Statement: "patch generated",
 		ExecutionID: execution.ID, AttemptID: attempt.ID,
 	})
@@ -1285,6 +1294,14 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 	}
 	if evidence.ExecutionID != execution.ID || evidence.AttemptID != attempt.ID {
 		t.Fatalf("evidence provenance mismatch: %+v", evidence)
+	}
+	evidenceAgain, err := s.AddArtifactEvidence(ctx, artifact.ID, collaboration.AddArtifactEvidenceRequest{
+		ID: "p6-coding-evidence", VersionID: version.ID, Kind: "diff", SourceRef: "coding-task:p6-artifact-task:diff",
+		ContentSHA256: version.ContentSHA256, Statement: "patch generated", CreatedBy: "agentmesh-coding-runtime",
+		ExecutionID: execution.ID, AttemptID: attempt.ID,
+	})
+	if err != nil || evidenceAgain.ID != evidence.ID {
+		t.Fatalf("evidence publication is not idempotent: %+v err=%v", evidenceAgain, err)
 	}
 	items, err := s.ListArtifactEvidence(ctx, artifact.ID)
 	if err != nil {
