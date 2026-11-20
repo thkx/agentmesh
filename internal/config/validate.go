@@ -54,6 +54,17 @@ func ValidateWithAPIAuth(c Config, apiAuthEnabled bool) error {
 	if strings.TrimSpace(c.Agent.WorkspaceRoot) == "" {
 		return fmt.Errorf("agent.workspace_root is required")
 	}
+	seenCodingRoots := make(map[string]struct{}, len(c.Coding.AllowedRepositoryRoots))
+	for i, root := range c.Coding.AllowedRepositoryRoots {
+		root = strings.TrimSpace(root)
+		if root == "" || strings.ContainsAny(root, "\\r\\n\\x00") {
+			return fmt.Errorf("coding.allowed_repository_roots[%d] is invalid", i)
+		}
+		if _, exists := seenCodingRoots[root]; exists {
+			return fmt.Errorf("coding.allowed_repository_roots contains duplicate root %q", root)
+		}
+		seenCodingRoots[root] = struct{}{}
+	}
 	if len(c.Agent.Tools.SandboxImage) > 256 {
 		return fmt.Errorf("agent.tools.sandbox_image is too long")
 	}
