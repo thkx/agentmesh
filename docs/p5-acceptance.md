@@ -153,6 +153,20 @@ Pass criteria:
    The CLI reads the token from stdin when the environment override is absent.
 5. When ready to stop the service, use the Dashboard shutdown confirmation or `go run ./cmd/agentmesh-ops shutdown`; verify the process exits cleanly and its database can be reopened.
 
+### Live graceful-shutdown gate
+
+After reviewing and retaining the live Workflow evidence, run the process-level shutdown check:
+
+```bash
+bash scripts/accept-p5-shutdown.sh
+```
+
+The script prompts for the API token without echo (unless the automation-only environment override is supplied), confirms that exactly one healthy AgentMesh process owns the configured loopback port, sends the authenticated `POST /api/v1/operations/shutdown` request through `agentmesh-ops`, and waits for the listener to release its port. It refuses remote HTTP URLs, ambiguous listeners and unrelated processes. It does not delete or replace the database or acceptance resources.
+
+After the script passes, restart AgentMesh with the same configuration and database. Confirm `/readyz` returns `ready`, then open `/dashboard/workflows` and verify the retained P5 Live Acceptance Run and its event history are still present. This restart check proves that the durable Workflow history survived the process lifecycle.
+
+The process-level script intentionally does not restart the service automatically: the normal launch method may be a terminal, a supervisor or a launch agent, and the script must not silently create a second server process. The application test `TestContainerCloseWaitsForWorkersBeforeClosingDatabase` verifies that a worker can persist its final state after cancellation and before the database is closed.
+
 ## 7. Automated test coverage
 
 Run the complete local/CI suite with:
@@ -177,7 +191,7 @@ P5-specific test coverage includes:
 | Diagnostics and observability | Redaction, allow-listed metrics, report bounds, support ZIP contents, authenticated metrics endpoint |
 | Backup and restore | Encryption, wrong-passphrase rejection, archive verification, SQLite integrity, isolated extraction and offline apply safeguards |
 | Upgrade | Ed25519 signature verification, checksum rejection, staging and offline apply safeguards |
-| Service lifecycle | Shutdown closes the database and the persisted database can be reopened |
+| Service lifecycle | Worker drain before database close; shutdown closes the database and persisted data can be reopened; live process shutdown script |
 
 The automated suite uses deterministic test adapters and isolated temporary SQLite databases. It does not spend money or require a third-party provider key. Real provider connectivity and one real Agent/Workflow invocation remain explicit live-environment acceptance gates.
 
