@@ -24,26 +24,26 @@ type Agent interface {
 	Run(context.Context, dom.Task) (dom.Result, error)
 }
 type Service struct {
-	repo              *Repository
-	agent             Agent
-	reviewer          Agent
-	artifactPublisher ArtifactPublisher
-	workspaceRoot             string
-	allowedRepositoryRoots    []string
-	restrictRepositoryAccess  bool
-	sandbox                   docker.Runner
-	worktrees         *worktree.Manager
-	taskLocks         *taskLockTable
-	closeOnce         sync.Once
-	done              chan struct{}
-	mu                sync.Mutex
-	cancels           map[string]context.CancelFunc
-	maxConcurrent     chan struct{}
-	ctx               context.Context
-	cancel            context.CancelFunc
-	wg                sync.WaitGroup
-	closed            bool
-	scheduled         map[string]struct{}
+	repo                     *Repository
+	agent                    Agent
+	reviewer                 Agent
+	artifactPublisher        ArtifactPublisher
+	workspaceRoot            string
+	allowedRepositoryRoots   []string
+	restrictRepositoryAccess bool
+	sandbox                  docker.Runner
+	worktrees                *worktree.Manager
+	taskLocks                *taskLockTable
+	closeOnce                sync.Once
+	done                     chan struct{}
+	mu                       sync.Mutex
+	cancels                  map[string]context.CancelFunc
+	maxConcurrent            chan struct{}
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	wg                       sync.WaitGroup
+	closed                   bool
+	scheduled                map[string]struct{}
 }
 
 func NewService(repo *Repository, agent Agent, workspaceRoot, image string, network bool) (*Service, error) {
@@ -75,8 +75,8 @@ func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) {
 }
 
 // SetAllowedRepositoryRoots enables deny-by-default repository authorization.
- // Every configured root is canonicalized once; Create canonicalizes the
- // requested repository again so symlinks cannot escape an approved root.
+// Every configured root is canonicalized once; Create canonicalizes the
+// requested repository again so symlinks cannot escape an approved root.
 func (s *Service) SetAllowedRepositoryRoots(roots []string) error {
 	canonical := make([]string, 0, len(roots))
 	for _, root := range roots {
