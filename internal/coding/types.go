@@ -9,6 +9,8 @@ import (
 
 type Status string
 
+const MaxCodingDiffBytes = 2 << 20
+
 const (
 	StatusPending   Status = "pending"
 	StatusRunning   Status = "running"
