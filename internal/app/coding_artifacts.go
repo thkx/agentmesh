@@ -53,6 +53,12 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 	if err != nil {
 		return coding.ArtifactPublication{}, fmt.Errorf("create coding patch artifact: %w", err)
 	}
+	if snapshot.ContentSHA256 != "" && snapshot.ContentSHA256 != version.ContentSHA256 {
+		return coding.ArtifactPublication{}, fmt.Errorf("coding snapshot digest does not match published Artifact Version")
+	}
+	if version.SourceExecution != task.ExecutionID || version.SourceAttempt != task.AttemptID {
+		return coding.ArtifactPublication{}, fmt.Errorf("published Artifact Version provenance does not match Coding Task")
+	}
 
 	addEvidence := func(id, kind, source, statement string) error {
 		_, evidenceErr := p.service.AddArtifactEvidence(ctx, artifact.ID, collaboration.AddArtifactEvidenceRequest{
