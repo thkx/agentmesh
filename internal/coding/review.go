@@ -83,8 +83,9 @@ func (s *Service) review(ctx context.Context, task Task, diff string) error {
 		_ = s.repo.Event(context.WithoutCancel(ctx), task.ID, "review.failed", map[string]string{"error": limit(err.Error(), 2000)})
 		return fmt.Errorf("independent coding review failed: %w", err)
 	}
-	verdict, err := parseReviewVerdict(result.Content)
-	step.Output = result.Content
+	reviewOutput := limit(result.Content, 12000)
+	verdict, err := parseReviewVerdict(reviewOutput)
+	step.Output = reviewOutput
 	if err != nil {
 		step.Status = "failed"
 		step.Error = err.Error()
