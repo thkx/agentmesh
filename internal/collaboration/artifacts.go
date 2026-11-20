@@ -119,7 +119,9 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 	if len(in.MediaType) > 128 {
 		return Artifact{}, ArtifactVersion{}, ErrInvalid
 	}
-	if in.SourceAttempt != "" && in.SourceExecution == "" { return Artifact{}, ArtifactVersion{}, ErrInvalid }
+	if in.SourceAttempt != "" && in.SourceExecution == "" {
+		return Artifact{}, ArtifactVersion{}, ErrInvalid
+	}
 	if len(in.Metadata) == 0 {
 		in.Metadata = json.RawMessage("{}")
 	}
@@ -154,19 +156,37 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 		existing, lookupErr := s.GetArtifact(ctx, in.ID)
 		if lookupErr == nil {
 			existingVersion, versionErr := s.GetArtifactVersion(ctx, in.ID, 1)
-			if versionErr != nil { return Artifact{}, ArtifactVersion{}, versionErr }
+			if versionErr != nil {
+				return Artifact{}, ArtifactVersion{}, versionErr
+			}
 			if existingVersion.ContentSHA256 == digest && existingVersion.SourceExecution == in.SourceExecution && existingVersion.SourceAttempt == in.SourceAttempt {
 				return existing, existingVersion, nil
 			}
 			return Artifact{}, ArtifactVersion{}, ErrConflict
 		}
-		if !errors.Is(lookupErr, ErrNotFound) { return Artifact{}, ArtifactVersion{}, lookupErr }
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return Artifact{}, ArtifactVersion{}, lookupErr
+		}
 	}
 	artifactID := strings.TrimSpace(in.ID)
-	if artifactID == "" { var idErr error; artifactID, idErr = newID(); if idErr != nil { return Artifact{}, ArtifactVersion{}, idErr } }
+	if artifactID == "" {
+		var idErr error
+		artifactID, idErr = newID()
+		if idErr != nil {
+			return Artifact{}, ArtifactVersion{}, idErr
+		}
+	}
 	versionID := strings.TrimSpace(in.VersionID)
-	if versionID == "" { var idErr error; versionID, idErr = newID(); if idErr != nil { return Artifact{}, ArtifactVersion{}, idErr } }
-	if len(artifactID) > 128 || len(versionID) > 128 { return Artifact{}, ArtifactVersion{}, ErrInvalid }
+	if versionID == "" {
+		var idErr error
+		versionID, idErr = newID()
+		if idErr != nil {
+			return Artifact{}, ArtifactVersion{}, idErr
+		}
+	}
+	if len(artifactID) > 128 || len(versionID) > 128 {
+		return Artifact{}, ArtifactVersion{}, ErrInvalid
+	}
 	now := s.clock().UTC()
 	artifact := Artifact{
 		ID: artifactID, WorkspaceID: in.WorkspaceID, SourceTaskID: in.SourceTaskID,
@@ -379,21 +399,27 @@ func (s *Service) AddArtifactEvidence(ctx context.Context, artifactID string, in
 	if id == "" {
 		var idErr error
 		id, idErr = newID()
-		if idErr != nil { return ArtifactEvidence{}, idErr }
+		if idErr != nil {
+			return ArtifactEvidence{}, idErr
+		}
 	}
-	if len(id) > 128 { return ArtifactEvidence{}, ErrInvalid }
+	if len(id) > 128 {
+		return ArtifactEvidence{}, ErrInvalid
+	}
 	var existing ArtifactEvidence
 	var existingCreated int64
 	lookupErr := s.db.QueryRowContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,COALESCE(execution_id,''),COALESCE(attempt_id,''),created_at FROM collaboration_artifact_evidence WHERE id=?`, id).Scan(
-		&existing.ID,&existing.ArtifactID,&existing.VersionID,&existing.WorkspaceID,&existing.TaskID,&existing.Kind,&existing.SourceRef,&existing.ContentSHA256,&existing.Statement,&existing.CreatedBy,&existing.ExecutionID,&existing.AttemptID,&existingCreated)
+		&existing.ID, &existing.ArtifactID, &existing.VersionID, &existing.WorkspaceID, &existing.TaskID, &existing.Kind, &existing.SourceRef, &existing.ContentSHA256, &existing.Statement, &existing.CreatedBy, &existing.ExecutionID, &existing.AttemptID, &existingCreated)
 	if lookupErr == nil {
 		if existing.ArtifactID == artifactID && existing.VersionID == in.VersionID && existing.Kind == in.Kind && existing.SourceRef == in.SourceRef && existing.ExecutionID == in.ExecutionID && existing.AttemptID == in.AttemptID {
 			existing.CreatedAt = time.UnixMilli(existingCreated).UTC()
-			return existing,nil
+			return existing, nil
 		}
-		return ArtifactEvidence{},ErrConflict
+		return ArtifactEvidence{}, ErrConflict
 	}
-	if !errors.Is(lookupErr,sql.ErrNoRows) { return ArtifactEvidence{},lookupErr }
+	if !errors.Is(lookupErr, sql.ErrNoRows) {
+		return ArtifactEvidence{}, lookupErr
+	}
 	now := s.clock().UTC()
 	evidence := ArtifactEvidence{
 		ID: id, ArtifactID: artifactID, VersionID: in.VersionID, WorkspaceID: workspaceID,
