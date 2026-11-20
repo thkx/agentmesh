@@ -386,6 +386,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	if e != nil {
 		return fail(e)
 	}
+	if len(diff) > MaxCodingDiffBytes {
+		return fail(fmt.Errorf("coding patch exceeds %d-byte artifact limit", MaxCodingDiffBytes))
+	}
 	if e = s.review(runCtx, t, diff); e != nil {
 		return fail(e)
 	}
