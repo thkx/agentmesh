@@ -26,6 +26,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/coding"
+	execdom "github.com/thkx/agentmesh/internal/domain/execution"
 	"github.com/thkx/agentmesh/internal/collaboration"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
@@ -49,6 +51,7 @@ type Dependencies struct {
 	APIToken            string
 	RequestShutdown     chan<- struct{}
 	ExecutionManager    *manager.Manager
+	CodingService       *coding.Service
 	Providers           *domainprovider.ProviderRegistry
 	Models              *domainprovider.ModelRegistry
 	Credentials         appcredential.Manager
@@ -66,6 +69,7 @@ type Handler struct {
 	token               string
 	requestShutdown     chan<- struct{}
 	manager             *manager.Manager
+	codingService       *coding.Service
 	providerRegistry    *domainprovider.ProviderRegistry
 	modelRegistry       *domainprovider.ModelRegistry
 	credentials         appcredential.Manager
@@ -91,6 +95,12 @@ type pageData struct {
 	Readiness        string
 	Counts           map[string]int64
 	Executions       []executionRow
+	CodingRows       []coding.Task
+	CodingTask       *coding.Task
+	CodingSteps      []coding.Step
+	CodingEvents     []coding.Event
+	CodingSnapshots  []coding.Snapshot
+	CodingDiff       string
 	Execution        *executionDetail
 	ProviderRows     []providerView
 	ModelRows        []modelView
@@ -254,6 +264,7 @@ func New(d Dependencies) *Handler {
 		token:               d.APIToken,
 		requestShutdown:     d.RequestShutdown,
 		manager:             d.ExecutionManager,
+		codingService:       d.CodingService,
 		providerRegistry:    d.Providers,
 		modelRegistry:       d.Models,
 		credentials:         d.Credentials,
@@ -322,6 +333,12 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/operations/metrics", h.requireSession(), h.operationsMetrics)
 	g.POST("/operations/shutdown", h.requireSession(), h.requestGracefulShutdown)
 	g.GET("/usage", h.requireSession(), h.usage)
+	g.GET("/coding", h.requireSession(), h.codingTasks)
+	g.POST("/coding", h.requireSession(), h.createCodingTask)
+	g.GET("/coding/:id", h.requireSession(), h.codingTask)
+	g.POST("/coding/:id/cancel", h.requireSession(), h.cancelCodingTask)
+	g.POST("/coding/:id/revert", h.requireSession(), h.revertCodingTask)
+	g.POST("/coding/:id/cleanup", h.requireSession(), h.cleanupCodingTask)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
 	g.POST("/executions/:id/cancel", h.requireSession(), h.cancelExecution)
@@ -1481,6 +1498,90 @@ func (h *Handler) workflowRun(c *gin.Context) {
 	h.render(c, pageData{Title: "Workflow Run " + run.ID, Active: "workflows", WorkflowRun: detail}, http.StatusOK)
 }
 
+func (h *Handler) codingTasks(c *gin.Context) {
+	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}}
+	if h.codingService != nil {
+		items, err := h.codingService.List(c.Request.Context(), 100)
+		if err != nil { data.Error = "Could not load coding tasks" } else { data.CodingRows = items }
+	}
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) createCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.manager == nil || h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	maxRepair, _ := strconv.Atoi(c.DefaultPostForm("max_repair_attempts", "2"))
+	timeout, _ := strconv.Atoi(c.DefaultPostForm("timeout_seconds", "1800"))
+	request := coding.CreateRequest{
+		ID: fmt.Sprintf("dashboard-%d", time.Now().UTC().UnixNano()),
+		Title: strings.TrimSpace(c.PostForm("title")),
+		RepositoryPath: strings.TrimSpace(c.PostForm("repository_path")),
+		ModelID: strings.TrimSpace(c.PostForm("model_id")),
+		Prompt: strings.TrimSpace(c.PostForm("prompt")),
+		MaxRepairAttempts: maxRepair, TimeoutSeconds: timeout,
+	}
+	if err := request.Validate(); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
+	input, err := json.Marshal(request)
+	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create"); return }
+	_, err = h.manager.Submit(c.Request.Context(), manager.SubmitRequest{
+		Kind: execdom.KindCoding, Runtime: execdom.RuntimeCoding, TaskID: request.ID,
+		Input: input, IdempotencyKey: "dashboard-coding:" + request.ID,
+	})
+	if err != nil { c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create"); return }
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(request.ID)+"?message=coding-queued")
+}
+
+func (h *Handler) codingTask(c *gin.Context) {
+	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	task, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
+	if err != nil { c.AbortWithStatus(http.StatusNotFound); return }
+	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task}
+	data.CodingSteps, err = h.codingService.Steps(c.Request.Context(), task.ID)
+	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	data.CodingEvents, err = h.codingService.Events(c.Request.Context(), task.ID)
+	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	data.CodingSnapshots, err = h.codingService.Snapshots(c.Request.Context(), task.ID)
+	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
+	if task.WorkspacePath != "" && task.Status != coding.StatusRunning && task.Status != coding.StatusTesting && task.Status != coding.StatusRepairing {
+		data.CodingDiff, _ = h.codingService.Diff(c.Request.Context(), task.ID)
+	}
+	data.Execution = nil
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) cancelCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err := h.codingService.CancelContext(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cancel")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=cancel-requested")
+}
+
+func (h *Handler) revertCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err := h.codingService.Revert(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=revert")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=reverted")
+}
+
+func (h *Handler) cleanupCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" { c.AbortWithStatus(http.StatusForbidden); return }
+	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
+	if err := h.codingService.Cleanup(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cleanup")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=cleaned")
+}
+
 func (h *Handler) executions(c *gin.Context) {
 	data := pageData{
 		Title: "Executions", Active: "executions", Executions: []executionRow{},
@@ -1745,6 +1846,12 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
 	}
 	switch c.Query("message") {
+	case "coding-queued":
+		data.Message = "Coding task queued. Review the Worktree diff and evidence before keeping changes."
+	case "reverted":
+		data.Message = "Coding Worktree reset to its base commit."
+	case "cleaned":
+		data.Message = "Coding Worktree and branch cleaned up."
 	case "cancel-requested":
 		data.Message = "Cancellation request recorded; the runtime outcome is not yet confirmed."
 	case "credential-saved":
