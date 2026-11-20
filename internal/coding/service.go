@@ -586,6 +586,54 @@ func (s *Service) Cleanup(ctx context.Context, id string) error {
 	return s.repo.UpdateWithEvent(ctx, t, "workspace.cleaned", nil)
 }
 
+const manualResolutionErrorPrefix = "operator_resolved:"
+
+// ResolveInterrupted records an explicit human decision after inspecting an
+// interrupted Worktree. "keep" retains the patch and resolves the task as
+// failed; "discard" resets the Worktree to its base commit and resolves it as
+// canceled. Neither decision claims that the Coding Task succeeded.
+func (s *Service) ResolveInterrupted(ctx context.Context, id, decision, reason string) (Task, error) {
+	decision = strings.TrimSpace(decision)
+	reason = strings.TrimSpace(reason)
+	if (decision != "keep" && decision != "discard") || reason == "" || len(reason) > 1000 || strings.ContainsAny(reason, "\r\n\x00") {
+		return Task{}, ErrInvalidRequest
+	}
+	unlock, locked := s.taskLocks.TryLock(id)
+	if !locked {
+		return Task{}, ErrConflict
+	}
+	defer unlock()
+	t, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Task{}, err
+	}
+	resolvedPrefix := manualResolutionErrorPrefix + decision + ":"
+	if !t.OutcomeUnknown && strings.HasPrefix(t.Error, resolvedPrefix) {
+		return t, nil
+	}
+	if !t.OutcomeUnknown || t.Status != StatusInterrupted || isActive(t.Status) {
+		return Task{}, ErrConflict
+	}
+	if decision == "discard" && t.WorkspacePath != "" {
+		ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
+		if err = s.worktrees.Reset(ctx, ws); err != nil {
+			return Task{}, fmt.Errorf("reset interrupted Worktree: %w", err)
+		}
+		t.Status = StatusCanceled
+	} else {
+		t.Status = StatusFailed
+	}
+	t.OutcomeUnknown = false
+	t.Error = resolvedPrefix + " " + reason
+	t.FinishedAt = time.Now().UTC()
+	if err = s.repo.UpdateWithEvent(ctx, t, "task.outcome_resolved", map[string]string{
+		"decision": decision, "reason": reason,
+	}); err != nil {
+		return Task{}, fmt.Errorf("persist interrupted outcome resolution: %w", err)
+	}
+	return t, nil
+}
+
 func (s *Service) Recover(ctx context.Context) (int64, error) { return s.repo.RecoverInterrupted(ctx) }
 
 func (s *Service) BindExecution(ctx context.Context, taskID, executionID, attemptID string) error {
