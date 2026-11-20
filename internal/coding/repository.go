@@ -165,7 +165,7 @@ func (r *Repository) UpdateWithEvent(ctx context.Context, t Task, kind string, p
 	}
 	defer tx.Rollback()
 	resultJSON, _ := json.Marshal(t.Result)
-	result, err := tx.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=? WHERE id=?`, t.Status, t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ID)
+	result, err := tx.ExecContext(ctx, `UPDATE coding_tasks SET status=?,workspace_id=?,workspace_path=?,branch_name=?,repair_attempts=?,result_json=?,error=?,updated_at=?,started_at=?,finished_at=?,execution_id=?,outcome_unknown=? WHERE id=?`, persistedStatus(t), t.WorkspaceID, t.WorkspacePath, t.BranchName, t.RepairAttempts, string(resultJSON), t.Error, time.Now().UTC().Unix(), unix(t.StartedAt), unix(t.FinishedAt), t.ExecutionID, boolInt(t.OutcomeUnknown), t.ID)
 	if err != nil {
 		return err
 	}
