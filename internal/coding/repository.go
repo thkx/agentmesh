@@ -267,6 +267,23 @@ func (r *Repository) Events(ctx context.Context, id string) ([]Event, error) {
 // RecoverInterrupted preserves uncertainty and appends a task event atomically.
 // The legacy CHECK constraint stores physical status as failed; outcome_unknown
 // exposes the logical interrupted state without rewriting the original schema.
+func (r *Repository) ListInterrupted(ctx context.Context) ([]Task, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT `+taskColumns+` FROM coding_tasks WHERE outcome_unknown=1 ORDER BY updated_at DESC,id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Task, 0)
+	for rows.Next() {
+		task, scanErr := scanTask(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		items = append(items, task)
+	}
+	return items, rows.Err()
+}
+
 func (r *Repository) RecoverInterrupted(ctx context.Context) (int64, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
