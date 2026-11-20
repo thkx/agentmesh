@@ -34,6 +34,7 @@ type Command struct {
 type Task struct {
 	ID                string    `json:"id"`
 	ExecutionID       string    `json:"execution_id,omitempty"`
+	AttemptID         string    `json:"attempt_id,omitempty"`
 	OutcomeUnknown    bool      `json:"outcome_unknown,omitempty"`
 	Title             string    `json:"title"`
 	RepositoryPath    string    `json:"repository_path"`
@@ -57,6 +58,7 @@ type Task struct {
 type CreateRequest struct {
 	ID                string  `json:"id"`
 	ExecutionID       string  `json:"execution_id,omitempty"`
+	AttemptID         string  `json:"attempt_id,omitempty"`
 	Title             string  `json:"title"`
 	RepositoryPath    string  `json:"repository_path"`
 	ModelID           string  `json:"model_id"`
