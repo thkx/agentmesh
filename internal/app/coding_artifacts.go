@@ -68,8 +68,8 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 				return coding.ArtifactPublication{},fmt.Errorf("record test evidence: %w",err)
 			}
 		case step.Kind=="review.inspect":
-			statement:=fmt.Sprintf("Independent reviewer verdict: %s; findings: %s",step.Status,limit(step.Output,3000))
-			if err=addEvidence(fmt.Sprintf("coding-evidence-%s-review-%d",task.ID,step.Sequence),"tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),limit(statement,3900));err!=nil {
+			statement:=fmt.Sprintf("Independent reviewer verdict: %s; findings: %s",step.Status,truncateCodingEvidence(step.Output,3000))
+			if err=addEvidence(fmt.Sprintf("coding-evidence-%s-review-%d",task.ID,step.Sequence),"tool_log",fmt.Sprintf("coding-task:%s:step:%d",task.ID,step.Sequence),truncateCodingEvidence(statement,3900));err!=nil {
 				return coding.ArtifactPublication{},fmt.Errorf("record review evidence: %w",err)
 			}
 		}
