@@ -115,17 +115,29 @@ func pathWithinRoot(path, root string) bool {
 }
 
 func (s *Service) normalizeRepositoryPath(ctx context.Context, in CreateRequest) (string, error) {
-	if err := in.Validate(); err != nil { return "", err }
+	if err := in.Validate(); err != nil {
+		return "", err
+	}
 	repo, err := filepath.Abs(in.RepositoryPath)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	repo, err = filepath.EvalSymlinks(repo)
-	if err != nil { return "", fmt.Errorf("resolve repository path: %w", err) }
+	if err != nil {
+		return "", fmt.Errorf("resolve repository path: %w", err)
+	}
 	info, err := os.Stat(repo)
-	if err != nil || !info.IsDir() { return "", fmt.Errorf("repository path must be an existing directory") }
+	if err != nil || !info.IsDir() {
+		return "", fmt.Errorf("repository path must be an existing directory")
+	}
 	top, err := git(ctx, repo, "rev-parse", "--show-toplevel")
-	if err != nil { return "", fmt.Errorf("repository is not a valid git repository: %w", err) }
+	if err != nil {
+		return "", fmt.Errorf("repository is not a valid git repository: %w", err)
+	}
 	top, err = filepath.EvalSymlinks(top)
-	if err != nil { return "", fmt.Errorf("resolve git repository root: %w", err) }
+	if err != nil {
+		return "", fmt.Errorf("resolve git repository root: %w", err)
+	}
 	s.mu.Lock()
 	restricted := s.restrictRepositoryAccess
 	roots := append([]string(nil), s.allowedRepositoryRoots...)
@@ -133,9 +145,14 @@ func (s *Service) normalizeRepositoryPath(ctx context.Context, in CreateRequest)
 	if restricted {
 		allowed := false
 		for _, root := range roots {
-			if pathWithinRoot(top, root) { allowed = true; break }
+			if pathWithinRoot(top, root) {
+				allowed = true
+				break
+			}
 		}
-		if !allowed { return "", ErrRepositoryNotAllowed }
+		if !allowed {
+			return "", ErrRepositoryNotAllowed
+		}
 	}
 	return filepath.Clean(top), nil
 }
@@ -154,7 +171,9 @@ func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	// Execution Manager accepts this task; never trust client-supplied IDs.
 	in.ExecutionID, in.AttemptID = "", ""
 	repositoryPath, err := s.normalizeRepositoryPath(ctx, in)
-	if err != nil { return Task{}, err }
+	if err != nil {
+		return Task{}, err
+	}
 	in.RepositoryPath = repositoryPath
 	return s.repo.Create(ctx, in)
 }
