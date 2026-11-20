@@ -1,4 +1,6 @@
 {{define "coding-page"}}
+{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}
+{{if .Message}}<div class="alert success">{{.Message}}</div>{{end}}
 <section class="page-header">
   <div>
     <h1>Coding</h1>
