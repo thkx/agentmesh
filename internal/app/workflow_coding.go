@@ -45,6 +45,12 @@ func (r *workflowCodingRunner) RunCoding(ctx context.Context, taskID string, inp
 		}
 		entity, err = r.manager.Get(ctx, entity.ID)
 		if err != nil {
+			if ctx.Err() != nil {
+				if workflowruntime.IsCancellationRequested(ctx) {
+					_ = r.manager.Cancel(context.WithoutCancel(ctx), entity.ID)
+				}
+				return nil, ctx.Err()
+			}
 			return nil, fmt.Errorf("observe workflow coding execution: %w", err)
 		}
 		switch entity.Status {
