@@ -596,7 +596,7 @@ func (s *Service) ResolveInterrupted(ctx context.Context, id, decision, reason s
 	decision = strings.TrimSpace(decision)
 	reason = strings.TrimSpace(reason)
 	if (decision != "keep" && decision != "discard") || reason == "" || len(reason) > 1000 || strings.ContainsAny(reason, "\r\n\x00") {
-		return Task{}, ErrInvalidRequest
+		return Task{}, ErrInvalidTask
 	}
 	unlock, locked := s.taskLocks.TryLock(id)
 	if !locked {
