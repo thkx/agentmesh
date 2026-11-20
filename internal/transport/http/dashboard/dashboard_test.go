@@ -344,12 +344,16 @@ func TestOperationsDashboardShowsSQLiteAndWorkerHealth(t *testing.T) {
 
 func TestCodingDashboardRendersTaskCreationAndRecentTasks(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	router:=gin.New()
-	New(Dependencies{SandboxImage:"golang:1.27",SandboxNetworkEnabled:false}).RegisterRoutes(router)
-	rec:=httptest.NewRecorder()
-	router.ServeHTTP(rec,httptest.NewRequest(http.MethodGet,"/dashboard/coding",nil))
-	if rec.Code!=http.StatusOK { t.Fatalf("coding dashboard status=%d body=%s",rec.Code,rec.Body.String()) }
-	for _,want:=range []string{"Coding","Create and run Coding Task","coding.allowed_repository_roots","Docker image","Network mode","Recent coding tasks"} {
-		if !strings.Contains(rec.Body.String(),want) { t.Fatalf("coding dashboard missing %q",want) }
+	router := gin.New()
+	New(Dependencies{SandboxImage: "golang:1.27", SandboxNetworkEnabled: false}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/coding", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("coding dashboard status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Coding", "Create and run Coding Task", "coding.allowed_repository_roots", "Docker image", "Network mode", "Recent coding tasks"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("coding dashboard missing %q", want)
+		}
 	}
 }
