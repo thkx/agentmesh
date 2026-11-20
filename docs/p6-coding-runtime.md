@@ -181,7 +181,34 @@ Required verification includes:
 
 A code commit or successful CI run is not a substitute for the user's live Docker/model acceptance. Every report must name the exact branch and commit, commands actually executed, skipped prerequisites and resulting evidence.
 
-## 7. Explicit non-goals
+
+## 8. Implementation status on `p6/coding-runtime`
+
+The following implementation work is now present in the branch:
+
+- **M57:** Coding Tasks persist canonical Execution and Attempt IDs; Coding model calls and reviewer calls receive Model Gateway execution provenance; restart recovery persists a logical `interrupted` / unknown outcome and an append-only event; the Coding Adapter maps that state to P4 Interrupted and ensures a terminal Attempt exists before finalization; tasks wait for local concurrency capacity rather than being rejected when both slots are busy.
+- **M58:** `NodeCoding` is part of the Workflow domain/compiler/runtime. The app-owned bridge submits through the existing Execution Manager with a deterministic task ID and idempotency key, observes the canonical Execution, and refuses automatic replay for interrupted or ambiguous outcomes.
+- **M59:** test steps retain command, exit code, duration and output; a separate read-only Reviewer Agent must return a structured `approve` verdict; final patch snapshots retain Execution/Attempt IDs and SHA-256; the existing Collaboration Artifact Version and Evidence services publish a code-patch artifact plus diff/test/reviewer evidence with the same canonical provenance and run deterministic artifact verification.
+- **M60:** Dashboard Coding list/create/detail, Worktree/diff, Steps, Events, test/review evidence, cancellation, guarded revert and cleanup are available under `/dashboard/coding`. The page discloses Docker image and network mode and links to the canonical Execution detail. Browser assets remain under `web/`.
+- Added migrations `000045`–`000048`, adapter/workflow/artifact provenance tests, `scripts/verify-p6.sh`, and the opt-in real model + Docker gate `scripts/accept-p6-coding.sh`.
+
+### Required local configuration
+
+Coding repository access is deny-by-default. Add only trusted repository parent directories to `coding.allowed_repository_roots` in the local configuration, for example:
+
+```yaml
+coding:
+  allowed_repository_roots:
+    - /Users/your-user/src
+```
+
+Use the actual absolute path on the machine running AgentMesh. The service canonicalizes both roots and requested repositories and rejects symlink escapes. Keep Docker network disabled unless the task explicitly needs it.
+
+### Verification status
+
+The implementation and verification scripts have been committed to this branch, but **no Go test, race test, build, vet, real model run, or Docker live acceptance is claimed as executed by the assistant**. Run `bash scripts/verify-p6.sh` on the target machine. Then configure the variables documented in `scripts/accept-p6-coding.sh` and run with `AGENTMESH_RUN_P6_LIVE=1` for the real Coding gate. A PR is required to obtain the repository's pull-request CI result; the branch is not yet merged into `p5/control-plane`.
+
+## 9. Explicit non-goals
 
 - No new generic job queue, scheduler or Execution Manager.
 - No rewrite of Agent Runtime, Workflow Runtime, Model Gateway or P5 Dashboard stack.
