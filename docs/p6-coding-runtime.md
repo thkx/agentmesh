@@ -149,6 +149,7 @@ Deliverables:
 
 Acceptance:
 
+- A deterministic repair test forces the first Docker Runner invocation to fail and the second to pass, then verifies the persisted repair step, both test results and Reviewer verdict.
 - A successful Coding result has a persisted base commit, final diff digest, test evidence and review verdict.
 - Failed tests remain visible with their original output; repairs cannot erase or rewrite previous evidence.
 - Review rejection leaves the Worktree available and the result non-accepted.
@@ -166,7 +167,7 @@ Deliverables:
 - Link each Coding Task to its canonical Execution detail/timeline and published Artifact/Evidence.
 - Show sandbox network mode and configured image identity; never imply that network-enabled execution is isolated from external services.
 - Add a deterministic fake-Agent/Git acceptance suite and a separate opt-in live acceptance script using a configured real model and Docker image.
-- Live acceptance must create a disposable local Git repository, make a bounded code change, run tests in Docker, exercise a repair case, persist the final diff/evidence and verify all links. It must not commit or push.
+- Live acceptance runs a real model and Docker Sandbox against an approved local Git repository, makes a bounded code change, runs tests, persists the final diff/evidence and verifies all links. The bounded repair loop is additionally covered by the deterministic forced-failure test. The live gate must not commit or push.
 - Update docs, example configuration and the P6 verification entry point.
 
 Acceptance:
