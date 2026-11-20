@@ -221,3 +221,21 @@ func TestRecoverInterruptedPreservesUnknownOutcomeAndEvent(t *testing.T) {
 		t.Fatalf("repeated recovery should be idempotent: count=%d err=%v", count, err)
 	}
 }
+
+func TestCodingSnapshotPersistsExecutionAttemptAndDigest(t *testing.T) {
+	r:=testRepository(t)
+	ctx:=context.Background()
+	_,err:=r.Create(ctx,CreateRequest{ID:"snapshot-task",RepositoryPath:"/tmp/repo",ModelID:"model",Prompt:"change"})
+	if err!=nil { t.Fatal(err) }
+	snapshot:=Snapshot{
+		TaskID:"snapshot-task",Label:"final",CommitHash:"abc123",Diff:"diff --git a/a b/a",
+		ExecutionID:"execution-snapshot",AttemptID:"execution-snapshot-a-1",
+		ContentSHA256:"0123456789abcdef",
+	}
+	if err=r.SaveSnapshot(ctx,snapshot);err!=nil { t.Fatal(err) }
+	items,err:=r.Snapshots(ctx,"snapshot-task")
+	if err!=nil { t.Fatal(err) }
+	if len(items)!=1 || items[0].ExecutionID!=snapshot.ExecutionID || items[0].AttemptID!=snapshot.AttemptID || items[0].ContentSHA256!=snapshot.ContentSHA256 {
+		t.Fatalf("snapshot provenance not persisted: %+v",items)
+	}
+}
