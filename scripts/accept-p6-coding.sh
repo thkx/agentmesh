@@ -101,8 +101,10 @@ jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.ar
 jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.evidence[]; .execution_id==$execution and .attempt_id==$attempt and .kind=="diff")' <<<"$DETAIL" >/dev/null || fail "diff Evidence provenance is missing"
 jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.evidence[]; .execution_id==$execution and .attempt_id==$attempt and .kind=="test")' <<<"$DETAIL" >/dev/null || fail "test Evidence provenance is missing"
 jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" 'any(.evidence[]; .execution_id==$execution and .attempt_id==$attempt and .kind=="tool_log")' <<<"$DETAIL" >/dev/null || fail "review Evidence provenance is missing"
+USAGE="$(api "$BASE_URL/api/v1/usage/events?execution_id=$EXECUTION_ID&attempt_id=$EXECUTION_ID-a-1&limit=200")"
+jq -e --arg execution "$EXECUTION_ID" --arg attempt "$EXECUTION_ID-a-1" '(.items|length)>=2 and all(.items[]; .execution_id==$execution and .attempt_id==$attempt)' <<<"$USAGE" >/dev/null || fail "Coding model usage is missing canonical Execution/Attempt provenance"
 
-echo "PASS: Workflow, Coding Execution, Attempt, final diff and P4 Artifact/Evidence provenance verified"
+echo "PASS: Workflow, Coding Execution, Attempt, final diff, Artifact/Evidence and Usage provenance verified"
 echo "Workflow: $WORKFLOW_ID"
 echo "Workflow Run: $RUN_ID"
 echo "Coding Task: $TASK_ID"
