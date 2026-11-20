@@ -84,7 +84,19 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 	if err != nil {
 		return Observation{}, err
 	}
-	if a.attempts != nil && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
+	// Pending Coding Tasks are durable in SQLite. Re-scheduling from Observe
+	// makes tasks that were waiting for a local concurrency slot survive restart.
+	if task.Status == coding.StatusPending {
+		if _, err = a.service.Start(ctx, id); err != nil {
+			return Observation{}, err
+		}
+		task, err = a.service.Get(ctx, id)
+		if err != nil {
+			return Observation{}, err
+		}
+	}
+	attemptNotStarted := task.Status == coding.StatusCanceled && task.StartedAt.IsZero()
+	if a.attempts != nil && !attemptNotStarted && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
 		attempts, attemptErr := a.attempts.ListAttempts(ctx, e.ID)
 		if attemptErr != nil {
 			return Observation{}, attemptErr
@@ -130,7 +142,7 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 		return Observation{}, fmt.Errorf("unknown coding task status %q", task.Status)
 	}
 	result, _ := json.Marshal(task)
-	return Observation{Status: status, Attempt: 1, Result: result, Error: task.Error}, nil
+	return Observation{Status: status, Attempt: 1, AttemptNotStarted: attemptNotStarted, Result: result, Error: task.Error}, nil
 }
 
 func (a *CodingAdapter) Cancel(ctx context.Context, e dom.Entity) error {
