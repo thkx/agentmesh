@@ -55,6 +55,25 @@ Ownership rules:
 - Usage Ledger remains the owner of model usage/cost records.
 - Dashboard is a presentation/application adapter; it calls services and does not mutate runtime tables directly.
 
+
+Example Coding Workflow node:
+
+```yaml
+- id: implement
+  type: coding
+  coding:
+    repository_path: /Users/your-user/src/example
+    model_id: glm-5.3-flash
+    prompt: "Implement the requested change and preserve existing behavior."
+    test_command:
+      program: go
+      args: ["test", "./..."]
+    max_repair_attempts: 2
+    timeout_seconds: 1800
+```
+
+The repository path must be inside `coding.allowed_repository_roots`. Test arguments are passed as an argv array; shell metacharacters are rejected and no shell command string is evaluated.
+
 ## 3. Milestones
 
 ### M57 — Durable Coding Execution and provenance
