@@ -137,7 +137,7 @@ An empty list disables Coding Task creation. Configured roots must exist. Reposi
 
 Docker remains a constrained execution environment, not a perfect hostile-code boundary:
 
-- Network is disabled by default; enabling it uses Docker bridge networking and is shown in the Dashboard. Writable Go module and Rust Cargo caches are ephemeral tmpfs mounts; they do not persist between test containers. With networking disabled, projects must vendor/preload dependencies or use an offline test command.
+- Network is disabled by default; enabling it uses Docker bridge networking and is shown in the Dashboard (`agent.tools.sandbox_network_enabled: true`). Writable Go module and Rust Cargo caches are ephemeral tmpfs mounts; they do not persist between test containers. With networking disabled, projects must vendor/preload dependencies or use an offline test command.
 - Container root filesystem is read-only.
 - Capabilities are dropped and no-new-privileges is enabled.
 - PID, memory and CPU limits are applied.
