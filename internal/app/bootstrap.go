@@ -377,6 +377,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("configure coding repository access: %w", err)
 	}
 	codingService.SetReviewer(agentRuntime)
+	if err := codingService.SetAllowedRepositoryRoots(cfg.Coding.AllowedRepositoryRoots); err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("configure coding repository allowlist: %w", err) }
 	if _, err := codingService.Recover(ctx); err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("recover interrupted coding tasks: %w", err)
