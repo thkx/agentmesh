@@ -182,7 +182,7 @@ func (r *Repository) UpdateWithEvent(ctx context.Context, t Task, kind string, p
 func (r *Repository) AddStep(ctx context.Context, s Step) error {
 	inputJSON := encodeJSONText(s.Input)
 	outputJSON := encodeJSONText(s.Output)
-	_, e := r.db.ExecContext(ctx, `INSERT INTO coding_task_steps(id,task_id,sequence,kind,status,input_json,output_json,error,started_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), s.TaskID, s.Sequence, s.Kind, s.Status, inputJSON, outputJSON, s.Error, unix(s.StartedAt), unix(s.FinishedAt))
+	_, e := r.db.ExecContext(ctx, `INSERT INTO coding_task_steps(id,task_id,sequence,kind,status,input_json,output_json,error,started_at,finished_at,exit_code,duration_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, uuid.NewString(), s.TaskID, s.Sequence, s.Kind, s.Status, inputJSON, outputJSON, s.Error, unix(s.StartedAt), unix(s.FinishedAt), s.ExitCode, s.DurationMillis)
 	return e
 }
 func encodeJSONText(s string) string {
@@ -196,7 +196,7 @@ func encodeJSONText(s string) string {
 	return string(b)
 }
 func (r *Repository) Steps(ctx context.Context, id string) ([]Step, error) {
-	rows, e := r.db.QueryContext(ctx, `SELECT id,task_id,sequence,kind,status,input_json,output_json,error,started_at,finished_at FROM coding_task_steps WHERE task_id=? ORDER BY sequence`, id)
+	rows, e := r.db.QueryContext(ctx, `SELECT id,task_id,sequence,kind,status,input_json,output_json,error,started_at,finished_at,exit_code,duration_ms FROM coding_task_steps WHERE task_id=? ORDER BY sequence`, id)
 	if e != nil {
 		return nil, e
 	}
@@ -206,7 +206,7 @@ func (r *Repository) Steps(ctx context.Context, id string) ([]Step, error) {
 		var s Step
 		var inputJSON, outputJSON string
 		var a, b int64
-		if e = rows.Scan(&s.ID, &s.TaskID, &s.Sequence, &s.Kind, &s.Status, &inputJSON, &outputJSON, &s.Error, &a, &b); e != nil {
+		if e = rows.Scan(&s.ID, &s.TaskID, &s.Sequence, &s.Kind, &s.Status, &inputJSON, &outputJSON, &s.Error, &a, &b, &s.ExitCode, &s.DurationMillis); e != nil {
 			return nil, e
 		}
 		if json.Unmarshal([]byte(inputJSON), &s.Input) != nil {
