@@ -53,6 +53,8 @@ type Dependencies struct {
 	RequestShutdown     chan<- struct{}
 	ExecutionManager    *manager.Manager
 	CodingService       *coding.Service
+	SandboxImage        string
+	SandboxNetworkEnabled bool
 	Providers           *domainprovider.ProviderRegistry
 	Models              *domainprovider.ModelRegistry
 	Credentials         appcredential.Manager
@@ -71,6 +73,8 @@ type Handler struct {
 	requestShutdown     chan<- struct{}
 	manager             *manager.Manager
 	codingService       *coding.Service
+	sandboxImage        string
+	sandboxNetworkEnabled bool
 	providerRegistry    *domainprovider.ProviderRegistry
 	modelRegistry       *domainprovider.ModelRegistry
 	credentials         appcredential.Manager
@@ -102,6 +106,8 @@ type pageData struct {
 	CodingEvents     []coding.Event
 	CodingSnapshots  []coding.Snapshot
 	CodingDiff       string
+	CodingSandboxImage string
+	CodingSandboxNetworkEnabled bool
 	Execution        *executionDetail
 	ProviderRows     []providerView
 	ModelRows        []modelView
@@ -266,6 +272,8 @@ func New(d Dependencies) *Handler {
 		requestShutdown:     d.RequestShutdown,
 		manager:             d.ExecutionManager,
 		codingService:       d.CodingService,
+		sandboxImage:        d.SandboxImage,
+		sandboxNetworkEnabled: d.SandboxNetworkEnabled,
 		providerRegistry:    d.Providers,
 		modelRegistry:       d.Models,
 		credentials:         d.Credentials,
@@ -1500,7 +1508,7 @@ func (h *Handler) workflowRun(c *gin.Context) {
 }
 
 func (h *Handler) codingTasks(c *gin.Context) {
-	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}}
+	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
 	if h.codingService != nil {
 		items, err := h.codingService.List(c.Request.Context(), 100)
 		if err != nil { data.Error = "Could not load coding tasks" } else { data.CodingRows = items }
@@ -1539,7 +1547,7 @@ func (h *Handler) codingTask(c *gin.Context) {
 	if h.codingService == nil { c.AbortWithStatus(http.StatusServiceUnavailable); return }
 	task, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
 	if err != nil { c.AbortWithStatus(http.StatusNotFound); return }
-	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task}
+	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
 	data.CodingSteps, err = h.codingService.Steps(c.Request.Context(), task.ID)
 	if err != nil { c.AbortWithStatus(http.StatusInternalServerError); return }
 	data.CodingEvents, err = h.codingService.Events(c.Request.Context(), task.ID)
