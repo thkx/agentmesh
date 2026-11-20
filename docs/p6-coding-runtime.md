@@ -97,7 +97,7 @@ The repository path must be inside `coding.allowed_repository_roots`. Test argum
 Deliverables:
 
 - Add an explicit Coding Task `interrupted` state (additive SQLite migration; preserve existing task rows and indexes).
-- Change restart recovery to atomically persist the interrupted state and a corresponding Coding Task event. Retain the Worktree for inspection.
+- Change restart recovery to atomically persist the interrupted state and a corresponding Coding Task event. Reattach a deterministic Worktree if the process crashed between Git Worktree creation and task metadata persistence. Retain the Worktree for inspection.
 - Map Coding `interrupted` to canonical Execution `interrupted`; the running Attempt becomes `unknown`, not `failed`.
 - Make local concurrency saturation a recoverable queued condition. A Coding Task must not become permanently `needs_reconciliation` merely because both in-process slots are occupied. Reuse the existing persisted pending tasks; do not add a second queue table.
 - Persist the canonical Execution ID on the Coding Task and propagate Execution/Attempt provenance through the Coding Agent context into Model Gateway Usage events.
