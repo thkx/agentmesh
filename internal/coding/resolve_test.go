@@ -15,6 +15,9 @@ func markTaskInterrupted(t *testing.T, service *Service, task Task) Task {
 	task.OutcomeUnknown = true
 	task.StartedAt = time.Now().Add(-time.Minute)
 	task.FinishedAt = time.Now().UTC()
+	if err := service.repo.Update(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
 	if err := service.repo.UpdateWithEvent(context.Background(), task, "task.interrupted", map[string]string{"reason": "test interruption"}); err != nil {
 		t.Fatal(err)
 	}
