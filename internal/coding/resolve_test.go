@@ -79,7 +79,7 @@ func TestResolveInterruptedDiscardResetsWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := service.worktrees.Create(context.Background(), repo, task.ID)
+	ws, err := service.worktrees.Create(context.Background(), repo, "coding-"+task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
