@@ -374,7 +374,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	codingService.SetReviewer(agentRuntime)
 	codingArtifactPublisher, err := newCodingArtifactPublisher(collaborationService)
-	if err != nil { _ = sqliteDB.Close(); return nil, fmt.Errorf("initialize coding artifact publisher: %w", err) }
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize coding artifact publisher: %w", err)
+	}
 	codingService.SetArtifactPublisher(codingArtifactPublisher)
 	if _, err := codingService.Recover(ctx); err != nil {
 		_ = sqliteDB.Close()
