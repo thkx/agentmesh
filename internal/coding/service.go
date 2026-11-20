@@ -15,6 +15,7 @@ import (
 	"github.com/thkx/agentmesh/internal/workspace"
 	"github.com/thkx/agentmesh/internal/workspace/sandbox/docker"
 	"github.com/thkx/agentmesh/internal/workspace/worktree"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type Agent interface {
@@ -174,7 +175,8 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	}
 	agentTask := dom.Task{ID: "coding-" + t.ID, ModelID: t.ModelID, WorkspaceID: workspaceID, Prompt: buildPrompt(t), MaxSteps: 80, MaxToolCalls: 200, TimeoutSeconds: t.TimeoutSeconds, ApprovedTools: []string{"file.write"}}
 	step := Step{TaskID: id, Sequence: 1, Kind: "agent.execute", Status: "running", StartedAt: time.Now().UTC()}
-	result, agentErr := s.agent.Run(runCtx, agentTask)
+	agentCtx := modelgateway.WithExecutionProvenance(runCtx, t.ExecutionID, t.AttemptID)
+	result, agentErr := s.agent.Run(agentCtx, agentTask)
 	step.FinishedAt = time.Now().UTC()
 	if agentErr != nil {
 		step.Status = "failed"
@@ -241,7 +243,7 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 			repairTask.ID = fmt.Sprintf("coding-%s-repair-%d", t.ID, attempt+1)
 			repairTask.Prompt = fmt.Sprintf("The previous implementation failed tests. Fix the failures below. Do not weaken or delete tests.\n\nCommand: %s %s\nOutput:\n%s", command.Program, strings.Join(command.Args, " "), limit(string(output), 18000))
 			repairStep := Step{TaskID: id, Sequence: 3 + attempt*2, Kind: "agent.repair", Status: "running", StartedAt: time.Now().UTC()}
-			if _, e = s.agent.Run(runCtx, repairTask); e != nil {
+			if _, e = s.agent.Run(modelgateway.WithExecutionProvenance(runCtx, t.ExecutionID, t.AttemptID), repairTask); e != nil {
 				repairStep.Status = "failed"
 				repairStep.Error = e.Error()
 				repairStep.FinishedAt = time.Now().UTC()
