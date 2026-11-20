@@ -524,6 +524,14 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize workflow engine: %w", err)
 	}
+	workflowCodingRunner, err := wfruntime.NewManagedCodingRunner(executionManager)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize workflow coding runner: %w", err)
+	}
+	workflowEngine.SetCodingRunner(workflowCodingRunner)
 	workflowExecutionAdapter, err := executionmanager.NewWorkflowAdapter(workflowEngine, cfg.Scheduler.MaxAttempts)
 	if err != nil {
 		workerCancel()
