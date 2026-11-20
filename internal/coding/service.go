@@ -615,6 +615,9 @@ func (s *Service) ResolveInterrupted(ctx context.Context, id, decision, reason s
 		return Task{}, ErrConflict
 	}
 	if decision == "discard" && t.WorkspacePath != "" {
+		if t.WorkspaceID != "coding-"+t.ID {
+			return Task{}, ErrConflict
+		}
 		ws := workspace.Workspace{ID: t.WorkspaceID, Path: t.WorkspacePath, Repository: t.RepositoryPath}
 		if err = s.worktrees.Reset(ctx, ws); err != nil {
 			return Task{}, fmt.Errorf("reset interrupted Worktree: %w", err)
