@@ -217,15 +217,25 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	defer func() { s.mu.Lock(); delete(s.cancels, id); s.mu.Unlock() }()
 	fail := func(err error) (Task, error) {
 		t.Status = StatusFailed
+		eventType := "task.failed"
 		if errors.Is(err, context.Canceled) {
-			t.Status = StatusCanceled
+			if s.ctx.Err() != nil {
+				// Service shutdown is not an explicit user cancellation. Preserve
+				// the uncertain runtime outcome for P4 reconciliation.
+				t.Status = StatusInterrupted
+				t.OutcomeUnknown = true
+				eventType = "task.interrupted"
+			} else {
+				t.Status = StatusCanceled
+				eventType = "task.canceled"
+			}
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			t.Status = StatusFailed
 		}
 		t.Error = err.Error()
 		t.FinishedAt = time.Now().UTC()
-		if persistErr := s.repo.UpdateWithEvent(context.Background(), t, "task.failed", map[string]string{"error": t.Error}); persistErr != nil {
+		if persistErr := s.repo.UpdateWithEvent(context.Background(), t, eventType, map[string]string{"error": t.Error}); persistErr != nil {
 			err = errors.Join(err, fmt.Errorf("persist failed task and event: %w", persistErr))
 		}
 		return t, err
