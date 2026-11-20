@@ -644,9 +644,12 @@ func (s *Service) Recover(ctx context.Context) (int64, error) {
 		return count, err
 	}
 	for _, task := range interrupted {
-		workspaceID := task.WorkspaceID
-		if workspaceID == "" {
-			workspaceID = "coding-" + task.ID
+		workspaceID := "coding-" + task.ID
+		if task.WorkspaceID != "" && task.WorkspaceID != workspaceID {
+			_ = s.repo.Event(ctx, task.ID, "workspace.recovery_unavailable", map[string]string{
+				"reason": "the persisted Worktree identity does not match the Coding Task",
+			})
+			continue
 		}
 		ws, branch, inspectErr := s.worktrees.Inspect(ctx, task.RepositoryPath, workspaceID)
 		if inspectErr != nil {
