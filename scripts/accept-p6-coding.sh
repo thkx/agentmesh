@@ -23,7 +23,7 @@ command -v docker >/dev/null || fail "Docker CLI is required"
 [[ -n "$TOKEN" ]] || fail "set AGENTMESH_API_TOKEN or AGENTMESH_API_TOKEN_FILE"
 [[ -n "$REPOSITORY" && -d "$REPOSITORY" ]] || fail "P6_REPOSITORY_PATH must point to a repository visible to the AgentMesh server"
 [[ -n "$MODEL_ID" ]] || fail "P6_MODEL_ID is required"
-[[ -n "$TEST_COMMAND" ]] || fail "P6_TEST_COMMAND_JSON is required, for example {"program":"go","args":["test","./..."]}"
+[[ -n "$TEST_COMMAND" ]] || fail 'P6_TEST_COMMAND_JSON is required, for example {"program":"go","args":["test","./..."]}'
 docker info >/dev/null 2>&1 || fail "Docker daemon is not reachable"
 git -C "$REPOSITORY" rev-parse --show-toplevel >/dev/null 2>&1 || fail "P6_REPOSITORY_PATH is not a Git repository"
 
