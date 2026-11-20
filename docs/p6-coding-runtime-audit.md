@@ -45,7 +45,7 @@ The P6 code is present on this branch. A green GitHub Actions run and the user's
 - Repeated Submit is idempotent. A previously bound pending task is re-scheduled by Observe after process restart.
 - A task canceled before it starts is reported as `AttemptNotStarted`; it does not receive a fictitious Attempt.
 - Explicit user cancellation remains `canceled`. Service shutdown records `interrupted` with `outcome_unknown=1`; it is not misreported as a user cancellation.
-- Interrupted tasks retain their Worktree and are not automatically replayed.
+- Interrupted tasks retain their Worktree and are not automatically replayed. Startup also inspects the deterministic Worktree path and reattaches it to the task if the process crashed after `git worktree add` but before the path/branch metadata was persisted.
 - The Dashboard exposes an explicit operator resolution after the diff and step history are visible: `keep` retains the Worktree and resolves the task/Execution as failed; `discard` resets the Worktree and resolves them as canceled. Neither option can mark an interrupted Coding Task successful.
 - Coding Task events and snapshots are append-only/immutable at the SQLite layer.
 - Coding model calls carry Execution/Attempt provenance into the Usage Ledger.
@@ -137,7 +137,7 @@ An empty list disables Coding Task creation. Configured roots must exist. Reposi
 
 Docker remains a constrained execution environment, not a perfect hostile-code boundary:
 
-- Network is disabled by default; enabling it uses Docker bridge networking and is shown in the Dashboard.
+- Network is disabled by default; enabling it uses Docker bridge networking and is shown in the Dashboard. Writable Go module and Rust Cargo caches are ephemeral tmpfs mounts; they do not persist between test containers. With networking disabled, projects must vendor/preload dependencies or use an offline test command.
 - Container root filesystem is read-only.
 - Capabilities are dropped and no-new-privileges is enabled.
 - PID, memory and CPU limits are applied.
