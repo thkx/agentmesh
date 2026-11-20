@@ -86,6 +86,9 @@ func (p *codingArtifactPublisher) PublishCodingArtifact(ctx context.Context, tas
 	if err != nil {
 		return coding.ArtifactPublication{}, fmt.Errorf("verify coding artifact: %w", err)
 	}
+	if verification.Outcome != "passed" {
+		return coding.ArtifactPublication{}, fmt.Errorf("coding artifact verification outcome is %q: %s", verification.Outcome, verification.Reason)
+	}
 	return coding.ArtifactPublication{
 		ArtifactID: artifact.ID, VersionID: version.ID,
 		VerificationID: verification.ID, VerificationOutcome: verification.Outcome,
