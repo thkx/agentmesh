@@ -304,6 +304,9 @@ func (m *Manager) Resolve(ctx context.Context, id string, status dom.LifecycleSt
 	if err != nil {
 		return dom.Entity{}, err
 	}
+	if current.Status == status {
+		return current, nil
+	}
 	if current.Status != dom.LifecycleInterrupted && current.Status != dom.LifecycleNeedsReconciliation {
 		return dom.Entity{}, dom.ErrInvalidTransition
 	}
