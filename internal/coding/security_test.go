@@ -4,13 +4,38 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
 
+func initGitRepositoryAt(t *testing.T, path string) string {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = path
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	run("init")
+	run("config", "user.name", "AgentMesh Test")
+	run("config", "user.email", "agentmesh-test@example.invalid")
+	if err := os.WriteFile(filepath.Join(path, "README.md"), []byte("test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "initial")
+	return path
+}
+
 func TestCreateEnforcesCanonicalRepositoryAllowlist(t *testing.T) {
-	allowedRepo := makeGitRepo(t)
-	allowedRoot := filepath.Dir(allowedRepo)
+	allowedRoot := t.TempDir()
+	allowedRepo := initGitRepositoryAt(t, filepath.Join(allowedRoot, "repo"))
 	outsideRepo := makeGitRepo(t)
 
 	service, err := NewService(testRepository(t), fakeCodingAgent{}, t.TempDir(), "golang:1.27.3", false)
