@@ -28,8 +28,10 @@ type Service struct {
 	agent             Agent
 	reviewer          Agent
 	artifactPublisher ArtifactPublisher
-	workspaceRoot     string
-	sandbox           docker.Runner
+	workspaceRoot             string
+	allowedRepositoryRoots    []string
+	restrictRepositoryAccess  bool
+	sandbox                   docker.Runner
 	worktrees         *worktree.Manager
 	taskLocks         *taskLockTable
 	closeOnce         sync.Once
@@ -72,6 +74,45 @@ func (s *Service) SetArtifactPublisher(publisher ArtifactPublisher) {
 	s.mu.Unlock()
 }
 
+// SetAllowedRepositoryRoots enables deny-by-default repository authorization.
+ // Every configured root is canonicalized once; Create canonicalizes the
+ // requested repository again so symlinks cannot escape an approved root.
+func (s *Service) SetAllowedRepositoryRoots(roots []string) error {
+	canonical := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			return ErrRepositoryNotAllowed
+		}
+		abs, err := filepath.Abs(root)
+		if err != nil {
+			return fmt.Errorf("resolve coding repository root: %w", err)
+		}
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err != nil {
+			return fmt.Errorf("resolve coding repository root %q: %w", root, err)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("coding repository root %q must be an existing directory", root)
+		}
+		canonical = append(canonical, filepath.Clean(resolved))
+	}
+	s.mu.Lock()
+	s.allowedRepositoryRoots = canonical
+	s.restrictRepositoryAccess = true
+	s.mu.Unlock()
+	return nil
+}
+
+func pathWithinRoot(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
 		return Task{}, e
@@ -80,14 +121,39 @@ func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e != nil {
 		return Task{}, e
 	}
+	repo, e = filepath.EvalSymlinks(repo)
+	if e != nil {
+		return Task{}, fmt.Errorf("resolve repository path: %w", e)
+	}
 	info, e := os.Stat(repo)
 	if e != nil || !info.IsDir() {
 		return Task{}, fmt.Errorf("repository path must be an existing directory")
 	}
-	if _, e = git(ctx, repo, "rev-parse", "--show-toplevel"); e != nil {
+	top, e := git(ctx, repo, "rev-parse", "--show-toplevel")
+	if e != nil {
 		return Task{}, fmt.Errorf("repository is not a valid git repository: %w", e)
 	}
-	in.RepositoryPath = repo
+	top, e = filepath.EvalSymlinks(top)
+	if e != nil {
+		return Task{}, fmt.Errorf("resolve git repository root: %w", e)
+	}
+	s.mu.Lock()
+	restricted := s.restrictRepositoryAccess
+	roots := append([]string(nil), s.allowedRepositoryRoots...)
+	s.mu.Unlock()
+	if restricted {
+		allowed := false
+		for _, root := range roots {
+			if pathWithinRoot(top, root) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return Task{}, ErrRepositoryNotAllowed
+		}
+	}
+	in.RepositoryPath = filepath.Clean(top)
 	return s.repo.Create(ctx, in)
 }
 func git(ctx context.Context, dir string, args ...string) (string, error) {
