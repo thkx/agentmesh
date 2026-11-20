@@ -130,5 +130,18 @@ type Snapshot struct {
 	Label      string    `json:"label"`
 	CommitHash string    `json:"commit_hash"`
 	Diff       string    `json:"diff"`
+	ExecutionID string `json:"execution_id,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+	ContentSHA256 string `json:"content_sha256,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+type ArtifactPublication struct {
+	ArtifactID string `json:"artifact_id"`
+	VersionID string `json:"version_id"`
+	VerificationID string `json:"verification_id"`
+	VerificationOutcome string `json:"verification_outcome"`
+}
+type ArtifactPublisher interface {
+	PublishCodingArtifact(context.Context, Task, Snapshot, []Step) (ArtifactPublication, error)
 }
