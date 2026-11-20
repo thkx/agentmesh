@@ -1509,6 +1509,7 @@ func (h *Handler) workflowRun(c *gin.Context) {
 
 func (h *Handler) codingTasks(c *gin.Context) {
 	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
+	if c.Query("error") == "create" { data.Error = "Could not create the Coding Task. Check the repository allowlist, model ID, prompt, test command and task limits." }
 	if h.codingService != nil {
 		items, err := h.codingService.List(c.Request.Context(), 100)
 		if err != nil {
@@ -1571,6 +1572,13 @@ func (h *Handler) codingTask(c *gin.Context) {
 		return
 	}
 	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
+	switch c.Query("message") {
+	case "coding-queued": data.Message = "Coding task submitted. Review the Worktree diff and evidence before keeping changes."
+	case "cancel-requested": data.Message = "Cancellation requested."
+	case "reverted": data.Message = "Worktree reset to its base commit."
+	case "cleaned": data.Message = "Worktree and task branch cleaned up."
+	}
+	if c.Query("error") != "" { data.Error = "The requested Coding operation could not be completed. Check the current task status and event history." }
 	data.CodingSteps, err = h.codingService.Steps(c.Request.Context(), task.ID)
 	if err != nil {
 		c.AbortWithStatus(http.StatusInternalServerError)
