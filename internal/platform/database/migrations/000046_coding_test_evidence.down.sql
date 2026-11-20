@@ -1,0 +1,2 @@
+-- SQLite does not support DROP COLUMN on every version supported by AgentMesh.
+-- These additive evidence columns are retained during downgrade to avoid table rebuild data loss.
