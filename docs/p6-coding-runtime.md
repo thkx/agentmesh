@@ -6,6 +6,20 @@
 
 The source audit is in [P6 Coding Runtime Source Audit](p6-coding-runtime-audit.md). This plan is intentionally additive: it closes gaps in the existing Coding Runtime rather than replacing it.
 
+## Implementation status
+
+M57–M60 implementation is being integrated on this branch. The Dashboard, Workflow Coding node, Coding Execution adapter, test/repair/review pipeline, Artifact/Evidence publisher, repository allowlist and live acceptance script are present. Do not mark P6 accepted until the latest branch commit passes GitHub Actions and the opt-in live acceptance below passes on the user's AgentMesh host.
+
+Coding repository access is deny-by-default. Add trusted absolute repository roots to the active configuration:
+
+```yaml
+coding:
+  allowed_repository_roots:
+    - /absolute/path/to/trusted/repositories
+```
+
+An empty list disables Coding Task creation. Relative paths are resolved from the AgentMesh process working directory. The configured directories must already exist.
+
 ## 1. Product outcome
 
 A user should be able to:
