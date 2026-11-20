@@ -275,8 +275,8 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	if e != nil {
 		return fail(e)
 	}
-	if err = s.review(runCtx, t, diff); err != nil {
-		return fail(err)
+	if e = s.review(runCtx, t, diff); e != nil {
+		return fail(e)
 	}
 	hash, e := s.worktrees.CommitHash(runCtx, ws)
 	if e != nil {
