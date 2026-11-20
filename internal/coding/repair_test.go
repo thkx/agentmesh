@@ -31,6 +31,7 @@ func TestCodingTaskRepairsFailedDockerTestAndPersistsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer service.Close()
 	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil {
 		t.Fatal(err)
 	}
