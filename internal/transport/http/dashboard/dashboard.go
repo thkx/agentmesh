@@ -1645,6 +1645,16 @@ func (h *Handler) resolveCodingTask(c *gin.Context) {
 	}
 	decision := strings.TrimSpace(c.PostForm("decision"))
 	reason := strings.TrimSpace(c.PostForm("reason"))
+	before, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+		return
+	}
+	if before.ExecutionID != "" {
+		// Observe the interrupted child state before applying the operator's
+		// terminal decision to the canonical Execution.
+		_, _ = h.manager.Get(c.Request.Context(), before.ExecutionID)
+	}
 	task, err := h.codingService.ResolveInterrupted(c.Request.Context(), c.Param("id"), decision, reason)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
@@ -1660,9 +1670,6 @@ func (h *Handler) resolveCodingTask(c *gin.Context) {
 			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
 			return
 		}
-		// Observe the child runtime after the Coding Task decision; this may
-		// already bring the Execution to its matching terminal state.
-		_, _ = h.manager.Get(c.Request.Context(), task.ExecutionID)
 		if _, err = h.manager.Resolve(c.Request.Context(), task.ExecutionID, status, result,
 			"coding outcome manually reviewed; decision="+decision+"; reason="+reason); err != nil {
 			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve-execution")
