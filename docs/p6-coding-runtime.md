@@ -162,6 +162,7 @@ Deliverables:
 
 - Add a Coding section to the existing Dashboard: task list, create form, detail, lifecycle, Steps, Events, repair iterations, test output, Worktree/branch, base commit and diff.
 - Provide safe controls for cancel, patch inspection, revert and cleanup; destructive actions require confirmation and POST.
+- For interrupted/unknown outcomes, show the retained diff and test history before offering explicit `keep` (resolve as failed) or `discard` (reset and resolve as canceled). Manual resolution must never mark the task succeeded.
 - Link each Coding Task to its canonical Execution detail/timeline and published Artifact/Evidence.
 - Show sandbox network mode and configured image identity; never imply that network-enabled execution is isolated from external services.
 - Add a deterministic fake-Agent/Git acceptance suite and a separate opt-in live acceptance script using a configured real model and Docker image.
