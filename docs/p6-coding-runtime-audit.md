@@ -46,6 +46,7 @@ The P6 code is present on this branch. A green GitHub Actions run and the user's
 - A task canceled before it starts is reported as `AttemptNotStarted`; it does not receive a fictitious Attempt.
 - Explicit user cancellation remains `canceled`. Service shutdown records `interrupted` with `outcome_unknown=1`; it is not misreported as a user cancellation.
 - Interrupted tasks retain their Worktree and are not automatically replayed.
+- The Dashboard exposes an explicit operator resolution after the diff and step history are visible: `keep` retains the Worktree and resolves the task/Execution as failed; `discard` resets the Worktree and resolves them as canceled. Neither option can mark an interrupted Coding Task successful.
 - Coding Task events and snapshots are append-only/immutable at the SQLite layer.
 - Coding model calls carry Execution/Attempt provenance into the Usage Ledger.
 - Test and reviewer output are bounded before persistence; patch size is capped before artifact publication.
