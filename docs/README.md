@@ -18,7 +18,7 @@ This page is the documentation index. Use the root README for the project overvi
 | [P5 Part 1 Checklist](p5-part1-checklist.md) | M49–M52 implementation tasks and final acceptance gates |
 | [P5 Part 1 Implementation](p5-part1-implementation.md) | Dashboard implementation record and exact verification gates |
 | [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |
-| [P5 M53 Implementation Status](p5-m53-implementation.md) | Current M53 implementation record, limitations and verification command |
+| [P5 M53 Implementation Status](p5-m53-implementation.md) | Current M53 implementation record, limitations and verification command |\n| [P6 Coding Runtime Source Audit](p6-coding-runtime-audit.md) | Source-level audit of Coding Task, Unified Execution adapter, Worktree, Docker, provenance and Dashboard gaps |\n| [P6 Coding Runtime Closed Loop](p6-coding-runtime.md) | M57–M60 architecture, delivery scope, security requirements and acceptance gates |
 
 ## Architecture and implementation history
 
