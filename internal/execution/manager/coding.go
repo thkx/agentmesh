@@ -37,6 +37,17 @@ func NewCodingAdapter(service CodingService, stores ...CodingAttemptStore) (*Cod
 	return adapter, nil
 }
 
+func (a *CodingAdapter) ValidateSubmit(ctx context.Context, in SubmitRequest) error {
+	var request coding.CreateRequest
+	if err := json.Unmarshal(in.Input, &request); err != nil { return ErrInvalidRequest }
+	if request.ID == "" { request.ID = in.TaskID }
+	if request.ID == "" || (in.TaskID != "" && request.ID != in.TaskID) { return ErrInvalidRequest }
+	if validator, ok := a.service.(interface { ValidateCreateRequest(context.Context, coding.CreateRequest) error }); ok {
+		return validator.ValidateCreateRequest(ctx, request)
+	}
+	return nil
+}
+
 func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
 	var request coding.CreateRequest
 	if err := json.Unmarshal(e.Input, &request); err != nil {
