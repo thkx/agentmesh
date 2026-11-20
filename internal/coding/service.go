@@ -449,7 +449,9 @@ func (s *Service) Cleanup(ctx context.Context, id string) error {
 
 func (s *Service) Recover(ctx context.Context) (int64, error) { return s.repo.RecoverInterrupted(ctx) }
 
-func (s *Service) BindExecution(ctx context.Context, taskID, executionID string) error { return s.repo.BindExecution(ctx, taskID, executionID) }
+func (s *Service) BindExecution(ctx context.Context, taskID, executionID, attemptID string) error {
+	return s.repo.BindExecution(ctx, taskID, executionID, attemptID)
+}
 
 // Start schedules a task in the background so HTTP request timeouts do not
 // truncate long-running coding sessions. Run remains available for controlled
