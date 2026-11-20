@@ -23,6 +23,7 @@ type Agent interface {
 type Service struct {
 	repo          *Repository
 	agent         Agent
+	reviewer      Agent
 	workspaceRoot string
 	sandbox       docker.Runner
 	worktrees     *worktree.Manager
@@ -60,6 +61,8 @@ func NewService(repo *Repository, agent Agent, workspaceRoot, image string, netw
 	serviceCtx, serviceCancel := context.WithCancel(context.Background())
 	return &Service{repo: repo, agent: agent, workspaceRoot: abs, sandbox: docker.Runner{Image: image, NetworkEnabled: network}, worktrees: worktrees, taskLocks: newTaskLockTable(), done: make(chan struct{}), cancels: map[string]context.CancelFunc{}, scheduled: map[string]struct{}{}, maxConcurrent: make(chan struct{}, 2), ctx: serviceCtx, cancel: serviceCancel}, nil
 }
+func (s *Service) SetReviewer(reviewer Agent) { s.mu.Lock(); s.reviewer = reviewer; s.mu.Unlock() }
+
 func (s *Service) Create(ctx context.Context, in CreateRequest) (Task, error) {
 	if e := in.Validate(); e != nil {
 		return Task{}, e
@@ -210,7 +213,9 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 				testStep.Error = testErr.Error()
 			}
 			testStep.Output = limit(string(output), 12000)
+			testStep.ExitCode = commandExitCode(testErr)
 			testStep.FinishedAt = time.Now().UTC()
+			testStep.DurationMillis = testStep.FinishedAt.Sub(testStep.StartedAt).Milliseconds()
 			if e = s.repo.AddStep(context.Background(), testStep); e != nil {
 				return fail(fmt.Errorf("persist test step: %w", e))
 			}
@@ -258,6 +263,7 @@ func (s *Service) run(ctx context.Context, id string, slotReserved bool) (Task, 
 	if e != nil {
 		return fail(e)
 	}
+	if err = s.review(runCtx, t, diff); err != nil { return fail(err) }
 	hash, e := s.worktrees.CommitHash(runCtx, ws)
 	if e != nil {
 		return fail(e)
