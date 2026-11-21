@@ -736,3 +736,57 @@ func TestNewTaskRouteRequiresAgentAndWorkspaceServices(t *testing.T) {
 		t.Fatalf("missing dependencies status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+
+func TestAgentRunDetailRendersSuccessAndFailureResults(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		name string
+		run  *agentRunDetailView
+		wants []string
+	}{
+		{
+			name: "success",
+			run: &agentRunDetailView{
+				ID: "run-success", DefinitionID: "agent-1", AgentName: "Research Agent",
+				TaskID: "task-1", Status: "succeeded", Content: "Workspace summary",
+				CreatedAt: "2026-11-21T12:00:00Z", StartedAt: "2026-11-21T12:00:01Z",
+				FinishedAt: "2026-11-21T12:00:03Z", Duration: "2s", Steps: 2, ToolCalls: 1,
+			},
+			wants: []string{"AGENT RUN RESULT", "Research Agent", "succeeded", "Workspace summary", "2s", "task-1", "Start another task"},
+		},
+		{
+			name: "failure",
+			run: &agentRunDetailView{
+				ID: "run-failed", DefinitionID: "agent-1", TaskID: "task-2",
+				Status: "failed", Error: "agent reached maximum steps: limit=2",
+				CreatedAt: "2026-11-21T12:00:00Z",
+			},
+			wants: []string{"failed", "Failure reason", "agent reached maximum steps: limit=2"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body bytes.Buffer
+			if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{
+				Title: "Agent Run " + tc.run.ID, Active: "agents", AgentRun: tc.run,
+			}); err != nil {
+				t.Fatalf("render Agent Run detail: %v", err)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(body.String(), want) {
+					t.Errorf("Agent Run detail missing %q: %s", want, body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestAgentRunRouteRequiresAgentCatalog(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/agent-runs/run-1", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing Agent catalog status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
