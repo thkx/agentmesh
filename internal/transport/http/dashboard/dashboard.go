@@ -353,6 +353,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
+	g.POST("/workspaces/quickstart", h.requireSession(), h.createQuickstartWorkspace)
 	g.POST("/workflows/quickstart", h.requireSession(), h.createQuickstartWorkflowTemplate)
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
@@ -1174,6 +1175,34 @@ func (h *Handler) deleteAgent(c *gin.Context) {
 	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-deleted")
 }
+func (h *Handler) createQuickstartWorkspace(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	slug := strings.TrimSpace(c.PostForm("slug"))
+	description := strings.TrimSpace(c.PostForm("description"))
+	if name == "" || len(name) > 160 || slug == "" || len(slug) > 100 {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	workspace := collaboration.Workspace{
+		Name: name, Slug: slug, Description: description,
+		AutonomyMode: "hybrid", MaxAgentConcurrency: 4, MaxDelegationDepth: 3,
+	}
+	if _, err := h.collaboration.CreateWorkspace(c.Request.Context(), workspace); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workspace-created")
+}
+
 func (h *Handler) createQuickstartWorkflowTemplate(c *gin.Context) {
 	if !sameOrigin(c.Request) {
 		c.AbortWithStatus(http.StatusForbidden)
