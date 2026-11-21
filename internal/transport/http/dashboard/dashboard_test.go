@@ -396,6 +396,7 @@ func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *te
 	body := rec.Body.String()
 	for _, want := range []string{
 		"4 / 5",
+		"href=\"/dashboard/new-task\">Start a task</a>",
 		"已完成 Agent 任务",
 		"Recommended next step: Run your first Agent task",
 		"href=\"/dashboard/agents\">Continue</a>",
