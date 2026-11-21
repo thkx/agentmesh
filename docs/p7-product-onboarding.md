@@ -48,6 +48,8 @@ P7 is a product usability phase, not a new runtime phase. It must reuse the exis
 - Let the user run a saved Workflow and navigate directly to its durable Run detail.
 - Keep YAML and graph editing available as advanced authoring paths.
 
+**Implementation in progress:** the Dashboard now has a guided single-Agent starter that requires an enabled model and an existing workspace, previews the Start → Agent → End sequence, and saves a validated durable template. Queueing a run now redirects to its durable Run detail. Automated and local verification are still required before M64 is accepted.
+
 ### M65 — Product-wide usability and acceptance
 
 - Normalize empty states, validation messages, destructive-action confirmation and navigation.
