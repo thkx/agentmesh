@@ -97,6 +97,13 @@ func (m *Manager) Submit(ctx context.Context, in SubmitRequest) (dom.Entity, err
 			return dom.Entity{}, err
 		}
 	}
+	if validator, ok := adapter.(interface {
+		ValidateSubmit(context.Context, SubmitRequest) error
+	}); ok {
+		if err := validator.ValidateSubmit(ctx, in); err != nil {
+			return dom.Entity{}, err
+		}
+	}
 	now := time.Now().UTC()
 	e := dom.Entity{
 		ID: uuid.NewString(), Kind: in.Kind, Runtime: in.Runtime, TaskID: in.TaskID,
@@ -296,6 +303,9 @@ func (m *Manager) Resolve(ctx context.Context, id string, status dom.LifecycleSt
 	current, err := m.store.Get(ctx, id)
 	if err != nil {
 		return dom.Entity{}, err
+	}
+	if current.Status == status {
+		return current, nil
 	}
 	if current.Status != dom.LifecycleInterrupted && current.Status != dom.LifecycleNeedsReconciliation {
 		return dom.Entity{}, dom.ErrInvalidTransition

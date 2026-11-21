@@ -24,6 +24,9 @@ import (
 type AgentRunner interface {
 	Run(context.Context, agentdom.Task) (agentdom.Result, error)
 }
+type CodingRunner interface {
+	RunCoding(context.Context, string, json.RawMessage) (json.RawMessage, error)
+}
 type AgentResultReader interface {
 	Get(string) (agentdom.Result, error)
 }
@@ -54,11 +57,30 @@ type Store interface {
 }
 type subworkflowDepthKey struct{}
 
+// ErrCodingOutcomeIndeterminate signals that a durable Coding Execution
+// cannot be safely resumed or replayed after its outcome became uncertain.
+var ErrCodingOutcomeIndeterminate = errors.New("coding execution outcome is indeterminate")
+
+type cancellationRequestContextKey struct{}
+
+// IsCancellationRequested distinguishes an explicit user cancellation from a
+// worker/process context shutdown. External runtimes must not convert the
+// latter into a confirmed cancellation of their own durable execution.
+func WithCancellationRequestCheck(ctx context.Context, check func() bool) context.Context {
+	return context.WithValue(ctx, cancellationRequestContextKey{}, check)
+}
+
+func IsCancellationRequested(ctx context.Context) bool {
+	check, ok := ctx.Value(cancellationRequestContextKey{}).(func() bool)
+	return ok && check != nil && check()
+}
+
 type Engine struct {
 	store          Store
 	agent          AgentRunner
 	policy         policy.Policy
 	capabilities   *capability.Registry
+	coding         CodingRunner
 	locks          sync.Map
 	cancels        sync.Map
 	cancelRequests sync.Map
@@ -111,6 +133,8 @@ func (e *Engine) RecoverNode(ctx context.Context, runID, nodeID, action, comment
 	}
 	return s.RecoverFailedNode(ctx, runID, nodeID, action, comment, maxAttempts)
 }
+
+func (e *Engine) SetCodingRunner(r CodingRunner) { e.coding = r }
 
 func (e *Engine) SetCapabilities(r *capability.Registry) {
 	if r != nil {
@@ -240,7 +264,11 @@ func (e *Engine) ProcessLeased(ctx context.Context, runID, owner string, fenceTo
 	if err = e.reconcileAgentNodes(ctx, c, &r, owner, fenceToken); err != nil {
 		return r, err
 	}
-	runCtx, cancel := context.WithCancel(ctx)
+	baseCtx := WithCancellationRequestCheck(ctx, func() bool {
+		_, requested := e.cancelRequests.Load(runID)
+		return requested
+	})
+	runCtx, cancel := context.WithCancel(baseCtx)
 	if _, loaded := e.cancels.LoadOrStore(runID, cancel); loaded {
 		cancel()
 		return r, errors.New("workflow run is already executing in this process")
@@ -290,6 +318,8 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 					return err
 				}
 				r.Context[nodeID] = map[string]any{"content": result.Content, "status": result.Status, "task_id": result.TaskID}
+			} else if node.Type == wf.NodeCoding {
+				r.Context[nodeID] = map[string]any{"coding": json.RawMessage(ledgerOutput)}
 			}
 			for _, edge := range c.Outgoing[nodeID] {
 				if node.Type != wf.NodeCondition || edgeIsActive(node, state, edge) {
@@ -320,6 +350,43 @@ func (e *Engine) reconcileAgentNodes(ctx context.Context, c *compiler.Compiled, 
 			r.FinishedAt = time.Now().UTC()
 			_ = e.persistRun(context.WithoutCancel(ctx), *r, owner, fenceToken)
 			return errors.New(state.Error)
+		}
+		if node.Type == wf.NodeCoding {
+			output, contextValue, _, codingErr := e.executeNode(ctx, node, r.Context, stableTaskID(r.ID, nodeID))
+			if codingErr != nil {
+				state.Status = wf.NodeFailed
+				if errors.Is(codingErr, ErrCodingOutcomeIndeterminate) {
+					state.Status = wf.NodeInterrupted
+				}
+				state.Error = codingErr.Error()
+				state.FinishedAt = time.Now().UTC()
+				if ledgerStatus == "running" {
+					_ = ledger.CompleteNode(ctx, r.ID, nodeID, owner, fenceToken, nil, codingErr)
+				}
+				r.Nodes[nodeID] = state
+				r.Status = wf.RunFailed
+				r.Error = state.Error
+				r.FinishedAt = state.FinishedAt
+				_ = e.persistRun(context.WithoutCancel(ctx), *r, owner, fenceToken)
+				return codingErr
+			}
+			if ledgerStatus == "running" || ledgerStatus == "failed" {
+				if err = ledger.RecoverNode(ctx, r.ID, nodeID, output); err != nil {
+					return err
+				}
+			}
+			state.Status = wf.NodeSucceeded
+			state.Output = output
+			state.Error = ""
+			state.FinishedAt = time.Now().UTC()
+			r.Nodes[nodeID] = state
+			if contextValue != nil {
+				r.Context[nodeID] = contextValue
+			}
+			for _, edge := range c.Outgoing[nodeID] {
+				r.PendingNodes = append(r.PendingNodes, edge.To)
+			}
+			continue
 		}
 		if node.Type != wf.NodeAgent || !canRead {
 			state.Status = wf.NodeInterrupted
@@ -559,10 +626,18 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 	ledger, hasLedger := e.store.(NodeLedger)
 	for {
 		if err := ctx.Err(); err != nil {
-			if _, requested := e.cancelRequests.Load(r.ID); requested {
+			if IsCancellationRequested(ctx) {
 				r.Status = wf.RunCanceled
 			} else {
 				r.Status = wf.RunFailed
+				for nodeID, state := range r.Nodes {
+					if state.Status == wf.NodeRunning {
+						state.Status = wf.NodeInterrupted
+						state.Error = "worker stopped while node outcome was unknown"
+						state.FinishedAt = time.Now().UTC()
+						r.Nodes[nodeID] = state
+					}
+				}
 			}
 			r.Error = err.Error()
 			r.FinishedAt = time.Now().UTC()
@@ -781,6 +856,10 @@ func (e *Engine) executeOwned(ctx context.Context, c *compiler.Compiled, r wf.Ru
 			}
 			if res.err != nil {
 				state.Status = wf.NodeFailed
+				if errors.Is(res.err, ErrCodingOutcomeIndeterminate) ||
+					(errors.Is(res.err, context.Canceled) && !IsCancellationRequested(ctx)) {
+					state.Status = wf.NodeInterrupted
+				}
 				state.Error = res.err.Error()
 				state.FinishedAt = time.Now().UTC()
 				if !state.StartedAt.IsZero() {
@@ -853,6 +932,28 @@ func (e *Engine) executeNode(ctx context.Context, n wf.Node, contextData map[str
 		}
 		b, err := json.Marshal(result)
 		return b, map[string]any{"content": result.Content, "status": result.Status, "task_id": result.TaskID}, "", err
+	case wf.NodeCoding:
+		if e.coding == nil {
+			return nil, nil, "", errors.New("workflow coding runtime is not configured")
+		}
+		cfg := n.Coding
+		request := map[string]any{
+			"id": taskID, "repository_path": cfg.RepositoryPath, "model_id": cfg.ModelID,
+			"prompt":              render(cfg.Prompt, agentRenderContext(contextData, "")),
+			"max_repair_attempts": cfg.MaxRepairAttempts, "timeout_seconds": cfg.TimeoutSeconds,
+		}
+		if cfg.TestCommand.Program != "" {
+			request["test_command"] = cfg.TestCommand
+		}
+		input, err := json.Marshal(request)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		output, err := e.coding.RunCoding(ctx, taskID, input)
+		if err != nil {
+			return nil, nil, "", err
+		}
+		return output, map[string]any{"coding": json.RawMessage(output)}, "", nil
 	case wf.NodeCondition:
 		actual := lookup(contextData, n.Condition.InputKey)
 		matched := evaluateCondition(actual, n.Condition)

@@ -227,7 +227,7 @@ func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
 
 func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
 	r := testRouter("")
-	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/tasks", "/dashboard/workflows", "/dashboard/executions"} {
+	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/tasks", "/dashboard/workflows", "/dashboard/executions", "/dashboard/coding"} {
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusOK {
@@ -338,6 +338,22 @@ func TestOperationsDashboardShowsSQLiteAndWorkerHealth(t *testing.T) {
 	for _, want := range []string{"System health", "SQLite integrity", "Schema version", "44", "running", "Gracefully stop AgentMesh"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("operations dashboard missing %q", want)
+		}
+	}
+}
+
+func TestCodingDashboardRendersTaskCreationAndRecentTasks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	New(Dependencies{SandboxImage: "golang:1.27", SandboxNetworkEnabled: false}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/coding", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("coding dashboard status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Coding", "Create and run Coding Task", "coding.allowed_repository_roots", "Docker image", "Network mode", "Recent coding tasks"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("coding dashboard missing %q", want)
 		}
 	}
 }

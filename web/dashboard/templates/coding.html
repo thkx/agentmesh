@@ -1,0 +1,103 @@
+{{define "coding-page"}}
+{{if .Error}}<div class="alert error">{{.Error}}</div>{{end}}
+{{if .Message}}<div class="alert success">{{.Message}}</div>{{end}}
+<section class="page-header">
+  <div>
+    <h1>Coding</h1>
+    <p>Run a coding task in an isolated Git Worktree, inspect test and review evidence, then decide what to keep.</p>
+  </div>
+  <a href="/dashboard/executions">Unified Executions</a>
+</section>
+
+{{if .CodingTask}}
+<section class="card">
+  <h2>{{.CodingTask.Title}}</h2>
+  <dl class="details">
+    <dt>Task ID</dt><dd><code>{{.CodingTask.ID}}</code></dd>
+    <dt>Execution ID</dt><dd>{{if .CodingTask.ExecutionID}}<a href="/dashboard/executions/{{.CodingTask.ExecutionID}}"><code>{{.CodingTask.ExecutionID}}</code></a>{{end}}</dd>
+    <dt>Attempt ID</dt><dd><code>{{.CodingTask.AttemptID}}</code></dd>
+    <dt>Status</dt><dd><strong>{{.CodingTask.Status}}</strong>{{if .CodingTask.OutcomeUnknown}} — outcome unknown; inspect the retained Worktree before resolving{{end}}</dd>
+    <dt>Model</dt><dd>{{.CodingTask.ModelID}}</dd>
+    <dt>Repository</dt><dd><code>{{.CodingTask.RepositoryPath}}</code></dd>
+    <dt>Branch</dt><dd><code>{{.CodingTask.BranchName}}</code></dd>
+    <dt>Worktree</dt><dd><code>{{.CodingTask.WorkspacePath}}</code></dd>
+    <dt>Repair attempts</dt><dd>{{.CodingTask.RepairAttempts}} / {{.CodingTask.MaxRepairAttempts}}</dd>
+    <dt>Error</dt><dd>{{.CodingTask.Error}}</dd>
+  </dl>
+  <div class="actions">
+    {{if or (eq .CodingTask.Status "pending") (eq .CodingTask.Status "running") (eq .CodingTask.Status "testing") (eq .CodingTask.Status "repairing")}}
+    <form method="post" action="/dashboard/coding/{{.CodingTask.ID}}/cancel"><button type="submit">Request cancellation</button></form>
+    {{end}}
+    {{if and (ne .CodingTask.WorkspacePath "") (not .CodingTask.OutcomeUnknown) (ne .CodingTask.Status "running") (ne .CodingTask.Status "testing") (ne .CodingTask.Status "repairing")}}
+    <form method="post" action="/dashboard/coding/{{.CodingTask.ID}}/revert" onsubmit="return confirm('Reset this task Worktree to its base commit?')"><input type="hidden" name="confirm" value="yes"><button type="submit">Revert Worktree</button></form>
+    <form method="post" action="/dashboard/coding/{{.CodingTask.ID}}/cleanup" onsubmit="return confirm('Remove this Worktree and its task branch?')"><input type="hidden" name="confirm" value="yes"><button type="submit">Cleanup Worktree</button></form>
+    {{end}}
+  </div>
+</section>
+
+
+<section class="card">
+  <h2>Final Diff</h2>
+  {{if .CodingDiff}}<pre class="code-block">{{.CodingDiff}}</pre>{{else}}<p>No diff is currently available. Check the saved snapshots and event history before resolving the task.</p>{{end}}
+  {{range .CodingSnapshots}}<p>Snapshot: <code>{{.CommitHash}}</code> · {{.CreatedAt}}</p>{{end}}
+</section>
+
+<section class="card">
+  <h2>Steps · Tests · Review</h2>
+  {{if .CodingSteps}}
+  <table><thead><tr><th>Sequence</th><th>Step</th><th>Status</th><th>Exit</th><th>Duration</th><th>Output / Error</th></tr></thead><tbody>
+  {{range .CodingSteps}}<tr><td>{{.Sequence}}</td><td>{{.Kind}}</td><td>{{.Status}}</td><td>{{.ExitCode}}</td><td>{{.DurationMillis}} ms</td><td><pre>{{if .Error}}{{.Error}}{{else}}{{.Output}}{{end}}</pre></td></tr>{{end}}
+  </tbody></table>
+  {{else}}<p>No steps recorded yet.</p>{{end}}
+</section>
+
+{{if .CodingTask.OutcomeUnknown}}
+<section class="card">
+  <h2>Resolve interrupted outcome</h2>
+  <p>Inspect the retained Worktree diff and test history above before choosing. This records a human decision; it never marks the Coding Task successful.</p>
+  <form method="post" action="/dashboard/coding/{{.CodingTask.ID}}/resolve" class="stack" onsubmit="return confirm('Record this manual resolution? Discard will reset the Worktree to its base commit.')">
+    <label>Decision
+      <select name="decision" required>
+        <option value="keep">Keep the current Worktree changes and mark the task failed</option>
+        <option value="discard">Discard changes by resetting the Worktree and mark the task canceled</option>
+      </select>
+    </label>
+    <label>Reason<textarea name="reason" rows="3" required maxlength="1000" placeholder="I inspected the diff and test history; explain why this is safe."></textarea></label>
+    <input type="hidden" name="confirm" value="yes">
+    <button type="submit">Record manual resolution</button>
+  </form>
+</section>
+{{end}}
+<section class="card">
+  <h2>Event History</h2>
+  {{range .CodingEvents}}<p><code>{{.CreatedAt}}</code> · <strong>{{.Type}}</strong> <pre>{{.Payload}}</pre></p>{{else}}<p>No events recorded.</p>{{end}}
+</section>
+{{else}}
+<section class="card">
+  <h2>Start a coding task</h2>
+  <form method="post" action="/dashboard/coding" class="stack">
+    <label>Title<input name="title" required maxlength="160" placeholder="Fix the API pagination bug"></label>
+    <label>Local Git repository path (must be under a configured coding.allowed_repository_roots directory)<input name="repository_path" required placeholder="/Users/me/src/my-project"></label>
+    <label>Model ID<input name="model_id" required placeholder="your-enabled-model-id"></label>
+    <label>Test command program (optional if project manifest is detected)<input name="test_program" placeholder="go, npm, pytest, cargo"></label>
+    <label>Test command arguments (space-separated, no shell syntax)<input name="test_args" placeholder="test ./..."></label>
+    <label>Task description<textarea name="prompt" rows="6" required placeholder="Describe the required change and acceptance criteria"></textarea></label>
+    <p class="muted">Leave both empty to detect Go, Node.js, Python or Rust tests from the repository manifest. Reviewed Coding success requires test evidence.</p>
+    <div class="form-row">
+      <label>Maximum repair attempts<input type="number" name="max_repair_attempts" min="0" max="5" value="2"></label>
+      <label>Timeout seconds<input type="number" name="timeout_seconds" min="60" max="7200" value="1800"></label>
+    </div>
+    <p class="muted">Docker image: <code>{{.CodingSandboxImage}}</code>. Network mode: <strong>{{if .CodingSandboxNetworkEnabled}}bridge enabled{{else}}disabled{{end}}</strong>. AgentMesh does not commit or push changes.</p>
+    <button type="submit">Create and run Coding Task</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Recent coding tasks</h2>
+  {{if .CodingRows}}
+  <table><thead><tr><th>Task</th><th>Status</th><th>Repository</th><th>Updated</th></tr></thead><tbody>
+  {{range .CodingRows}}<tr><td><a href="/dashboard/coding/{{.ID}}">{{if .Title}}{{.Title}}{{else}}{{.ID}}{{end}}</a></td><td>{{.Status}}{{if .OutcomeUnknown}} · unknown{{end}}</td><td><code>{{.RepositoryPath}}</code></td><td>{{.UpdatedAt}}</td></tr>{{end}}
+  </tbody></table>
+  {{else}}<p>No coding tasks yet.</p>{{end}}
+</section>
+{{end}}
+{{end}}

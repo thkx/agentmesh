@@ -3,13 +3,17 @@ package airesource
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -24,6 +28,67 @@ func (e *upstreamError) Error() string {
 
 // StatusCode lets the shared model gateway classify upstream failures.
 func (e *upstreamError) StatusCode() int { return e.Status }
+
+// providerRequestError exposes only a bounded diagnostic category. The
+// underlying net/http error is intentionally not retained because it may
+// contain a URL with credentials or sensitive query parameters.
+type providerRequestError struct {
+	category string
+}
+
+func (e *providerRequestError) Error() string {
+	return "provider request failed (" + e.category + ")"
+}
+
+func (e *providerRequestError) DiagnosticCode() string { return e.category }
+
+func classifyTransportError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "request_cancelled"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "request_timeout"
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns_error"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "request_timeout"
+	}
+	var authorityErr x509.UnknownAuthorityError
+	if errors.As(err, &authorityErr) {
+		return "tls_error"
+	}
+	var hostnameErr x509.HostnameError
+	if errors.As(err, &hostnameErr) {
+		return "tls_error"
+	}
+	var certInvalidErr x509.CertificateInvalidError
+	if errors.As(err, &certInvalidErr) {
+		return "tls_error"
+	}
+	var recordErr tls.RecordHeaderError
+	if errors.As(err, &recordErr) {
+		return "tls_error"
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return "connection_refused"
+	}
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+		return "connection_reset"
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		return "network_error"
+	}
+	return "network_error"
+}
+
 func endpointURL(base, path string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(path, "/")
 }
@@ -59,9 +124,9 @@ func doJSON(ctx context.Context, client *http.Client, method, target, key string
 	}
 	resp, e := client.Do(req)
 	if e != nil {
-		// net/http errors may include the full URL. Gemini authentication uses
-		// a query parameter, so never return the raw error string.
-		return nil, 0, errors.New("provider request failed (network or timeout)")
+		// Keep the diagnostic useful without returning net/http's raw error,
+		// which may include a sensitive URL or query parameter.
+		return nil, 0, &providerRequestError{category: classifyTransportError(e)}
 	}
 	defer resp.Body.Close()
 	data, e := io.ReadAll(io.LimitReader(resp.Body, 8<<20))

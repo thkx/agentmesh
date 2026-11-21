@@ -1,12 +1,15 @@
 package coding
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
 )
 
 type Status string
+
+const MaxCodingDiffBytes = 2 << 20
 
 const (
 	StatusPending   Status = "pending"
@@ -16,13 +19,16 @@ const (
 	StatusSucceeded Status = "succeeded"
 	StatusFailed    Status = "failed"
 	StatusCanceled  Status = "canceled"
+	// StatusInterrupted means the process stopped before the runtime outcome was known.
+	StatusInterrupted Status = "interrupted"
 )
 
 var (
-	ErrNotFound      = errors.New("coding task not found")
-	ErrInvalidTask   = errors.New("invalid coding task")
-	ErrConflict      = errors.New("coding task state conflict")
-	ErrUnsafeCommand = errors.New("test command is not allowed")
+	ErrNotFound             = errors.New("coding task not found")
+	ErrInvalidTask          = errors.New("invalid coding task")
+	ErrConflict             = errors.New("coding task state conflict")
+	ErrUnsafeCommand        = errors.New("test command is not allowed")
+	ErrRepositoryNotAllowed = errors.New("coding repository is outside the configured allowed roots")
 )
 
 type Command struct {
@@ -31,6 +37,9 @@ type Command struct {
 }
 type Task struct {
 	ID                string    `json:"id"`
+	ExecutionID       string    `json:"execution_id,omitempty"`
+	AttemptID         string    `json:"attempt_id,omitempty"`
+	OutcomeUnknown    bool      `json:"outcome_unknown,omitempty"`
 	Title             string    `json:"title"`
 	RepositoryPath    string    `json:"repository_path"`
 	ModelID           string    `json:"model_id"`
@@ -52,6 +61,8 @@ type Task struct {
 }
 type CreateRequest struct {
 	ID                string  `json:"id"`
+	ExecutionID       string  `json:"execution_id,omitempty"`
+	AttemptID         string  `json:"attempt_id,omitempty"`
 	Title             string  `json:"title"`
 	RepositoryPath    string  `json:"repository_path"`
 	ModelID           string  `json:"model_id"`
@@ -76,6 +87,9 @@ func (r CreateRequest) Validate() error {
 	if r.MaxRepairAttempts < 0 || r.MaxRepairAttempts > 5 || r.TimeoutSeconds < 0 || r.TimeoutSeconds > 7200 {
 		return ErrInvalidTask
 	}
+	if r.TestCommand.Program == "" && len(r.TestCommand.Args) > 0 {
+		return ErrInvalidTask
+	}
 	if r.TestCommand.Program != "" {
 		if err := ValidateCommand(r.TestCommand); err != nil {
 			return err
@@ -97,16 +111,18 @@ func ValidateCommand(c Command) error {
 }
 
 type Step struct {
-	ID         string    `json:"id"`
-	TaskID     string    `json:"task_id"`
-	Sequence   int       `json:"sequence"`
-	Kind       string    `json:"kind"`
-	Status     string    `json:"status"`
-	Input      string    `json:"input,omitempty"`
-	Output     string    `json:"output,omitempty"`
-	Error      string    `json:"error,omitempty"`
-	StartedAt  time.Time `json:"started_at"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id"`
+	Sequence       int       `json:"sequence"`
+	Kind           string    `json:"kind"`
+	Status         string    `json:"status"`
+	Input          string    `json:"input,omitempty"`
+	Output         string    `json:"output,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	StartedAt      time.Time `json:"started_at"`
+	FinishedAt     time.Time `json:"finished_at,omitempty"`
+	ExitCode       int       `json:"exit_code"`
+	DurationMillis int64     `json:"duration_ms"`
 }
 type Event struct {
 	ID        string    `json:"id"`
@@ -116,10 +132,23 @@ type Event struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type Snapshot struct {
-	ID         string    `json:"id"`
-	TaskID     string    `json:"task_id"`
-	Label      string    `json:"label"`
-	CommitHash string    `json:"commit_hash"`
-	Diff       string    `json:"diff"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID            string    `json:"id"`
+	TaskID        string    `json:"task_id"`
+	Label         string    `json:"label"`
+	CommitHash    string    `json:"commit_hash"`
+	Diff          string    `json:"diff"`
+	ExecutionID   string    `json:"execution_id,omitempty"`
+	AttemptID     string    `json:"attempt_id,omitempty"`
+	ContentSHA256 string    `json:"content_sha256,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
+type ArtifactPublication struct {
+	ArtifactID          string `json:"artifact_id"`
+	VersionID           string `json:"version_id"`
+	VerificationID      string `json:"verification_id"`
+	VerificationOutcome string `json:"verification_outcome"`
+}
+type ArtifactPublisher interface {
+	PublishCodingArtifact(context.Context, Task, Snapshot, []Step) (ArtifactPublication, error)
 }

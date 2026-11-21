@@ -29,6 +29,7 @@ func Defaults() Config {
 		},
 		Providers: []ProviderConfig{},
 		Models:    []ModelConfig{},
+		Coding:    CodingConfig{AllowedRepositoryRoots: []string{}},
 		Scheduler: SchedulerConfig{Workers: 1, PollInterval: 500 * time.Millisecond, LeaseDuration: 30 * time.Second, MaxAttempts: 3},
 		Agent:     AgentConfig{WorkspaceRoot: "./data/workspaces", CLI: CLIConfig{Claude: "claude", Codex: "codex", Gemini: "gemini", OpenCode: "opencode"}, Runtime: AgentRuntimeConfig{MaxSteps: 12, MaxToolCalls: 8, MaxContextChars: 24000, MaxConcurrent: 4, TimeoutSeconds: 900}},
 	}

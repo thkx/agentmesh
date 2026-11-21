@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"math"
 	"net"
@@ -26,10 +27,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/thkx/agentmesh/internal/agentcatalog"
+	"github.com/thkx/agentmesh/internal/coding"
 	"github.com/thkx/agentmesh/internal/collaboration"
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	domainagent "github.com/thkx/agentmesh/internal/domain/agent"
 	domaincredential "github.com/thkx/agentmesh/internal/domain/credential"
+	execdom "github.com/thkx/agentmesh/internal/domain/execution"
 	domainprovider "github.com/thkx/agentmesh/internal/domain/provider"
 	domainworkflow "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/execution/manager"
@@ -43,94 +46,108 @@ import (
 const sessionCookie = "agentmesh_dashboard"
 
 type Dependencies struct {
-	Metrics             *observability.Metrics
-	Alerts              *observability.AlertEvaluator
-	DB                  *sql.DB
-	APIToken            string
-	RequestShutdown     chan<- struct{}
-	ExecutionManager    *manager.Manager
-	Providers           *domainprovider.ProviderRegistry
-	Models              *domainprovider.ModelRegistry
-	Credentials         appcredential.Manager
-	AgentDefinitions    *agentcatalog.Service
-	Collaboration       *collaboration.Service
-	WorkflowEngine      *workflowruntime.Engine
-	WorkflowMaxAttempts int
-	Catalog             *handlers.CatalogHandler
+	Metrics               *observability.Metrics
+	Alerts                *observability.AlertEvaluator
+	DB                    *sql.DB
+	APIToken              string
+	RequestShutdown       chan<- struct{}
+	ExecutionManager      *manager.Manager
+	CodingService         *coding.Service
+	SandboxImage          string
+	SandboxNetworkEnabled bool
+	Providers             *domainprovider.ProviderRegistry
+	Models                *domainprovider.ModelRegistry
+	Credentials           appcredential.Manager
+	AgentDefinitions      *agentcatalog.Service
+	Collaboration         *collaboration.Service
+	WorkflowEngine        *workflowruntime.Engine
+	WorkflowMaxAttempts   int
+	Catalog               *handlers.CatalogHandler
 }
 
 type Handler struct {
-	metrics             *observability.Metrics
-	alerts              *observability.AlertEvaluator
-	db                  *sql.DB
-	token               string
-	requestShutdown     chan<- struct{}
-	manager             *manager.Manager
-	providerRegistry    *domainprovider.ProviderRegistry
-	modelRegistry       *domainprovider.ModelRegistry
-	credentials         appcredential.Manager
-	agentCatalog        *agentcatalog.Service
-	collaboration       *collaboration.Service
-	workflowEngine      *workflowruntime.Engine
-	workflowMaxAttempts int
-	workflowRepo        *authoring.Repository
-	catalogAPI          http.Handler
-	executionAPI        http.Handler
-	tmpl                *template.Template
-	loginMu             sync.Mutex
-	loginAttempts       map[string][]time.Time
+	metrics               *observability.Metrics
+	alerts                *observability.AlertEvaluator
+	db                    *sql.DB
+	token                 string
+	requestShutdown       chan<- struct{}
+	manager               *manager.Manager
+	codingService         *coding.Service
+	sandboxImage          string
+	sandboxNetworkEnabled bool
+	providerRegistry      *domainprovider.ProviderRegistry
+	modelRegistry         *domainprovider.ModelRegistry
+	credentials           appcredential.Manager
+	agentCatalog          *agentcatalog.Service
+	collaboration         *collaboration.Service
+	workflowEngine        *workflowruntime.Engine
+	workflowMaxAttempts   int
+	workflowRepo          *authoring.Repository
+	catalogAPI            http.Handler
+	executionAPI          http.Handler
+	tmpl                  *template.Template
+	loginMu               sync.Mutex
+	loginAttempts         map[string][]time.Time
 }
 
 type workspaceOption struct{ ID, Name string }
 
 type pageData struct {
-	Title            string
-	Active           string
-	Error            string
-	Message          string
-	Readiness        string
-	Counts           map[string]int64
-	Executions       []executionRow
-	Execution        *executionDetail
-	ProviderRows     []providerView
-	ModelRows        []modelView
-	AgentRows        []agentView
-	IdentityRows     []identityView
-	TaskRows         []taskView
-	WorkspaceOptions []workspaceOption
-	WorkflowRows     []workflowView
-	WorkflowRuns     []workflowRunListView
-	WorkflowRun      *workflowRunDetailView
-	Credential       *credentialView
-	FilterStatus     string
-	FilterKind       string
-	FilterRuntime    string
-	FilterTask       string
-	Offset           int
-	Limit            int
-	PrevOffset       int
-	NextOffset       int
-	HasPrevious      bool
-	HasNext          bool
-	Attempts         []attemptView
-	Artifacts        []artifactView
-	Evidence         []evidenceView
-	Events           []eventView
-	UsageRows        []usageView
-	UsageEvents      []usageEventView
-	UsageSince       string
-	UsageUntil       string
-	UsageLimit       int
-	UsageOffset      int
-	UsageNextOffset  int
-	UsagePrevOffset  int
-	UsageHasMore     bool
-	TimelineHasMore  bool
-	TimelineNextURL  string
-	RunResult        string
-	ActiveAlerts     []observability.Alert
-	AlertHistory     []observability.Alert
-	OpsHealth        operationsHealthView
+	Title                       string
+	Active                      string
+	Error                       string
+	Message                     string
+	Readiness                   string
+	Counts                      map[string]int64
+	Executions                  []executionRow
+	CodingRows                  []coding.Task
+	CodingTask                  *coding.Task
+	CodingSteps                 []coding.Step
+	CodingEvents                []coding.Event
+	CodingSnapshots             []coding.Snapshot
+	CodingDiff                  string
+	CodingSandboxImage          string
+	CodingSandboxNetworkEnabled bool
+	Execution                   *executionDetail
+	ProviderRows                []providerView
+	ModelRows                   []modelView
+	AgentRows                   []agentView
+	IdentityRows                []identityView
+	TaskRows                    []taskView
+	WorkspaceOptions            []workspaceOption
+	WorkflowRows                []workflowView
+	WorkflowRuns                []workflowRunListView
+	WorkflowRun                 *workflowRunDetailView
+	Credential                  *credentialView
+	FilterStatus                string
+	FilterKind                  string
+	FilterRuntime               string
+	FilterTask                  string
+	Offset                      int
+	Limit                       int
+	PrevOffset                  int
+	NextOffset                  int
+	HasPrevious                 bool
+	HasNext                     bool
+	Attempts                    []attemptView
+	Artifacts                   []artifactView
+	Evidence                    []evidenceView
+	Events                      []eventView
+	UsageRows                   []usageView
+	UsageEvents                 []usageEventView
+	UsageSince                  string
+	UsageUntil                  string
+	UsageLimit                  int
+	UsageOffset                 int
+	UsageNextOffset             int
+	UsagePrevOffset             int
+	UsageHasMore                bool
+	TimelineHasMore             bool
+	TimelineNextURL             string
+	RunResult                   string
+	ActiveAlerts                []observability.Alert
+	AlertHistory                []observability.Alert
+	OpsHealth                   operationsHealthView
 }
 
 type operationsHealthView struct {
@@ -248,21 +265,24 @@ func New(d Dependencies) *Handler {
 	}
 	t := template.Must(template.ParseFS(webassets.Assets, "dashboard/templates/*.html"))
 	h := &Handler{
-		db:                  d.DB,
-		metrics:             metrics,
-		alerts:              d.Alerts,
-		token:               d.APIToken,
-		requestShutdown:     d.RequestShutdown,
-		manager:             d.ExecutionManager,
-		providerRegistry:    d.Providers,
-		modelRegistry:       d.Models,
-		credentials:         d.Credentials,
-		agentCatalog:        d.AgentDefinitions,
-		collaboration:       d.Collaboration,
-		workflowEngine:      d.WorkflowEngine,
-		workflowMaxAttempts: d.WorkflowMaxAttempts,
-		tmpl:                t,
-		loginAttempts:       make(map[string][]time.Time),
+		db:                    d.DB,
+		metrics:               metrics,
+		alerts:                d.Alerts,
+		token:                 d.APIToken,
+		requestShutdown:       d.RequestShutdown,
+		manager:               d.ExecutionManager,
+		codingService:         d.CodingService,
+		sandboxImage:          d.SandboxImage,
+		sandboxNetworkEnabled: d.SandboxNetworkEnabled,
+		providerRegistry:      d.Providers,
+		modelRegistry:         d.Models,
+		credentials:           d.Credentials,
+		agentCatalog:          d.AgentDefinitions,
+		collaboration:         d.Collaboration,
+		workflowEngine:        d.WorkflowEngine,
+		workflowMaxAttempts:   d.WorkflowMaxAttempts,
+		tmpl:                  t,
+		loginAttempts:         make(map[string][]time.Time),
 	}
 	if d.DB != nil {
 		h.workflowRepo, _ = authoring.NewRepository(d.DB)
@@ -322,6 +342,13 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/operations/metrics", h.requireSession(), h.operationsMetrics)
 	g.POST("/operations/shutdown", h.requireSession(), h.requestGracefulShutdown)
 	g.GET("/usage", h.requireSession(), h.usage)
+	g.GET("/coding", h.requireSession(), h.codingTasks)
+	g.POST("/coding", h.requireSession(), h.createCodingTask)
+	g.GET("/coding/:id", h.requireSession(), h.codingTask)
+	g.POST("/coding/:id/cancel", h.requireSession(), h.cancelCodingTask)
+	g.POST("/coding/:id/resolve", h.requireSession(), h.resolveCodingTask)
+	g.POST("/coding/:id/revert", h.requireSession(), h.revertCodingTask)
+	g.POST("/coding/:id/cleanup", h.requireSession(), h.cleanupCodingTask)
 	g.GET("/executions", h.requireSession(), h.executions)
 	g.GET("/executions/:id", h.requireSession(), h.execution)
 	g.POST("/executions/:id/cancel", h.requireSession(), h.cancelExecution)
@@ -1481,6 +1508,209 @@ func (h *Handler) workflowRun(c *gin.Context) {
 	h.render(c, pageData{Title: "Workflow Run " + run.ID, Active: "workflows", WorkflowRun: detail}, http.StatusOK)
 }
 
+func (h *Handler) codingTasks(c *gin.Context) {
+	data := pageData{Title: "Coding", Active: "coding", CodingRows: []coding.Task{}, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
+	if c.Query("error") == "create" {
+		data.Error = "Could not create the Coding Task. Check the repository allowlist, model ID, prompt, test command and task limits."
+	}
+	if h.codingService != nil {
+		items, err := h.codingService.List(c.Request.Context(), 100)
+		if err != nil {
+			data.Error = "Could not load coding tasks"
+		} else {
+			data.CodingRows = items
+		}
+	}
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) createCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.manager == nil || h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	maxRepair, _ := strconv.Atoi(c.DefaultPostForm("max_repair_attempts", "2"))
+	timeout, _ := strconv.Atoi(c.DefaultPostForm("timeout_seconds", "1800"))
+	request := coding.CreateRequest{
+		ID:                fmt.Sprintf("dashboard-%d", time.Now().UTC().UnixNano()),
+		Title:             strings.TrimSpace(c.PostForm("title")),
+		RepositoryPath:    strings.TrimSpace(c.PostForm("repository_path")),
+		ModelID:           strings.TrimSpace(c.PostForm("model_id")),
+		Prompt:            strings.TrimSpace(c.PostForm("prompt")),
+		TestCommand:       coding.Command{Program: strings.TrimSpace(c.PostForm("test_program")), Args: strings.Fields(c.PostForm("test_args"))},
+		MaxRepairAttempts: maxRepair, TimeoutSeconds: timeout,
+	}
+	if err := request.Validate(); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
+	input, err := json.Marshal(request)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
+	_, err = h.manager.Submit(c.Request.Context(), manager.SubmitRequest{
+		Kind: execdom.KindCoding, Runtime: execdom.RuntimeCoding, TaskID: request.ID,
+		Input: input, IdempotencyKey: "dashboard-coding:" + request.ID,
+	})
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding?error=create")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(request.ID)+"?message=coding-queued")
+}
+
+func (h *Handler) codingTask(c *gin.Context) {
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	task, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	data := pageData{Title: "Coding " + task.ID, Active: "coding", CodingTask: &task, CodingSandboxImage: h.sandboxImage, CodingSandboxNetworkEnabled: h.sandboxNetworkEnabled}
+	switch c.Query("message") {
+	case "coding-queued":
+		data.Message = "Coding task submitted. Review the Worktree diff and evidence before keeping changes."
+	case "cancel-requested":
+		data.Message = "Cancellation requested."
+	case "reverted":
+		data.Message = "Worktree reset to its base commit."
+	case "cleaned":
+		data.Message = "Worktree and task branch cleaned up."
+	case "resolved-keep":
+		data.Message = "Outcome manually resolved. Changes are retained in the Worktree; the Execution is not marked successful."
+	case "resolved-discard":
+		data.Message = "Outcome manually resolved. Worktree was reset to its base commit."
+	}
+	if c.Query("error") != "" {
+		data.Error = "The requested Coding operation could not be completed. Check the current task status and event history."
+	}
+	data.CodingSteps, err = h.codingService.Steps(c.Request.Context(), task.ID)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	data.CodingEvents, err = h.codingService.Events(c.Request.Context(), task.ID)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	data.CodingSnapshots, err = h.codingService.Snapshots(c.Request.Context(), task.ID)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	if task.WorkspacePath != "" && task.Status != coding.StatusRunning && task.Status != coding.StatusTesting && task.Status != coding.StatusRepairing {
+		data.CodingDiff, _ = h.codingService.Diff(c.Request.Context(), task.ID)
+	}
+	data.Execution = nil
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) cancelCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.codingService.CancelContext(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cancel")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=cancel-requested")
+}
+
+func (h *Handler) resolveCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil || h.manager == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	decision := strings.TrimSpace(c.PostForm("decision"))
+	reason := strings.TrimSpace(c.PostForm("reason"))
+	before, err := h.codingService.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+		return
+	}
+	if before.ExecutionID != "" {
+		// Observe the interrupted child state before applying the operator's
+		// terminal decision to the canonical Execution.
+		_, _ = h.manager.Get(c.Request.Context(), before.ExecutionID)
+	}
+	task, err := h.codingService.ResolveInterrupted(c.Request.Context(), c.Param("id"), decision, reason)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+		return
+	}
+	if task.ExecutionID != "" {
+		status := execdom.LifecycleFailed
+		if decision == "discard" {
+			status = execdom.LifecycleCanceled
+		}
+		result, marshalErr := json.Marshal(task)
+		if marshalErr != nil {
+			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve")
+			return
+		}
+		if _, err = h.manager.Resolve(c.Request.Context(), task.ExecutionID, status, result,
+			"coding outcome manually reviewed; decision="+decision+"; reason="+reason); err != nil {
+			c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=resolve-execution")
+			return
+		}
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=resolved-"+decision)
+}
+
+func (h *Handler) revertCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.codingService.Revert(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=revert")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=reverted")
+}
+
+func (h *Handler) cleanupCodingTask(c *gin.Context) {
+	if !sameOrigin(c.Request) || c.PostForm("confirm") != "yes" {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.codingService == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.codingService.Cleanup(c.Request.Context(), c.Param("id")); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?error=cleanup")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/coding/"+url.PathEscape(c.Param("id"))+"?message=cleaned")
+}
+
 func (h *Handler) executions(c *gin.Context) {
 	data := pageData{
 		Title: "Executions", Active: "executions", Executions: []executionRow{},
@@ -1745,6 +1975,12 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
 	}
 	switch c.Query("message") {
+	case "coding-queued":
+		data.Message = "Coding task queued. Review the Worktree diff and evidence before keeping changes."
+	case "reverted":
+		data.Message = "Coding Worktree reset to its base commit."
+	case "cleaned":
+		data.Message = "Coding Worktree and branch cleaned up."
 	case "cancel-requested":
 		data.Message = "Cancellation request recorded; the runtime outcome is not yet confirmed."
 	case "credential-saved":

@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	wf "github.com/thkx/agentmesh/internal/domain/workflow"
 	"github.com/thkx/agentmesh/internal/workflow/checkpoint"
+	"github.com/thkx/agentmesh/internal/workflow/compiler"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -430,5 +433,158 @@ func TestEvaluateConditionOperators(t *testing.T) {
 				t.Fatalf("got %v want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+type fakeWorkflowCodingRunner struct{ calls int }
+
+func (f *fakeWorkflowCodingRunner) RunCoding(_ context.Context, taskID string, input json.RawMessage) (json.RawMessage, error) {
+	f.calls++
+	return json.Marshal(map[string]string{"task_id": taskID, "status": "succeeded"})
+}
+
+func TestWorkflowCodingNodeUsesManagedCodingRunner(t *testing.T) {
+	store := newMemoryStore()
+	engine, err := New(store, &fakeAgent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeWorkflowCodingRunner{}
+	engine.SetCodingRunner(runner)
+	definition := wf.Definition{
+		ID: "coding-workflow", Name: "Coding workflow", Version: 1, Entry: "start",
+		Nodes: []wf.Node{
+			{ID: "start", Type: wf.NodeStart},
+			{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{
+				RepositoryPath: "/tmp/approved-repository", ModelID: "test-model", Prompt: "Add a health endpoint",
+				MaxRepairAttempts: 1, TimeoutSeconds: 120,
+			}},
+			{ID: "finish", Type: wf.NodeEnd},
+		},
+		Edges: []wf.Edge{{From: "start", To: "implement"}, {From: "implement", To: "finish"}},
+	}
+	if err = engine.PutDefinition(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	run, err := engine.Start(context.Background(), definition.ID, "coding-run-1", map[string]any{"request": "health"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != wf.RunSucceeded {
+		t.Fatalf("run status=%s error=%s", run.Status, run.Error)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("coding runner calls=%d, want 1", runner.calls)
+	}
+	state := run.Nodes["implement"]
+	if state.Status != wf.NodeSucceeded || !strings.Contains(string(state.Output), "task_id") {
+		t.Fatalf("coding node output not checkpointed: %+v", state)
+	}
+}
+
+type fakeCodingRunner struct {
+	calls  int
+	taskID string
+	output json.RawMessage
+	err    error
+}
+
+func (f *fakeCodingRunner) RunCoding(_ context.Context, taskID string, _ json.RawMessage) (json.RawMessage, error) {
+	f.calls++
+	f.taskID = taskID
+	return f.output, f.err
+}
+
+func TestReconcileRunningCodingNodeRejoinsExistingExecution(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	engine, err := New(store, &fakeAgent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeCodingRunner{output: json.RawMessage(`{"execution_id":"coding-exec","task_id":"coding-task"}`)}
+	engine.SetCodingRunner(runner)
+	definition := wf.Definition{
+		ID: "coding-recovery", Name: "Coding recovery", Version: 1, Entry: "implement",
+		Nodes: []wf.Node{
+			{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{RepositoryPath: "/approved/repo", ModelID: "model", Prompt: "implement"}},
+			{ID: "finish", Type: wf.NodeEnd},
+		},
+		Edges: []wf.Edge{{From: "implement", To: "finish"}},
+	}
+	if err = engine.PutDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := compiler.Compile(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := wf.Run{
+		ID: "coding-recovery-run", WorkflowID: definition.ID, WorkflowVersion: 1,
+		Status: wf.RunRunning, Context: map[string]any{}, Nodes: map[string]wf.NodeState{
+			"implement": {Status: wf.NodeRunning, StartedAt: time.Now().Add(-time.Minute)},
+		},
+	}
+	if err = store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.BeginNode(ctx, run.ID, "implement", "coding-recovery-key", "worker", 1, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err = engine.reconcileAgentNodes(ctx, compiled, &run, "worker", 1); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls != 1 || runner.taskID != stableTaskID(run.ID, "implement") {
+		t.Fatalf("coding runner calls=%d task_id=%q", runner.calls, runner.taskID)
+	}
+	if run.Nodes["implement"].Status != wf.NodeSucceeded {
+		t.Fatalf("coding node status=%s error=%s", run.Nodes["implement"].Status, run.Nodes["implement"].Error)
+	}
+	if run.Context["implement"] == nil || len(run.PendingNodes) != 1 || run.PendingNodes[0] != "finish" {
+		t.Fatalf("coding result was not restored into workflow context: context=%v pending=%v", run.Context, run.PendingNodes)
+	}
+	ledgerStatus, _, err := store.LookupNode(ctx, run.ID, "implement")
+	if err != nil || ledgerStatus != "succeeded" {
+		t.Fatalf("coding node ledger status=%q err=%v", ledgerStatus, err)
+	}
+}
+
+func TestReconcileCodingNodeKeepsIndeterminateOutcomeInterrupted(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	engine, err := New(store, &fakeAgent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine.SetCodingRunner(&fakeCodingRunner{err: ErrCodingOutcomeIndeterminate})
+	definition := wf.Definition{
+		ID: "coding-unknown", Name: "Coding unknown", Version: 1, Entry: "implement",
+		Nodes: []wf.Node{{ID: "implement", Type: wf.NodeCoding, Coding: &wf.CodingConfig{RepositoryPath: "/approved/repo", ModelID: "model", Prompt: "implement"}}, {ID: "end", Type: wf.NodeEnd}},
+		Edges: []wf.Edge{{From: "implement", To: "end"}},
+	}
+	if err = engine.PutDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := compiler.Compile(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := wf.Run{
+		ID: "coding-unknown-run", WorkflowID: definition.ID, WorkflowVersion: 1,
+		Status: wf.RunRunning, Context: map[string]any{}, Nodes: map[string]wf.NodeState{
+			"implement": {Status: wf.NodeRunning, StartedAt: time.Now().Add(-time.Minute)},
+		},
+	}
+	if err = store.CreateRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.BeginNode(ctx, run.ID, "implement", "coding-unknown-key", "worker", 1, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err = engine.reconcileAgentNodes(ctx, compiled, &run, "worker", 1); !errors.Is(err, ErrCodingOutcomeIndeterminate) {
+		t.Fatalf("expected indeterminate outcome, got %v", err)
+	}
+	if run.Nodes["implement"].Status != wf.NodeInterrupted || run.Status != wf.RunFailed {
+		t.Fatalf("unexpected recovery state: node=%s run=%s", run.Nodes["implement"].Status, run.Status)
 	}
 }

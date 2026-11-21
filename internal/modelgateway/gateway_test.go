@@ -304,14 +304,21 @@ func TestGatewayObserverRecordsGenerateAndStreamSetup(t *testing.T) {
 	if stream == nil {
 		t.Fatal("expected non-nil stream")
 	}
+	// Drain the output channel so the asynchronous terminal stream observation
+	// completes before inspecting the observer spy.
+	for range stream {
+	}
 
-	if len(observer.calls) != 2 {
-		t.Fatalf("observer calls = %d, want 2: %+v", len(observer.calls), observer.calls)
+	if len(observer.calls) != 3 {
+		t.Fatalf("observer calls = %d, want 3: %+v", len(observer.calls), observer.calls)
 	}
 	if observer.calls[0].operation != "generate" || observer.calls[0].outcome != "success" {
 		t.Fatalf("unexpected generate observation: %+v", observer.calls[0])
 	}
 	if observer.calls[1].operation != "stream_open" || observer.calls[1].outcome != "success" {
-		t.Fatalf("unexpected stream observation: %+v", observer.calls[1])
+		t.Fatalf("unexpected stream-open observation: %+v", observer.calls[1])
+	}
+	if observer.calls[2].operation != "stream" || observer.calls[2].outcome != "error" {
+		t.Fatalf("unexpected terminal stream observation: %+v", observer.calls[2])
 	}
 }

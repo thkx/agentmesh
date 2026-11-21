@@ -80,6 +80,8 @@ type Dependencies struct {
 	AgentDefinitions      *agentcatalog.Service
 	Collaboration         *collaboration.Service
 	CodingService         *coding.Service
+	SandboxImage          string
+	SandboxNetworkEnabled bool
 	APIToken              string
 	Alerts                *observability.AlertEvaluator
 	RequestShutdown       chan<- struct{}
@@ -232,7 +234,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		handlers.NewUsageHandler(deps.DB).RegisterRoutes(api)
 	}
 	if deps.CodingService != nil {
-		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
+		handlers.NewCodingHandler(deps.CodingService, deps.ExecutionManager).RegisterRoutes(api)
 	}
 	h := handlers.NewCatalogHandler(deps.Providers, deps.Models, deps.Adapters, deps.ProviderRuntime, deps.Repository, deps.Gateway)
 	if deps.AIResources != nil {
@@ -307,7 +309,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
-	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, CodingService: deps.CodingService, SandboxImage: deps.SandboxImage, SandboxNetworkEnabled: deps.SandboxNetworkEnabled, Catalog: h}).RegisterRoutes(router)
 	return otelhttp.NewHandler(router, "agentmesh.http")
 }
 

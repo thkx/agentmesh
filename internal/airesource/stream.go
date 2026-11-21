@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -225,7 +224,7 @@ func openStream(ctx context.Context, candidate Candidate, req GenerateRequest) (
 	request.Header.Set("Authorization", "Bearer "+candidate.Secret)
 	response, err := (&http.Client{}).Do(request)
 	if err != nil {
-		return nil, 0, errors.New("provider streaming request failed (network or timeout)")
+		return nil, 0, &providerRequestError{category: classifyTransportError(err)}
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 8<<20))

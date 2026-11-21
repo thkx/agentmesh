@@ -17,13 +17,43 @@ type CodingService interface {
 	Cancel(string) error
 }
 
-type CodingAdapter struct{ service CodingService }
+type CodingAttemptStore interface {
+	ListAttempts(context.Context, string) ([]dom.Attempt, error)
+	CreateAttempt(context.Context, dom.Attempt) (dom.Attempt, error)
+}
+type CodingAdapter struct {
+	service  CodingService
+	attempts CodingAttemptStore
+}
 
-func NewCodingAdapter(service CodingService) (*CodingAdapter, error) {
+func NewCodingAdapter(service CodingService, stores ...CodingAttemptStore) (*CodingAdapter, error) {
 	if service == nil {
 		return nil, errors.New("coding execution service is nil")
 	}
-	return &CodingAdapter{service: service}, nil
+	adapter := &CodingAdapter{service: service}
+	if len(stores) > 0 {
+		adapter.attempts = stores[0]
+	}
+	return adapter, nil
+}
+
+func (a *CodingAdapter) ValidateSubmit(ctx context.Context, in SubmitRequest) error {
+	var request coding.CreateRequest
+	if err := json.Unmarshal(in.Input, &request); err != nil {
+		return ErrInvalidRequest
+	}
+	if request.ID == "" {
+		request.ID = in.TaskID
+	}
+	if request.ID == "" || (in.TaskID != "" && request.ID != in.TaskID) {
+		return ErrInvalidRequest
+	}
+	if validator, ok := a.service.(interface {
+		ValidateCreateRequest(context.Context, coding.CreateRequest) error
+	}); ok {
+		return validator.ValidateCreateRequest(ctx, request)
+	}
+	return nil
 }
 
 func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error) {
@@ -31,6 +61,8 @@ func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error
 	if err := json.Unmarshal(e.Input, &request); err != nil {
 		return "", fmt.Errorf("decode coding execution input: %w", err)
 	}
+	request.ExecutionID = e.ID
+	request.AttemptID = fmt.Sprintf("%s-a-1", e.ID)
 	if request.ID == "" {
 		request.ID = e.TaskID
 	}
@@ -41,13 +73,22 @@ func (a *CodingAdapter) Submit(ctx context.Context, e dom.Entity) (string, error
 		return "", dom.ErrInvalidEntity
 	}
 	task, err := a.service.Get(ctx, request.ID)
+	created := false
 	if errors.Is(err, coding.ErrNotFound) {
 		task, err = a.service.Create(ctx, request)
+		created = err == nil
 	}
 	if err != nil {
 		return "", err
 	}
-	if task.Status == coding.StatusPending {
+	if binder, ok := a.service.(interface {
+		BindExecution(context.Context, string, string, string) error
+	}); ok {
+		if err := binder.BindExecution(ctx, task.ID, e.ID, request.AttemptID); err != nil {
+			return "", err
+		}
+	}
+	if task.Status == coding.StatusPending && (created || task.ExecutionID != e.ID) {
 		if _, err = a.service.Start(ctx, task.ID); err != nil {
 			return "", err
 		}
@@ -64,6 +105,61 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 	if err != nil {
 		return Observation{}, err
 	}
+	// Pending Coding Tasks are durable in SQLite. Re-scheduling from Observe
+	// makes tasks that were waiting for a local concurrency slot survive restart.
+	if task.Status == coding.StatusPending {
+		if _, err = a.service.Start(ctx, id); err != nil {
+			return Observation{}, err
+		}
+		task, err = a.service.Get(ctx, id)
+		if err != nil {
+			return Observation{}, err
+		}
+	}
+	attemptNotStarted := task.Status == coding.StatusCanceled && task.StartedAt.IsZero()
+	if a.attempts != nil && !attemptNotStarted && (task.Status == coding.StatusSucceeded || task.Status == coding.StatusFailed || task.Status == coding.StatusCanceled || task.Status == coding.StatusInterrupted) {
+		attemptID := task.AttemptID
+		if attemptID == "" {
+			attemptID = fmt.Sprintf("%s-a-1", e.ID)
+			if binder, ok := a.service.(interface {
+				BindExecution(context.Context, string, string, string) error
+			}); ok {
+				if bindErr := binder.BindExecution(ctx, task.ID, e.ID, attemptID); bindErr != nil {
+					return Observation{}, bindErr
+				}
+			}
+		}
+		attempts, attemptErr := a.attempts.ListAttempts(ctx, e.ID)
+		if attemptErr != nil {
+			return Observation{}, attemptErr
+		}
+		if len(attempts) == 0 {
+			started := task.StartedAt
+			if started.IsZero() {
+				started = task.CreatedAt
+			}
+			attemptID := task.AttemptID
+			if attemptID == "" {
+				attemptID = fmt.Sprintf("%s-a-1", e.ID)
+			}
+			_, attemptErr = a.attempts.CreateAttempt(ctx, dom.Attempt{
+				ID: attemptID, ExecutionID: e.ID, Number: 1, Runtime: e.Runtime,
+				RuntimeRef: task.ID, Status: dom.AttemptRunning, Input: e.Input, StartedAt: started,
+			})
+			if attemptErr != nil {
+				return Observation{}, attemptErr
+			}
+		}
+	}
+	if task.Status == coding.StatusSucceeded {
+		if finalizer, ok := a.service.(interface {
+			PublishArtifacts(context.Context, string) error
+		}); ok {
+			if err := finalizer.PublishArtifacts(ctx, task.ID); err != nil {
+				return Observation{}, fmt.Errorf("publish coding artifact evidence: %w", err)
+			}
+		}
+	}
 	var status dom.LifecycleStatus
 	switch task.Status {
 	case coding.StatusPending:
@@ -76,11 +172,13 @@ func (a *CodingAdapter) Observe(ctx context.Context, e dom.Entity) (Observation,
 		status = dom.LifecycleFailed
 	case coding.StatusCanceled:
 		status = dom.LifecycleCanceled
+	case coding.StatusInterrupted:
+		status = dom.LifecycleInterrupted
 	default:
 		return Observation{}, fmt.Errorf("unknown coding task status %q", task.Status)
 	}
 	result, _ := json.Marshal(task)
-	return Observation{Status: status, Attempt: 1, Result: result, Error: task.Error}, nil
+	return Observation{Status: status, Attempt: 1, AttemptNotStarted: attemptNotStarted, Result: result, Error: task.Error}, nil
 }
 
 func (a *CodingAdapter) Cancel(ctx context.Context, e dom.Entity) error {

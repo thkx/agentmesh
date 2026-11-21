@@ -42,10 +42,14 @@ func (r Runner) Run(ctx context.Context, workspace string, command string, args 
 	if r.NetworkEnabled {
 		network = "bridge"
 	}
-	argv := []string{"run", "--rm", "--network", network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=2g", "--cpus=2", "--tmpfs", "/tmp:rw,nosuid,size=512m",
+	argv := []string{"run", "--rm", "--network", network, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128", "--memory=2g", "--cpus=2", "--tmpfs", "/tmp:rw,exec,nosuid,size=512m",
 		"--tmpfs", "/root/.cache:rw,nosuid,size=512m",
 		"--tmpfs", "/root/.npm:rw,nosuid,size=256m",
+		"--tmpfs", "/root/.cargo:rw,nosuid,size=1g",
+		"--tmpfs", "/go/pkg/mod:rw,nosuid,size=1g",
 		"--env", "GOCACHE=/tmp/go-build-cache",
+		"--env", "GOMODCACHE=/go/pkg/mod",
+		"--env", "CARGO_HOME=/root/.cargo",
 		"--ulimit", "nofile=1024:1024",
 		"--ipc", "none",
 		"-v", workspace + ":/workspace:rw", "-w", "/workspace", r.Image, command}

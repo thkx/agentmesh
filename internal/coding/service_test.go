@@ -58,6 +58,9 @@ func TestCodingTaskEndToEndWithoutDockerTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repo}); err != nil {
+		t.Fatal(err)
+	}
 	defer service.Close()
 	task, err := service.Create(context.Background(), CreateRequest{ID: "task-e2e", RepositoryPath: repo, ModelID: "test-model", Prompt: "create a file"})
 	if err != nil {
@@ -159,6 +162,9 @@ func TestStartReservesBoundedSlotsAndCloseCancelsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil {
+		t.Fatal(err)
+	}
 	for i := 1; i <= 3; i++ {
 		if _, err = service.Create(context.Background(), CreateRequest{ID: fmt.Sprintf("start-%d", i), RepositoryPath: repoPath, ModelID: "test", Prompt: "test"}); err != nil {
 			t.Fatal(err)
@@ -180,8 +186,20 @@ func TestStartReservesBoundedSlotsAndCloseCancelsRuns(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("second agent did not start")
 	}
-	if _, err = service.Start(context.Background(), "start-3"); !errors.Is(err, ErrConflict) {
-		t.Fatalf("third task should be rejected at capacity: %v", err)
+	if _, err = service.Start(context.Background(), "start-3"); err != nil {
+		t.Fatalf("third task should remain queued at capacity: %v", err)
+	}
+	queued, err := service.Get(context.Background(), "start-3")
+	if err != nil || queued.Status != StatusPending {
+		t.Fatalf("third task should remain durably pending: task=%#v err=%v", queued, err)
+	}
+	if err = service.CancelContext(context.Background(), "start-1"); err != nil {
+		t.Fatalf("cancel first task to release a slot: %v", err)
+	}
+	select {
+	case <-agent.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("queued third task did not start after a slot was released")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -247,5 +265,64 @@ func TestCancelContextCancelsQueuedTaskBeforeWorkerClaim(t *testing.T) {
 	}
 	if claimed {
 		t.Fatal("canceled task was claimable")
+	}
+}
+
+func TestGracefulShutdownPreservesUnknownCodingOutcome(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	repoPath := makeGitRepo(t)
+	root := filepath.Join(t.TempDir(), "workspaces")
+	wm, err := workspace.NewManager(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &blockingCodingAgent{workspaces: wm, started: make(chan struct{}, 1)}
+	service, err := NewService(testRepository(t), agent, root, "golang:1.27.3", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.SetAllowedRepositoryRoots([]string{repoPath}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.Create(context.Background(), CreateRequest{
+		ID: "shutdown-interrupted", RepositoryPath: repoPath, ModelID: "test", Prompt: "modify repository",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = service.Start(context.Background(), task.ID); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-agent.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("coding agent did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err = service.CloseContext(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err := service.Get(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusInterrupted || !got.OutcomeUnknown {
+		t.Fatalf("graceful shutdown must preserve unknown outcome, got status=%s unknown=%v error=%q", got.Status, got.OutcomeUnknown, got.Error)
+	}
+	events, err := service.Events(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, event := range events {
+		if event.Type == "task.interrupted" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("task.interrupted event was not persisted")
 	}
 }

@@ -32,6 +32,7 @@ func Load(path string) (Config, error) {
 		"providers":                       []map[string]interface{}{},
 		"models":                          []map[string]interface{}{},
 		"agent.workspace_root":            "./data/workspaces",
+		"coding.allowed_repository_roots": []string{},
 		"agent.runtime.max_steps":         12,
 		"agent.runtime.max_tool_calls":    8,
 		"agent.runtime.max_context_chars": 24000,

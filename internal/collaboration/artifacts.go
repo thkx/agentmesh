@@ -39,6 +39,7 @@ type ArtifactVersion struct {
 	Metadata        json.RawMessage `json:"metadata"`
 	CreatorAgentID  string          `json:"creator_agent_id,omitempty"`
 	SourceExecution string          `json:"source_execution_id,omitempty"`
+	SourceAttempt   string          `json:"source_attempt_id,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 }
 
@@ -53,6 +54,8 @@ type ArtifactEvidence struct {
 	ContentSHA256 string    `json:"content_sha256,omitempty"`
 	Statement     string    `json:"statement,omitempty"`
 	CreatedBy     string    `json:"created_by,omitempty"`
+	ExecutionID   string    `json:"execution_id,omitempty"`
+	AttemptID     string    `json:"attempt_id,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
@@ -73,6 +76,8 @@ type ArtifactVerification struct {
 }
 
 type CreateArtifactRequest struct {
+	ID              string          `json:"id,omitempty"`
+	VersionID       string          `json:"version_id,omitempty"`
 	WorkspaceID     string          `json:"workspace_id"`
 	SourceTaskID    string          `json:"source_task_id"`
 	CreatorAgentID  string          `json:"creator_agent_id"`
@@ -82,15 +87,19 @@ type CreateArtifactRequest struct {
 	MediaType       string          `json:"media_type"`
 	Metadata        json.RawMessage `json:"metadata"`
 	SourceExecution string          `json:"source_execution_id"`
+	SourceAttempt   string          `json:"source_attempt_id"`
 }
 
 type AddArtifactEvidenceRequest struct {
+	ID            string `json:"id,omitempty"`
 	VersionID     string `json:"version_id"`
 	Kind          string `json:"kind"`
 	SourceRef     string `json:"source_ref"`
 	ContentSHA256 string `json:"content_sha256"`
 	Statement     string `json:"statement"`
 	CreatedBy     string `json:"created_by"`
+	ExecutionID   string `json:"execution_id"`
+	AttemptID     string `json:"attempt_id"`
 }
 
 func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) (Artifact, ArtifactVersion, error) {
@@ -108,6 +117,9 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 		in.MediaType = "application/octet-stream"
 	}
 	if len(in.MediaType) > 128 {
+		return Artifact{}, ArtifactVersion{}, ErrInvalid
+	}
+	if in.SourceAttempt != "" && in.SourceExecution == "" {
 		return Artifact{}, ArtifactVersion{}, ErrInvalid
 	}
 	if len(in.Metadata) == 0 {
@@ -138,16 +150,44 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 		}
 	}
 
-	artifactID, err := newID()
-	if err != nil {
-		return Artifact{}, ArtifactVersion{}, err
+	sum := sha256.Sum256(in.Content)
+	digest := hex.EncodeToString(sum[:])
+	if in.ID != "" {
+		existing, lookupErr := s.GetArtifact(ctx, in.ID)
+		if lookupErr == nil {
+			existingVersion, versionErr := s.GetArtifactVersion(ctx, in.ID, 1)
+			if versionErr != nil {
+				return Artifact{}, ArtifactVersion{}, versionErr
+			}
+			if existing.WorkspaceID == in.WorkspaceID && existing.Kind == in.Kind && existingVersion.ContentSHA256 == digest && existingVersion.SourceExecution == in.SourceExecution && existingVersion.SourceAttempt == in.SourceAttempt {
+				return existing, existingVersion, nil
+			}
+			return Artifact{}, ArtifactVersion{}, ErrConflict
+		}
+		if !errors.Is(lookupErr, ErrNotFound) {
+			return Artifact{}, ArtifactVersion{}, lookupErr
+		}
 	}
-	versionID, err := newID()
-	if err != nil {
-		return Artifact{}, ArtifactVersion{}, err
+	artifactID := strings.TrimSpace(in.ID)
+	if artifactID == "" {
+		var idErr error
+		artifactID, idErr = newID()
+		if idErr != nil {
+			return Artifact{}, ArtifactVersion{}, idErr
+		}
+	}
+	versionID := strings.TrimSpace(in.VersionID)
+	if versionID == "" {
+		var idErr error
+		versionID, idErr = newID()
+		if idErr != nil {
+			return Artifact{}, ArtifactVersion{}, idErr
+		}
+	}
+	if len(artifactID) > 128 || len(versionID) > 128 {
+		return Artifact{}, ArtifactVersion{}, ErrInvalid
 	}
 	now := s.clock().UTC()
-	sum := sha256.Sum256(in.Content)
 	artifact := Artifact{
 		ID: artifactID, WorkspaceID: in.WorkspaceID, SourceTaskID: in.SourceTaskID,
 		CreatorAgentID: in.CreatorAgentID, Kind: in.Kind, Title: in.Title,
@@ -155,9 +195,9 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 	}
 	version := ArtifactVersion{
 		ID: versionID, ArtifactID: artifactID, Version: 1, Content: in.Content,
-		ContentSHA256: hex.EncodeToString(sum[:]), MediaType: in.MediaType,
+		ContentSHA256: digest, MediaType: in.MediaType,
 		SizeBytes: int64(len(in.Content)), Metadata: in.Metadata,
-		CreatorAgentID: in.CreatorAgentID, SourceExecution: in.SourceExecution,
+		CreatorAgentID: in.CreatorAgentID, SourceExecution: in.SourceExecution, SourceAttempt: in.SourceAttempt,
 		CreatedAt: now,
 	}
 
@@ -175,11 +215,11 @@ func (s *Service) CreateArtifact(ctx context.Context, in CreateArtifactRequest) 
 		return artifact, version, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_artifact_versions
-		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,source_attempt_id,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 		version.ID, version.ArtifactID, version.Version, version.Content, version.ContentSHA256,
 		version.MediaType, version.SizeBytes, string(version.Metadata), null(version.CreatorAgentID),
-		null(version.SourceExecution), now.UnixMilli())
+		null(version.SourceExecution), null(version.SourceAttempt), now.UnixMilli())
 	if err != nil {
 		return artifact, version, err
 	}
@@ -243,14 +283,14 @@ func (s *Service) AddArtifactVersion(ctx context.Context, artifactID string, in 
 		ID: id, ArtifactID: artifactID, Version: current + 1, Content: in.Content,
 		ContentSHA256: hex.EncodeToString(sum[:]), MediaType: in.MediaType,
 		SizeBytes: int64(len(in.Content)), Metadata: in.Metadata,
-		CreatorAgentID: creatorID, SourceExecution: in.SourceExecution, CreatedAt: now,
+		CreatorAgentID: creatorID, SourceExecution: in.SourceExecution, SourceAttempt: in.SourceAttempt, CreatedAt: now,
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_artifact_versions
-		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		(id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,source_attempt_id,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 		version.ID, version.ArtifactID, version.Version, version.Content, version.ContentSHA256,
 		version.MediaType, version.SizeBytes, string(version.Metadata), null(version.CreatorAgentID),
-		null(version.SourceExecution), now.UnixMilli())
+		null(version.SourceExecution), null(version.SourceAttempt), now.UnixMilli())
 	if err != nil {
 		return ArtifactVersion{}, err
 	}
@@ -298,11 +338,12 @@ func (s *Service) GetArtifactVersion(ctx context.Context, artifactID string, ver
 	var version ArtifactVersion
 	var metadata string
 	var creatorID, executionID sql.NullString
+	var attemptID string
 	var created int64
-	err := s.db.QueryRowContext(ctx, `SELECT id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,created_at
+	err := s.db.QueryRowContext(ctx, `SELECT id,artifact_id,version,content,content_sha256,media_type,size_bytes,metadata_json,creator_agent_id,source_execution_id,COALESCE(source_attempt_id,''),created_at
 		FROM collaboration_artifact_versions WHERE artifact_id=? AND version=?`, artifactID, versionNumber).Scan(
 		&version.ID, &version.ArtifactID, &version.Version, &version.Content, &version.ContentSHA256,
-		&version.MediaType, &version.SizeBytes, &metadata, &creatorID, &executionID, &created)
+		&version.MediaType, &version.SizeBytes, &metadata, &creatorID, &executionID, &attemptID, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return version, ErrNotFound
 	}
@@ -312,6 +353,7 @@ func (s *Service) GetArtifactVersion(ctx context.Context, artifactID string, ver
 	version.Metadata = json.RawMessage(metadata)
 	version.CreatorAgentID = creatorID.String
 	version.SourceExecution = executionID.String
+	version.SourceAttempt = attemptID
 	version.CreatedAt = time.UnixMilli(created).UTC()
 	sum := sha256.Sum256(version.Content)
 	if hex.EncodeToString(sum[:]) != version.ContentSHA256 {
@@ -331,7 +373,7 @@ func (s *Service) AddArtifactEvidence(ctx context.Context, artifactID string, in
 		"tool_log": true, "metric": true, "manual": true,
 	}
 	if artifactID == "" || in.VersionID == "" || !validKinds[in.Kind] ||
-		len(in.SourceRef) > 2048 || len(in.Statement) > 4000 || len(in.ContentSHA256) > 64 {
+		len(in.SourceRef) > 2048 || len(in.Statement) > 4000 || len(in.ContentSHA256) > 64 || (in.AttemptID != "" && in.ExecutionID == "") {
 		return ArtifactEvidence{}, ErrInvalid
 	}
 	var workspaceID, taskID string
@@ -353,21 +395,42 @@ func (s *Service) AddArtifactEvidence(ctx context.Context, artifactID string, in
 			return ArtifactEvidence{}, ErrConflict
 		}
 	}
-	id, err := newID()
-	if err != nil {
-		return ArtifactEvidence{}, err
+	id := strings.TrimSpace(in.ID)
+	if id == "" {
+		var idErr error
+		id, idErr = newID()
+		if idErr != nil {
+			return ArtifactEvidence{}, idErr
+		}
+	}
+	if len(id) > 128 {
+		return ArtifactEvidence{}, ErrInvalid
+	}
+	var existing ArtifactEvidence
+	var existingCreated int64
+	lookupErr := s.db.QueryRowContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,COALESCE(execution_id,''),COALESCE(attempt_id,''),created_at FROM collaboration_artifact_evidence WHERE id=?`, id).Scan(
+		&existing.ID, &existing.ArtifactID, &existing.VersionID, &existing.WorkspaceID, &existing.TaskID, &existing.Kind, &existing.SourceRef, &existing.ContentSHA256, &existing.Statement, &existing.CreatedBy, &existing.ExecutionID, &existing.AttemptID, &existingCreated)
+	if lookupErr == nil {
+		if existing.ArtifactID == artifactID && existing.VersionID == in.VersionID && existing.Kind == in.Kind && existing.SourceRef == in.SourceRef && existing.ContentSHA256 == in.ContentSHA256 && existing.Statement == in.Statement && existing.ExecutionID == in.ExecutionID && existing.AttemptID == in.AttemptID {
+			existing.CreatedAt = time.UnixMilli(existingCreated).UTC()
+			return existing, nil
+		}
+		return ArtifactEvidence{}, ErrConflict
+	}
+	if !errors.Is(lookupErr, sql.ErrNoRows) {
+		return ArtifactEvidence{}, lookupErr
 	}
 	now := s.clock().UTC()
 	evidence := ArtifactEvidence{
 		ID: id, ArtifactID: artifactID, VersionID: in.VersionID, WorkspaceID: workspaceID,
 		TaskID: taskID, Kind: in.Kind, SourceRef: in.SourceRef, ContentSHA256: in.ContentSHA256,
-		Statement: in.Statement, CreatedBy: in.CreatedBy, CreatedAt: now,
+		ExecutionID: in.ExecutionID, AttemptID: in.AttemptID, Statement: in.Statement, CreatedBy: in.CreatedBy, CreatedAt: now,
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO collaboration_artifact_evidence
-		(id,artifact_id,version_id,workspace_id,task_id,kind,source_ref,content_sha256,statement,created_by,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		(id,artifact_id,version_id,workspace_id,task_id,kind,source_ref,content_sha256,statement,created_by,execution_id,attempt_id,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		evidence.ID, evidence.ArtifactID, evidence.VersionID, evidence.WorkspaceID, null(evidence.TaskID),
-		evidence.Kind, evidence.SourceRef, evidence.ContentSHA256, evidence.Statement, evidence.CreatedBy, now.UnixMilli())
+		evidence.Kind, evidence.SourceRef, evidence.ContentSHA256, evidence.Statement, evidence.CreatedBy, null(evidence.ExecutionID), null(evidence.AttemptID), now.UnixMilli())
 	return evidence, err
 }
 
@@ -375,7 +438,7 @@ func (s *Service) ListArtifactEvidence(ctx context.Context, artifactID string) (
 	if _, err := s.GetArtifact(ctx, artifactID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id,artifact_id,version_id,workspace_id,COALESCE(task_id,''),kind,source_ref,content_sha256,statement,created_by,COALESCE(execution_id,''),COALESCE(attempt_id,''),created_at
 		FROM collaboration_artifact_evidence WHERE artifact_id=? ORDER BY created_at,id LIMIT 200`, artifactID)
 	if err != nil {
 		return nil, err
@@ -386,7 +449,7 @@ func (s *Service) ListArtifactEvidence(ctx context.Context, artifactID string) (
 		var item ArtifactEvidence
 		var created int64
 		if err = rows.Scan(&item.ID, &item.ArtifactID, &item.VersionID, &item.WorkspaceID, &item.TaskID,
-			&item.Kind, &item.SourceRef, &item.ContentSHA256, &item.Statement, &item.CreatedBy, &created); err != nil {
+			&item.Kind, &item.SourceRef, &item.ContentSHA256, &item.Statement, &item.CreatedBy, &item.ExecutionID, &item.AttemptID, &created); err != nil {
 			return nil, err
 		}
 		item.CreatedAt = time.UnixMilli(created).UTC()

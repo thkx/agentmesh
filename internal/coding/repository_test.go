@@ -19,10 +19,10 @@ func testRepository(t *testing.T) *Repository {
       id TEXT PRIMARY KEY,title TEXT NOT NULL,repository_path TEXT NOT NULL,model_id TEXT NOT NULL,prompt TEXT NOT NULL,status TEXT NOT NULL,
       workspace_id TEXT NOT NULL DEFAULT '',workspace_path TEXT NOT NULL DEFAULT '',branch_name TEXT NOT NULL DEFAULT '',test_command_json TEXT NOT NULL DEFAULT '[]',
       max_repair_attempts INTEGER NOT NULL DEFAULT 2,repair_attempts INTEGER NOT NULL DEFAULT 0,timeout_seconds INTEGER NOT NULL DEFAULT 1800,
-      result_json TEXT NOT NULL DEFAULT '{}',error TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,started_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER NOT NULL DEFAULT 0);
+      result_json TEXT NOT NULL DEFAULT '{}',error TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,started_at INTEGER NOT NULL DEFAULT 0,finished_at INTEGER NOT NULL DEFAULT 0,execution_id TEXT NOT NULL DEFAULT '',outcome_unknown INTEGER NOT NULL DEFAULT 0,attempt_id TEXT NOT NULL DEFAULT '');
       CREATE TABLE coding_task_events(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,event_type TEXT NOT NULL,payload_json TEXT NOT NULL,created_at INTEGER NOT NULL);
-      CREATE TABLE coding_task_steps(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,sequence INTEGER NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input_json TEXT NOT NULL,output_json TEXT NOT NULL,error TEXT NOT NULL,started_at INTEGER NOT NULL,finished_at INTEGER NOT NULL,UNIQUE(task_id,sequence));
-      CREATE TABLE coding_task_snapshots(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,label TEXT NOT NULL,commit_hash TEXT NOT NULL,diff TEXT NOT NULL,created_at INTEGER NOT NULL);`
+      CREATE TABLE coding_task_steps(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,sequence INTEGER NOT NULL,kind TEXT NOT NULL,status TEXT NOT NULL,input_json TEXT NOT NULL,output_json TEXT NOT NULL,error TEXT NOT NULL,started_at INTEGER NOT NULL,finished_at INTEGER NOT NULL,exit_code INTEGER NOT NULL DEFAULT 0,duration_ms INTEGER NOT NULL DEFAULT 0,UNIQUE(task_id,sequence));
+      CREATE TABLE coding_task_snapshots(id TEXT PRIMARY KEY,task_id TEXT NOT NULL,label TEXT NOT NULL,commit_hash TEXT NOT NULL,diff TEXT NOT NULL,created_at INTEGER NOT NULL,execution_id TEXT NOT NULL DEFAULT '',attempt_id TEXT NOT NULL DEFAULT '',content_sha256 TEXT NOT NULL DEFAULT '');`
 	if _, err = db.Exec(schema); err != nil {
 		t.Fatal(err)
 	}
@@ -168,5 +168,80 @@ func TestRepositoryCancelPendingRejectsMissingOrClaimedTask(t *testing.T) {
 	}
 	if err := r.CancelPending(ctx, task.ID); err != ErrConflict {
 		t.Fatalf("claimed task error=%v, want ErrConflict", err)
+	}
+}
+
+func TestRecoverInterruptedPreservesUnknownOutcomeAndEvent(t *testing.T) {
+	r := testRepository(t)
+	ctx := context.Background()
+	task, err := r.Create(ctx, CreateRequest{ID: "restart-unknown", ExecutionID: "execution-1", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-1", "execution-1-a-1"); err != nil {
+		t.Fatalf("idempotent bind: %v", err)
+	}
+	if err = r.BindExecution(ctx, task.ID, "execution-2", "execution-2-a-1"); err != ErrConflict {
+		t.Fatalf("conflicting bind error=%v", err)
+	}
+	if claimed, err := r.ClaimWithEvent(ctx, task.ID, "task.started", nil); err != nil || !claimed {
+		t.Fatalf("claim=%v err=%v", claimed, err)
+	}
+	task, err = r.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.Status = StatusTesting
+	if err = r.Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	count, err := r.RecoverInterrupted(ctx)
+	if err != nil || count != 1 {
+		t.Fatalf("recovered=%d err=%v", count, err)
+	}
+	got, err := r.Get(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.ExecutionID != "execution-1" || got.AttemptID != "execution-1-a-1" {
+		t.Fatalf("unexpected recovered task: %+v", got)
+	}
+	events, err := r.Events(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[2].Type != "task.interrupted" {
+		t.Fatalf("interruption event missing: %+v", events)
+	}
+	count, err = r.RecoverInterrupted(ctx)
+	if err != nil || count != 0 {
+		t.Fatalf("repeated recovery should be idempotent: count=%d err=%v", count, err)
+	}
+}
+
+func TestCodingSnapshotPersistsExecutionAttemptAndDigest(t *testing.T) {
+	r := testRepository(t)
+	ctx := context.Background()
+	_, err := r.Create(ctx, CreateRequest{ID: "snapshot-task", RepositoryPath: "/tmp/repo", ModelID: "model", Prompt: "change"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := Snapshot{
+		TaskID: "snapshot-task", Label: "final", CommitHash: "abc123", Diff: "diff --git a/a b/a",
+		ExecutionID: "execution-snapshot", AttemptID: "execution-snapshot-a-1",
+		ContentSHA256: "0123456789abcdef",
+	}
+	if err = r.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	items, err := r.Snapshots(ctx, "snapshot-task")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ExecutionID != snapshot.ExecutionID || items[0].AttemptID != snapshot.AttemptID || items[0].ContentSHA256 != snapshot.ContentSHA256 {
+		t.Fatalf("snapshot provenance not persisted: %+v", items)
 	}
 }

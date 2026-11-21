@@ -372,6 +372,11 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize coding task service: %w", err)
 	}
+	if err = codingService.SetAllowedRepositoryRoots(cfg.Coding.AllowedRepositoryRoots); err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("configure coding repository access: %w", err)
+	}
+	codingService.SetReviewer(agentRuntime)
 	if _, err := codingService.Recover(ctx); err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("recover interrupted coding tasks: %w", err)
@@ -401,7 +406,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("register agent execution adapter: %w", err)
 	}
-	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService)
+	codingExecutionAdapter, err := executionmanager.NewCodingAdapter(codingService, executionStore)
 	if err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize coding execution adapter: %w", err)
@@ -524,6 +529,14 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize workflow engine: %w", err)
 	}
+	workflowCodingRunner, err := newWorkflowCodingRunner(executionManager)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize workflow coding runner: %w", err)
+	}
+	workflowEngine.SetCodingRunner(workflowCodingRunner)
 	workflowExecutionAdapter, err := executionmanager.NewWorkflowAdapter(workflowEngine, cfg.Scheduler.MaxAttempts)
 	if err != nil {
 		workerCancel()
@@ -688,6 +701,15 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize collaboration service: %w", err)
 	}
+
+	codingArtifactPublisher, err := newCodingArtifactPublisher(collaborationService)
+	if err != nil {
+		workerCancel()
+		workerWG.Wait()
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize coding artifact publisher: %w", err)
+	}
+	codingService.SetArtifactPublisher(codingArtifactPublisher)
 	collaborationDispatcher, err := collaboration.NewDispatcher(sqliteDB.DB, time.Second)
 	if err != nil {
 		workerCancel()
@@ -753,7 +775,7 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
 		Logger: log, Metrics: metrics,
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, AIResources: aiResources, APIToken: apiToken, RequestShutdown: shutdownRequests,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, SandboxImage: cfg.Agent.Tools.SandboxImage, SandboxNetworkEnabled: cfg.Agent.Tools.SandboxNetworkEnabled, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, AIResources: aiResources, APIToken: apiToken, RequestShutdown: shutdownRequests,
 	})
 	traceConfigured = true
 	return container, nil

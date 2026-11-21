@@ -19,6 +19,8 @@ This page is the documentation index. Use the root README for the project overvi
 | [P5 Part 1 Implementation](p5-part1-implementation.md) | Dashboard implementation record and exact verification gates |
 | [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |
 | [P5 M53 Implementation Status](p5-m53-implementation.md) | Current M53 implementation record, limitations and verification command |
+| [P6 Coding Runtime Implementation](p6-coding-runtime-audit.md) | M57–M60 source audit and implementation record, migrations, provenance and verification state |
+| [P6 Coding Runtime Architecture](p6-coding-runtime.md) | Product outcome, architecture, milestone scope, security requirements and live acceptance instructions |
 
 ## Architecture and implementation history
 

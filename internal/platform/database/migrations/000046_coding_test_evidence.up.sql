@@ -1,0 +1,2 @@
+ALTER TABLE coding_task_steps ADD COLUMN exit_code INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE coding_task_steps ADD COLUMN duration_ms INTEGER NOT NULL DEFAULT 0;

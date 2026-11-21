@@ -95,6 +95,12 @@ agent:
     max_concurrent: 4
     timeout_seconds: 900
 
+# Coding Runtime repository access is deny-by-default. Add only trusted local
+# Git repository parent directories; paths are canonicalized and symlinks may
+# not escape these roots. An empty list disables Coding Task creation.
+coding:
+  allowed_repository_roots: []
+
 scheduler:
   workers: 1
   worker_id: ""

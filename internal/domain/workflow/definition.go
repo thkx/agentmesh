@@ -22,6 +22,7 @@ const (
 	NodeCondition   NodeType = "condition"
 	NodeApproval    NodeType = "approval"
 	NodeSubworkflow NodeType = "subworkflow"
+	NodeCoding      NodeType = "coding"
 	NodeEnd         NodeType = "end"
 )
 
@@ -42,6 +43,7 @@ type Node struct {
 	Condition   *ConditionConfig   `json:"condition,omitempty"`
 	Approval    *ApprovalConfig    `json:"approval,omitempty"`
 	Subworkflow *SubworkflowConfig `json:"subworkflow,omitempty"`
+	Coding      *CodingConfig      `json:"coding,omitempty"`
 }
 type AgentConfig struct {
 	AgentProfile  string   `json:"agent_profile,omitempty"`
@@ -52,6 +54,18 @@ type AgentConfig struct {
 	MaxToolCalls  int      `json:"max_tool_calls,omitempty"`
 	ApprovedTools []string `json:"approved_tools,omitempty"`
 	Capabilities  []string `json:"capabilities,omitempty"`
+}
+type CodingConfig struct {
+	RepositoryPath    string        `json:"repository_path"`
+	ModelID           string        `json:"model_id"`
+	Prompt            string        `json:"prompt"`
+	TestCommand       CodingCommand `json:"test_command,omitempty"`
+	MaxRepairAttempts int           `json:"max_repair_attempts,omitempty"`
+	TimeoutSeconds    int           `json:"timeout_seconds,omitempty"`
+}
+type CodingCommand struct {
+	Program string   `json:"program,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 type ConditionConfig struct {
 	InputKey    string `json:"input_key"`

@@ -501,7 +501,7 @@ func (s *Service) RecordResult(ctx context.Context, c Candidate, requestID strin
 	errorCode := ""
 	if callErr != nil {
 		status = "failure"
-		errorCode = classifyError(statusCode)
+		errorCode = classifyError(statusCode, callErr)
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -551,7 +551,17 @@ func (s *Service) RecordResult(ctx context.Context, c Candidate, requestID strin
 	}
 	return tx.Commit()
 }
-func classifyError(code int) string {
+func classifyError(code int, causes ...error) string {
+	for _, cause := range causes {
+		var diagnostic interface{ DiagnosticCode() string }
+		if errors.As(cause, &diagnostic) {
+			switch diagnostic.DiagnosticCode() {
+			case "request_timeout", "request_cancelled", "dns_error", "tls_error",
+				"connection_refused", "connection_reset", "network_error":
+				return diagnostic.DiagnosticCode()
+			}
+		}
+	}
 	switch code {
 	case 401:
 		return "authentication_failed"
@@ -652,7 +662,7 @@ func (s *Service) CheckCredential(ctx context.Context, id string) error {
 	message := ""
 	if err != nil {
 		state = "degraded"
-		message = classifyError(statusFromError(err))
+		message = classifyError(statusFromError(err), err)
 	}
 	_, updateErr := s.db.ExecContext(ctx, `UPDATE ai_credential_health SET state=?,last_error=?,updated_at=? WHERE credential_id=?`, state, message, nowMS(), id)
 	return errors.Join(err, updateErr)
