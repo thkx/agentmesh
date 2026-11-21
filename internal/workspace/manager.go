@@ -51,6 +51,42 @@ func (m *Manager) Create(ctx context.Context, id string) (Workspace, error) {
 	}
 	return Workspace{ID: id, Path: path}, nil
 }
+
+// Ensure creates a missing workspace directory and validates existing paths.
+// It is safe to call repeatedly when reconciling persisted workspace records.
+func (m *Manager) Ensure(ctx context.Context, id string) (Workspace, error) {
+	if err := ctx.Err(); err != nil {
+		return Workspace{}, err
+	}
+	if !validID(id) {
+		return Workspace{}, ErrInvalidWorkspaceID
+	}
+	path := filepath.Join(m.Root, id)
+	if err := os.Mkdir(path, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return Workspace{}, err
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Workspace{}, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return Workspace{}, ErrInvalidWorkspaceID
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return Workspace{}, err
+	}
+	root, err := filepath.EvalSymlinks(m.Root)
+	if err != nil {
+		return Workspace{}, err
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return Workspace{}, ErrInvalidWorkspaceID
+	}
+	return Workspace{ID: id, Path: resolved}, nil
+}
+
 func (m *Manager) Remove(id string) error {
 	if !validID(id) {
 		return ErrInvalidWorkspaceID

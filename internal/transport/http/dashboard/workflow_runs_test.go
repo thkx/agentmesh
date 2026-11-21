@@ -30,7 +30,7 @@ func TestDashboardListsAndShowsPersistedWorkflowRuns(t *testing.T) {
 		`CREATE TABLE workflow_runs (id TEXT PRIMARY KEY NOT NULL, workflow_id TEXT NOT NULL, workflow_version INTEGER NOT NULL, status TEXT NOT NULL, current_node TEXT, state_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
 		`CREATE TABLE workflow_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, node_id TEXT, worker_id TEXT, occurred_at INTEGER NOT NULL, data_json TEXT NOT NULL DEFAULT '{}')`,
 		`CREATE TABLE workflow_node_executions (run_id TEXT NOT NULL,node_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,status TEXT NOT NULL,owner TEXT,lease_until INTEGER,output_json TEXT,error_text TEXT,attempt INTEGER NOT NULL DEFAULT 1,started_at INTEGER NOT NULL,finished_at INTEGER,PRIMARY KEY(run_id,node_id))`,
-		`CREATE TABLE workflow_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,available_at INTEGER NOT NULL,lease_owner TEXT,lease_until INTEGER,last_error TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
+		`CREATE TABLE workflow_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,available_at INTEGER NOT NULL,lease_owner TEXT,lease_until INTEGER,last_error TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
 	}
 	for _, statement := range statements {
 		if _, err = db.Exec(statement); err != nil {
@@ -111,10 +111,81 @@ func TestDashboardListsAndShowsPersistedWorkflowRuns(t *testing.T) {
 			t.Fatalf("workflow detail missing %q: %s", want, detail.Body.String())
 		}
 	}
+	for _, unwanted := range []string{
+		"STEP 4 · WORKFLOW QUICKSTART",
+		"No enabled models are available",
+		"No workspace is available yet",
+		"No workflow runs have been recorded yet",
+		"No workflow templates are saved",
+	} {
+		if strings.Contains(detail.Body.String(), unwanted) {
+			t.Fatalf("workflow run detail should not render workflow index content %q", unwanted)
+		}
+	}
 }
 
 type dashboardNoopAgent struct{}
 
 func (dashboardNoopAgent) Run(context.Context, agentdom.Task) (agentdom.Result, error) {
 	return agentdom.Result{}, nil
+}
+
+func TestQueueingWorkflowRedirectsToDurableRunDetail(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		`CREATE TABLE workflows (id TEXT NOT NULL, version INTEGER NOT NULL, name TEXT NOT NULL, definition_json TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY(id,version))`,
+		`CREATE TABLE workflow_runs (id TEXT PRIMARY KEY NOT NULL, workflow_id TEXT NOT NULL, workflow_version INTEGER NOT NULL, status TEXT NOT NULL, current_node TEXT, state_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
+		`CREATE TABLE workflow_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, node_id TEXT, worker_id TEXT, occurred_at INTEGER NOT NULL, data_json TEXT NOT NULL DEFAULT '{}')`,
+		`CREATE TABLE workflow_node_executions (run_id TEXT NOT NULL,node_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,status TEXT NOT NULL,owner TEXT,lease_until INTEGER,output_json TEXT,error_text TEXT,attempt INTEGER NOT NULL DEFAULT 1,started_at INTEGER NOT NULL,finished_at INTEGER,PRIMARY KEY(run_id,node_id))`,
+		`CREATE TABLE workflow_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,available_at INTEGER NOT NULL,lease_owner TEXT,lease_until INTEGER,last_error TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := checkpoint.NewSQLite(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := wf.Definition{
+		ID: "wf-quickstart-redirect", Name: "Quickstart redirect", Version: 1, Entry: "start",
+		Nodes: []wf.Node{{ID: "start", Type: wf.NodeStart}, {ID: "end", Type: wf.NodeEnd}},
+		Edges: []wf.Edge{{From: "start", To: "end"}},
+	}
+	if err := store.SaveDefinition(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	engine, err := workflowruntime.New(store, dashboardNoopAgent{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	New(Dependencies{DB: db, WorkflowEngine: engine}).RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/workflows/wf-quickstart-redirect/run", strings.NewReader("input_json=%7B%7D"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://127.0.0.1")
+	req.Host = "127.0.0.1"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("queue status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if !strings.HasPrefix(location, "/dashboard/workflow-runs/") {
+		t.Fatalf("queue should redirect to durable run detail, location=%q", location)
+	}
+	runID := strings.TrimPrefix(location, "/dashboard/workflow-runs/")
+	if runID == "" {
+		t.Fatal("redirect did not include durable run ID")
+	}
+	detail := httptest.NewRecorder()
+	router.ServeHTTP(detail, httptest.NewRequest(http.MethodGet, location, nil))
+	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), runID) {
+		t.Fatalf("durable run detail status=%d body=%s", detail.Code, detail.Body.String())
+	}
 }

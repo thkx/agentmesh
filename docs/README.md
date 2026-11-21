@@ -42,6 +42,8 @@ The following files remain at the repository root to preserve existing links. Th
 
 - [P0/P1 implementation notes](../README-P0-P1.md): retained for historical context; not a current installation guide or a replacement for the repository.
 
+| [P7 First-Run Product Experience](p7-product-onboarding.md) | M61–M65 guided onboarding, model setup, Agent quickstart and Workflow templates |
+
 ## P2: current execution contract
 
 P2 is the common execution management layer above the existing Agent Scheduler, Coding Service, Workflow queue and CLI executor.

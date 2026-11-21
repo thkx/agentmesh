@@ -40,6 +40,7 @@ import (
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
+	"github.com/thkx/agentmesh/internal/workspace"
 	webassets "github.com/thkx/agentmesh/web"
 )
 
@@ -62,6 +63,7 @@ type Dependencies struct {
 	Collaboration         *collaboration.Service
 	WorkflowEngine        *workflowruntime.Engine
 	WorkflowMaxAttempts   int
+	Workspaces            *workspace.Manager
 	Catalog               *handlers.CatalogHandler
 }
 
@@ -82,6 +84,7 @@ type Handler struct {
 	collaboration         *collaboration.Service
 	workflowEngine        *workflowruntime.Engine
 	workflowMaxAttempts   int
+	workspaces            *workspace.Manager
 	workflowRepo          *authoring.Repository
 	catalogAPI            http.Handler
 	executionAPI          http.Handler
@@ -92,9 +95,20 @@ type Handler struct {
 
 type workspaceOption struct{ ID, Name string }
 
+type setupStepView struct {
+	Title       string
+	Description string
+	Href        string
+	Done        bool
+}
+
 type pageData struct {
 	Title                       string
 	Active                      string
+	SetupSteps                  []setupStepView
+	NextSetupStep               setupStepView
+	SetupDone                   int
+	SetupTotal                  int
 	Error                       string
 	Message                     string
 	Readiness                   string
@@ -115,6 +129,10 @@ type pageData struct {
 	IdentityRows                []identityView
 	TaskRows                    []taskView
 	WorkspaceOptions            []workspaceOption
+	ProviderOptions             []providerOption
+	ModelOptions                []modelOption
+	AllProviderOptions          []providerOption
+	AllModelOptions             []modelOption
 	WorkflowRows                []workflowView
 	WorkflowRuns                []workflowRunListView
 	WorkflowRun                 *workflowRunDetailView
@@ -161,6 +179,8 @@ type operationsHealthView struct {
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
+type providerOption struct{ ID, Name string }
+type modelOption struct{ ID, Name string }
 type modelView struct {
 	ID, ProviderID, Name, DisplayName, Status, Source string
 	ContextWindow, MaxOutputTokens                    int
@@ -281,6 +301,7 @@ func New(d Dependencies) *Handler {
 		collaboration:         d.Collaboration,
 		workflowEngine:        d.WorkflowEngine,
 		workflowMaxAttempts:   d.WorkflowMaxAttempts,
+		workspaces:            d.Workspaces,
 		tmpl:                  t,
 		loginAttempts:         make(map[string][]time.Time),
 	}
@@ -336,6 +357,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
+	g.POST("/workspaces/quickstart", h.requireSession(), h.createQuickstartWorkspace)
+	g.POST("/workflows/quickstart", h.requireSession(), h.createQuickstartWorkflowTemplate)
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
 	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
@@ -680,10 +703,12 @@ func (h *Handler) overview(c *gin.Context) {
 			data.Readiness = "Database ready"
 		}
 		queries := map[string]string{
-			"executions": "SELECT COUNT(*) FROM executions",
-			"agents":     "SELECT COUNT(*) FROM agent_definitions",
-			"providers":  "SELECT COUNT(*) FROM providers",
-			"workflows":  "SELECT COUNT(*) FROM workflows",
+			"executions":            "SELECT COUNT(*) FROM executions",
+			"agent_tasks_completed": "SELECT COUNT(*) FROM agent_runs WHERE status='succeeded'",
+			"agents":                "SELECT COUNT(*) FROM agent_definitions WHERE enabled=1",
+			"providers":             "SELECT COUNT(*) FROM providers WHERE enabled=1",
+			"models":                "SELECT COUNT(*) FROM models m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=1 AND p.enabled=1",
+			"workflows":             "SELECT COUNT(*) FROM workflows",
 		}
 		for name, query := range queries {
 			var count int64
@@ -692,19 +717,41 @@ func (h *Handler) overview(c *gin.Context) {
 			}
 		}
 	}
+	data.SetupSteps = []setupStepView{
+		{Title: "Connect a model provider", Description: "Add the service or local model endpoint that AgentMesh will call.", Href: "/dashboard/providers", Done: data.Counts["providers"] > 0},
+		{Title: "Enable a model", Description: "Register an available model and make sure its credentials are configured.", Href: "/dashboard/models", Done: data.Counts["models"] > 0},
+		{Title: "Create your first Agent", Description: "Give an Agent a model, a role and a clear task description.", Href: "/dashboard/agents", Done: data.Counts["agents"] > 0},
+		{Title: "Run your first Agent task", Description: "Submit a small task and inspect its Execution history.", Href: "/dashboard/agents", Done: data.Counts["agent_tasks_completed"] > 0},
+		{Title: "Build a reusable Workflow", Description: "Combine Agents and other activities into a repeatable process.", Href: "/dashboard/workflows", Done: data.Counts["workflows"] > 0},
+	}
+	data.SetupTotal = len(data.SetupSteps)
+	for _, step := range data.SetupSteps {
+		if step.Done {
+			data.SetupDone++
+			continue
+		}
+		if data.NextSetupStep.Title == "" {
+			data.NextSetupStep = step
+		}
+	}
 	h.render(c, data, http.StatusOK)
 }
 
 func (h *Handler) callCatalog(c *gin.Context, method, path string, payload any) bool {
+	status := h.callCatalogStatus(c, method, path, payload)
+	return status >= http.StatusOK && status < http.StatusMultipleChoices
+}
+
+func (h *Handler) callCatalogStatus(c *gin.Context, method, path string, payload any) int {
 	if h.catalogAPI == nil {
-		return false
+		return 0
 	}
 	var body []byte
 	if payload != nil {
 		var err error
 		body, err = json.Marshal(payload)
 		if err != nil {
-			return false
+			return 0
 		}
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -712,7 +759,7 @@ func (h *Handler) callCatalog(c *gin.Context, method, path string, payload any) 
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.catalogAPI.ServeHTTP(rec, req)
-	return rec.Code >= 200 && rec.Code < 300
+	return rec.Code
 }
 
 func (h *Handler) createProvider(c *gin.Context) {
@@ -789,11 +836,17 @@ func (h *Handler) testProvider(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if !h.callCatalog(c, http.MethodPost, "/api/v1/providers/"+c.Param("id")+"/test", map[string]any{}) {
-		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test")
-		return
+	status := h.callCatalogStatus(c, http.MethodPost, "/api/v1/providers/"+c.Param("id")+"/test", map[string]any{})
+	switch {
+	case status >= http.StatusOK && status < http.StatusMultipleChoices:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=provider-tested")
+	case status == http.StatusConflict:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-model")
+	case status == http.StatusGatewayTimeout:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-timeout")
+	default:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-failed")
 	}
-	c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=provider-tested")
 }
 func (h *Handler) createModel(c *gin.Context) {
 	if !sameOrigin(c.Request) {
@@ -900,6 +953,15 @@ func (h *Handler) deleteCredential(c *gin.Context) {
 
 func (h *Handler) models(c *gin.Context) {
 	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
+	if h.providerRegistry != nil {
+		for _, provider := range h.providerRegistry.List() {
+			option := providerOption{ID: string(provider.ID), Name: provider.Name}
+			data.AllProviderOptions = append(data.AllProviderOptions, option)
+			if provider.Enabled {
+				data.ProviderOptions = append(data.ProviderOptions, option)
+			}
+		}
+	}
 	if h.catalogAPI != nil {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil).WithContext(c.Request.Context())
 		rec := httptest.NewRecorder()
@@ -993,6 +1055,14 @@ func (h *Handler) runAgent(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
 	}
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=workspace-unavailable")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=workspace-unavailable")
+		return
+	}
 	result, err := h.agentCatalog.Run(c.Request.Context(), c.Param("id"), workspaceID, prompt)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
@@ -1025,7 +1095,7 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-run")
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workflow-run-"+string(run.Status))
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflow-runs/"+url.PathEscape(run.ID))
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
@@ -1117,6 +1187,106 @@ func (h *Handler) deleteAgent(c *gin.Context) {
 	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-deleted")
 }
+func (h *Handler) createQuickstartWorkspace(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.collaboration == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	slug := strings.ToLower(strings.TrimSpace(c.PostForm("slug")))
+	description := strings.TrimSpace(c.PostForm("description"))
+	if name == "" || len(name) > 160 || !validWorkspaceSlug(slug) {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	workspace := collaboration.Workspace{
+		Name: name, Slug: slug, Description: description,
+		AutonomyMode: "hybrid", MaxAgentConcurrency: 4, MaxDelegationDepth: 3,
+	}
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	created, err := h.collaboration.CreateWorkspace(c.Request.Context(), workspace)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), created.ID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workspace-created")
+}
+
+func (h *Handler) createQuickstartWorkflowTemplate(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.workflowRepo == nil || h.modelRegistry == nil || h.collaboration == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	modelID := strings.TrimSpace(c.PostForm("model_id"))
+	workspaceID := strings.TrimSpace(c.PostForm("workspace_id"))
+	prompt := strings.TrimSpace(c.PostForm("prompt"))
+	if name == "" || len(name) > 160 || modelID == "" || workspaceID == "" || prompt == "" || len(prompt) > 10000 {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+
+	modelEnabled := false
+	for _, model := range h.modelRegistry.List() {
+		if model.ID == modelID && model.Enabled {
+			modelEnabled = true
+			break
+		}
+	}
+	if !modelEnabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-model")
+		return
+	}
+	if _, err := h.collaboration.GetWorkspace(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+
+	id := "quickstart-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+	definition := domainworkflow.Definition{
+		ID: id, Name: name, Version: 1, Entry: "start",
+		Nodes: []domainworkflow.Node{
+			{ID: "start", Type: domainworkflow.NodeStart},
+			{ID: "agent", Type: domainworkflow.NodeAgent, Name: "Run Agent task", Agent: &domainworkflow.AgentConfig{
+				ModelID: modelID, WorkspaceID: workspaceID, Prompt: prompt, MaxSteps: 10, MaxToolCalls: 10,
+			}},
+			{ID: "end", Type: domainworkflow.NodeEnd},
+		},
+		Edges: []domainworkflow.Edge{{From: "start", To: "agent"}, {From: "agent", To: "end"}},
+	}
+	template := authoring.Template{ID: id, Name: name, Description: "Starter Workflow created from the guided quickstart.", Definition: definition}
+	if err := h.workflowRepo.SaveTemplate(c.Request.Context(), template); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workflow-quickstart-saved")
+}
+
 func (h *Handler) createWorkflowTemplate(c *gin.Context) {
 	if !sameOrigin(c.Request) {
 		c.AbortWithStatus(http.StatusForbidden)
@@ -1255,6 +1425,19 @@ func (h *Handler) deleteAgentIdentity(c *gin.Context) {
 
 func (h *Handler) agents(c *gin.Context) {
 	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
+	if h.modelRegistry != nil {
+		for _, model := range h.modelRegistry.List() {
+			name := model.DisplayName
+			if name == "" {
+				name = model.Name
+			}
+			option := modelOption{ID: model.ID, Name: name}
+			data.AllModelOptions = append(data.AllModelOptions, option)
+			if model.Enabled {
+				data.ModelOptions = append(data.ModelOptions, option)
+			}
+		}
+	}
 	if h.collaboration != nil {
 		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
 		if err == nil {
@@ -1409,6 +1592,28 @@ func (h *Handler) executionForAnyTask(ctx context.Context, taskID string) string
 
 func (h *Handler) workflows(c *gin.Context) {
 	data := pageData{Title: "Workflows", Active: "workflows", WorkflowRows: []workflowView{}, WorkflowRuns: []workflowRunListView{}}
+	if h.modelRegistry != nil {
+		for _, model := range h.modelRegistry.List() {
+			if !model.Enabled {
+				continue
+			}
+			name := model.DisplayName
+			if name == "" {
+				name = model.Name
+			}
+			data.ModelOptions = append(data.ModelOptions, modelOption{ID: model.ID, Name: name})
+		}
+	}
+	if h.collaboration != nil {
+		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
+		if err == nil {
+			for _, workspace := range workspaces {
+				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: workspace.ID, Name: workspace.Name})
+			}
+		} else {
+			data.Error = "Could not load workspaces for the Workflow quickstart"
+		}
+	}
 	if h.db != nil {
 		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT r.id,r.workflow_id,r.workflow_version,r.status,r.created_at,r.updated_at,COALESCE(w.name,r.workflow_id)
 			FROM workflow_runs r LEFT JOIN workflows w ON w.id=r.workflow_id AND w.version=r.workflow_version
@@ -1971,7 +2176,21 @@ func (h *Handler) cancelExecution(c *gin.Context) {
 }
 
 func (h *Handler) render(c *gin.Context, data pageData, status int) {
-	if c.Query("error") != "" {
+	switch c.Query("error") {
+	case "provider-test-model":
+		data.Error = "The provider is disabled or has no enabled model. Enable the provider and add or enable one of its models before testing."
+	case "provider-test-timeout":
+		data.Error = "The connection test timed out. Check the provider URL and network access, then try again."
+	case "provider-test-failed":
+		data.Error = "The connection test failed. Check the API key, provider URL, and API model name."
+	case "workflow-quickstart":
+		data.Error = "Enter a Workflow name, choose an enabled model and workspace, and provide a task instruction."
+	case "workflow-quickstart-model":
+		data.Error = "The selected model is no longer enabled. Enable a model and try again."
+	case "workflow-quickstart-workspace":
+		data.Error = "The selected workspace could not be found. Choose an existing workspace and try again."
+	case "":
+	default:
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
 	}
 	switch c.Query("message") {
@@ -1991,6 +2210,8 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Message = "Provider configuration saved."
 	case "provider-deleted":
 		data.Message = "Provider deleted."
+	case "workflow-quickstart-saved":
+		data.Message = "Starter Workflow saved. Review it below, apply it to the Workflow Runtime, then queue a run."
 	case "provider-tested":
 		data.Message = "Provider connectivity test completed successfully."
 	case "model-saved":
@@ -2028,6 +2249,19 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 	if err := h.tmpl.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		return
 	}
+}
+
+func validWorkspaceSlug(slug string) bool {
+	if slug == "" || len(slug) > 100 {
+		return false
+	}
+	for i, r := range slug {
+		isAlphaNumeric := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		if !isAlphaNumeric && (r != '-' || i == 0 || i == len(slug)-1) {
+			return false
+		}
+	}
+	return true
 }
 
 func sameOrigin(r *http.Request) bool {

@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +29,7 @@ func TestDashboardRendersWithoutExternalAssets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"AgentMesh", "Overview", "Providers", "Executions"} {
+	for _, want := range []string{"AgentMesh", "Overview", "Providers", "Executions", "Your first AgentMesh workflow", "Connect a model provider", "Run your first Agent task"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("dashboard response missing %q", want)
 		}
@@ -354,6 +355,310 @@ func TestCodingDashboardRendersTaskCreationAndRecentTasks(t *testing.T) {
 	for _, want := range []string{"Coding", "Create and run Coding Task", "coding.allowed_repository_roots", "Docker image", "Network mode", "Recent coding tasks"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("coding dashboard missing %q", want)
+		}
+	}
+}
+
+func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	schema := `
+		CREATE TABLE providers(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+		CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL);
+		CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+		CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL);
+		CREATE TABLE agent_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL);
+		CREATE TABLE workflows(id TEXT PRIMARY KEY);
+		INSERT INTO providers(id, enabled) VALUES ('provider-1', 1);
+		INSERT INTO models(id, provider_id, enabled) VALUES ('model-1', 'provider-1', 1);
+		INSERT INTO agent_definitions(id, enabled) VALUES ('agent-1', 1);
+		INSERT INTO executions(id, kind, status) VALUES
+			('workflow-run', 'workflow', 'succeeded');
+		INSERT INTO agent_runs(id, status) VALUES
+			('agent-queued', 'queued'),
+			('agent-failed', 'failed');
+		INSERT INTO workflows(id) VALUES ('workflow-1');
+	`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	New(Dependencies{DB: db}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"4 / 5",
+		"已完成 Agent 任务",
+		"Recommended next step: Run your first Agent task",
+		"href=\"/dashboard/agents\">Continue</a>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("overview missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "agent_executions</span></div>") {
+		t.Fatal("agent execution counter should not be shown as a separate setup requirement")
+	}
+	if _, err = db.Exec("INSERT INTO agent_runs(id, status) VALUES ('agent-succeeded', 'succeeded')"); err != nil {
+		t.Fatal(err)
+	}
+	completed := httptest.NewRecorder()
+	router.ServeHTTP(completed, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if completed.Code != http.StatusOK || !strings.Contains(completed.Body.String(), "5 / 5") || !strings.Contains(completed.Body.String(), "Your first-run setup is complete") {
+		t.Fatalf("successful Agent run did not complete onboarding: status=%d body=%s", completed.Code, completed.Body.String())
+	}
+}
+
+func TestOverviewEmptyDatabaseRecommendsConnectingProvider(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		"CREATE TABLE providers(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
+		"CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL)",
+		"CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
+		"CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL)",
+		"CREATE TABLE agent_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL)",
+		"CREATE TABLE workflows(id TEXT PRIMARY KEY)",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := gin.New()
+	New(Dependencies{DB: db}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"0 / 5", "Recommended next step: Connect a model provider", "href=\"/dashboard/providers\">Continue</a>"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("empty overview missing %q: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		wants  []string
+	}{
+		{active: "providers", wants: []string{
+			"Connect the AI service you want AgentMesh to use",
+			"Create provider",
+			"Save the API key",
+			"New API key",
+			"Save key",
+			"Add and enable a model",
+			"test the connection",
+		}},
+		{active: "models", wants: []string{
+			"Tell AgentMesh which model to call",
+			"Model ID is an internal unique ID",
+			"API model name is sent to the provider",
+			"Select provider",
+		}},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: tc.active}); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s page missing setup guidance %q", tc.active, want)
+			}
+		}
+	}
+}
+
+func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{Active: "agents", ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}}, AgentRows: []agentView{{ID: "agent-1", Name: "Helper"}}, WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render agents page: %v", err)
+	}
+	for _, want := range []string{
+		"Create an Agent, then give it one small task",
+		"unique ID, a name, the enabled Model ID",
+		"Select workspace",
+		"Default workspace",
+		"Describe one small task for this Agent",
+		"Select enabled model",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("agents page missing first-task guidance %q", want)
+		}
+	}
+	if strings.Contains(body.String(), `name="workspace_id" placeholder="Workspace ID"`) {
+		t.Fatal("run form should select a known workspace instead of requiring users to copy an ID")
+	}
+}
+
+func TestEditFormsUseCatalogSelectionsAndPreserveCurrentAssignments(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		data   pageData
+		wants  []string
+	}{
+		{
+			active: "agents",
+			data: pageData{
+				Active:          "agents",
+				AgentRows:       []agentView{{ID: "agent-1", Name: "Helper", ModelID: "model-disabled"}},
+				AllModelOptions: []modelOption{{ID: "model-disabled", Name: "Legacy model"}},
+			},
+			wants: []string{`<select name="model_id" aria-label="Model">`,
+				`<option value="model-disabled" selected>Legacy model · model-disabled</option>`},
+		},
+		{
+			active: "models",
+			data: pageData{
+				Active:             "models",
+				ModelRows:          []modelView{{ID: "model-1", ProviderID: "provider-disabled", Source: "provider"}},
+				AllProviderOptions: []providerOption{{ID: "provider-disabled", Name: "Legacy provider"}},
+			},
+			wants: []string{
+				`<select name="provider_id" aria-label="Provider">`,
+				`<option value="provider-disabled" selected>Legacy provider · provider-disabled</option>`},
+		},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", tc.data); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s edit form missing %q", tc.active, want)
+			}
+		}
+	}
+}
+
+func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "provider-test-model", want: "add or enable one of its models"},
+		{query: "provider-test-timeout", want: "Check the provider URL and network access"},
+		{query: "provider-test-failed", want: "Check the API key, provider URL, and API model name"},
+	} {
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/dashboard/providers?error="+tc.query, nil)
+		h.render(ctx, pageData{Title: "Providers", Active: "providers"}, http.StatusOK)
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("error %q missing guidance %q: %s", tc.query, tc.want, rec.Body.String())
+		}
+	}
+}
+
+func TestModelAndAgentCreationUseCatalogSelections(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		data   pageData
+		wants  []string
+	}{
+		{active: "models", data: pageData{Active: "models", ProviderOptions: []providerOption{{ID: "provider-1", Name: "Primary provider"}}}, wants: []string{`<select name="provider_id" required>`, "Primary provider"}},
+		{active: "agents", data: pageData{Active: "agents", ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}}}, wants: []string{`<select name="model_id" required>`, "Main model"}},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", tc.data); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s page missing selection %q", tc.active, want)
+			}
+		}
+	}
+}
+
+// TestWorkflowQuickstartExplainsTheGeneratedStepsAndRequiresExistingResources verifies
+// that the guided Workflow form exposes only configured model/workspace choices.
+func TestWorkflowQuickstartExplainsTheGeneratedStepsAndRequiresExistingResources(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active:           "workflows",
+		ModelOptions:     []modelOption{{ID: "model-1", Name: "Main model"}},
+		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"Create a reusable Agent Workflow",
+		"Start → one Agent task → End",
+		"Select enabled model",
+		"Select workspace",
+		"Agent instruction",
+		"action=\"/dashboard/workflows/quickstart\"",
+		"Main model · model-1",
+		"Default workspace",
+		"Save starter Workflow",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("Workflow quickstart missing %q", want)
+		}
+	}
+}
+
+func TestWorkflowQuickstartDisablesCreationWithoutModelOrWorkspace(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: "workflows"}); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"<button disabled>Save starter Workflow</button>",
+		"No enabled models are available",
+		"No workspace is available",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("empty Workflow quickstart missing %q", want)
+		}
+	}
+}
+
+// TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists keeps
+// first-time users from being blocked by a missing prerequisite.
+func TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active:       "workflows",
+		ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"No workspace is available yet",
+		"action=\"/dashboard/workspaces/quickstart\"",
+		"Workspace name",
+		"Workspace slug",
+		"Create workspace",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("empty-workspace quickstart missing %q", want)
 		}
 	}
 }
