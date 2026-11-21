@@ -4,10 +4,14 @@
 # The repository is changed only inside AgentMesh's task Worktree; this script never commits or pushes.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
 BASE_URL="${AGENTMESH_BASE_URL:-http://127.0.0.1:8080}"
 TOKEN="${AGENTMESH_API_TOKEN:-}"
-if [[ -z "$TOKEN" && -n "${AGENTMESH_API_TOKEN_FILE:-}" ]]; then
-  TOKEN="$(cat "$AGENTMESH_API_TOKEN_FILE")"
+TOKEN_FILE="${AGENTMESH_API_TOKEN_FILE:-$ROOT/data/api-token}"
+if [[ -z "$TOKEN" && -f "$TOKEN_FILE" ]]; then
+  TOKEN="$(cat "$TOKEN_FILE")"
 fi
 REPOSITORY="${P6_REPOSITORY_PATH:-}"
 MODEL_ID="${P6_MODEL_ID:-}"
