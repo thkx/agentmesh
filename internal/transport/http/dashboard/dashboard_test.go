@@ -472,7 +472,7 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
 	h := New(Dependencies{})
 	var body bytes.Buffer
-	data := pageData{Active: "agents", WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
+	data := pageData{Active: "agents", AgentRows: []agentView{{ID: "agent-1", Name: "Helper"}}, WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
 	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
 		t.Fatalf("render agents page: %v", err)
 	}
