@@ -371,14 +371,16 @@ func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *te
 		CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL);
 		CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
 		CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL);
+		CREATE TABLE agent_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL);
 		CREATE TABLE workflows(id TEXT PRIMARY KEY);
 		INSERT INTO providers(id, enabled) VALUES ('provider-1', 1);
 		INSERT INTO models(id, provider_id, enabled) VALUES ('model-1', 'provider-1', 1);
 		INSERT INTO agent_definitions(id, enabled) VALUES ('agent-1', 1);
 		INSERT INTO executions(id, kind, status) VALUES
-			('agent-queued', 'agent', 'queued'),
-			('agent-failed', 'agent', 'failed'),
 			('workflow-run', 'workflow', 'succeeded');
+		INSERT INTO agent_runs(id, status) VALUES
+			('agent-queued', 'queued'),
+			('agent-failed', 'failed');
 		INSERT INTO workflows(id) VALUES ('workflow-1');
 	`
 	if _, err := db.Exec(schema); err != nil {
@@ -403,6 +405,14 @@ func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *te
 	}
 	if strings.Contains(body, "agent_executions</span></div>") {
 		t.Fatal("agent execution counter should not be shown as a separate setup requirement")
+	}
+	if _, err = db.Exec("INSERT INTO agent_runs(id, status) VALUES ('agent-succeeded', 'succeeded')"); err != nil {
+		t.Fatal(err)
+	}
+	completed := httptest.NewRecorder()
+	router.ServeHTTP(completed, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if completed.Code != http.StatusOK || !strings.Contains(completed.Body.String(), "5 / 5") || !strings.Contains(completed.Body.String(), "Your first-run setup is complete") {
+		t.Fatalf("successful Agent run did not complete onboarding: status=%d body=%s", completed.Code, completed.Body.String())
 	}
 }
 
