@@ -845,7 +845,7 @@ func (h *Handler) agentRun(c *gin.Context) {
 			detail.Duration = run.Result.FinishedAt.Sub(run.Result.StartedAt).Round(time.Millisecond).String()
 		}
 	}
-	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agents", AgentRun: detail}, http.StatusOK)
+	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agent-run", AgentRun: detail}, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
