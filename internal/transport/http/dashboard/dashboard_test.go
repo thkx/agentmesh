@@ -626,7 +626,6 @@ func TestWorkflowQuickstartDisablesCreationWithoutModelOrWorkspace(t *testing.T)
 	}
 }
 
-
 // TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists keeps
 // first-time users from being blocked by a missing prerequisite.
 func TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists(t *testing.T) {
