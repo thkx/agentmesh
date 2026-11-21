@@ -578,3 +578,50 @@ func TestModelAndAgentCreationUseCatalogSelections(t *testing.T) {
 		}
 	}
 }
+
+// TestWorkflowQuickstartExplainsTheGeneratedStepsAndRequiresExistingResources verifies
+// that the guided Workflow form exposes only configured model/workspace choices.
+func TestWorkflowQuickstartExplainsTheGeneratedStepsAndRequiresExistingResources(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active: "workflows",
+		ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}},
+		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"Create a reusable Agent Workflow",
+		"Start → one Agent task → End",
+		"Select enabled model",
+		"Select workspace",
+		"Agent instruction",
+		"action=\"/dashboard/workflows/quickstart\"",
+		"Main model · model-1",
+		"Default workspace",
+		"Save starter Workflow",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("Workflow quickstart missing %q", want)
+		}
+	}
+}
+
+func TestWorkflowQuickstartDisablesCreationWithoutModelOrWorkspace(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: "workflows"}); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"<button disabled disabled>Save starter Workflow</button>",
+		"No enabled models are available",
+		"No workspace is available",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("empty Workflow quickstart missing %q", want)
+		}
+	}
+}
