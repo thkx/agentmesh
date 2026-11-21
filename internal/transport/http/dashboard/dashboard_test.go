@@ -447,7 +447,9 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 		{active: "providers", wants: []string{
 			"Connect the AI service you want AgentMesh to use",
 			"Create provider",
-			"Save credentials",
+			"Save the API key",
+			"New API key",
+			"Save key",
 			"Add and enable a model",
 			"test the connection",
 		}},
