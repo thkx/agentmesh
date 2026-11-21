@@ -2,6 +2,7 @@ package checkpoint_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -56,8 +57,12 @@ func TestFinishRunPersistsFailureToRunAndJob(t *testing.T) {
 			continue
 		}
 		finished = true
-		if event.Data["job_status"] != "failed" || event.Data["run_status"] != string(workflow.RunFailed) {
-			t.Fatalf("worker.finished data = %#v", event.Data)
+		var data map[string]any
+		if err = json.Unmarshal(event.Data, &data); err != nil {
+			t.Fatal(err)
+		}
+		if data["job_status"] != "failed" || data["run_status"] != string(workflow.RunFailed) {
+			t.Fatalf("worker.finished data = %#v", data)
 		}
 	}
 	if !finished {
