@@ -33,7 +33,7 @@ Collaboration Artifact Version + Evidence
 Unified Execution Detail / Timeline
 ```
 
-The P6 code is present on this branch. A green GitHub Actions run and the user's live Docker/model acceptance are still required before P6 can be called accepted.
+The P6 code is present on this branch. The user has now reported a successful live Docker/model Coding Workflow acceptance; see [P6 Live Acceptance Record](p6-live-acceptance.md). Final CI for the exact latest branch head and manual inspection of the retained Worktree remain release-hygiene checks.
 
 ## 2. M57 — Durable Coding Execution
 
@@ -152,7 +152,7 @@ AgentMesh does not mount provider credentials, its database, encryption keys or 
 - P5 baseline was accepted separately; P5 acceptance is not evidence of live Coding acceptance.
 - P6 CI runs formatting, shell checks, the complete P5 verification suite and P6 verification.
 - The opt-in live gate requires a running AgentMesh instance, a configured provider/model, Docker daemon access, an approved repository root and an explicit test command if the project manifest cannot be detected.
-- No claim of live Docker/model success is made until the user runs `scripts/accept-p6-coding.sh` and the script passes.
+- The user ran `scripts/accept-p6-coding.sh` successfully. The output verified the completed Workflow Coding node, Coding Task/Worktree/canonical Attempt linkage, Docker test and independent review evidence, final diff, Artifact/Evidence and Usage provenance. See [P6 Live Acceptance Record](p6-live-acceptance.md).
 - Docker daemon/image trust, single-host execution and local filesystem access remain explicit deployment boundaries.
 
 ## 8. Non-goals retained
