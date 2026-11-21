@@ -40,6 +40,7 @@ import (
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	"github.com/thkx/agentmesh/internal/workflow/authoring"
 	workflowruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
+	"github.com/thkx/agentmesh/internal/workspace"
 	webassets "github.com/thkx/agentmesh/web"
 )
 
@@ -62,6 +63,7 @@ type Dependencies struct {
 	Collaboration         *collaboration.Service
 	WorkflowEngine        *workflowruntime.Engine
 	WorkflowMaxAttempts   int
+	Workspaces            *workspace.Manager
 	Catalog               *handlers.CatalogHandler
 }
 
@@ -82,6 +84,7 @@ type Handler struct {
 	collaboration         *collaboration.Service
 	workflowEngine        *workflowruntime.Engine
 	workflowMaxAttempts   int
+	workspaces            *workspace.Manager
 	workflowRepo          *authoring.Repository
 	catalogAPI            http.Handler
 	executionAPI          http.Handler
@@ -298,6 +301,7 @@ func New(d Dependencies) *Handler {
 		collaboration:         d.Collaboration,
 		workflowEngine:        d.WorkflowEngine,
 		workflowMaxAttempts:   d.WorkflowMaxAttempts,
+		workspaces:            d.Workspaces,
 		tmpl:                  t,
 		loginAttempts:         make(map[string][]time.Time),
 	}
@@ -1051,6 +1055,14 @@ func (h *Handler) runAgent(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
 		return
 	}
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=workspace-unavailable")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=workspace-unavailable")
+		return
+	}
 	result, err := h.agentCatalog.Run(c.Request.Context(), c.Param("id"), workspaceID, prompt)
 	if err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/agents?error=agent-run")
@@ -1196,7 +1208,16 @@ func (h *Handler) createQuickstartWorkspace(c *gin.Context) {
 		Name: name, Slug: slug, Description: description,
 		AutonomyMode: "hybrid", MaxAgentConcurrency: 4, MaxDelegationDepth: 3,
 	}
-	if _, err := h.collaboration.CreateWorkspace(c.Request.Context(), workspace); err != nil {
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	created, err := h.collaboration.CreateWorkspace(c.Request.Context(), workspace)
+	if err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), created.ID); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
 		return
 	}
@@ -1234,6 +1255,14 @@ func (h *Handler) createQuickstartWorkflowTemplate(c *gin.Context) {
 		return
 	}
 	if _, err := h.collaboration.GetWorkspace(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+	if h.workspaces == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+	if _, err := h.workspaces.Ensure(c.Request.Context(), workspaceID); err != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
 		return
 	}
