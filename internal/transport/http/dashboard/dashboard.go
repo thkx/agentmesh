@@ -136,6 +136,7 @@ type pageData struct {
 	WorkflowRows                []workflowView
 	WorkflowRuns                []workflowRunListView
 	WorkflowRun                 *workflowRunDetailView
+	AgentRun                    *agentRunDetailView
 	Credential                  *credentialView
 	FilterStatus                string
 	FilterKind                  string
@@ -187,6 +188,11 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
+type agentRunDetailView struct {
+	ID, DefinitionID, AgentName, TaskID, Status string
+	Error, Content, CreatedAt, StartedAt, FinishedAt, Duration, ExecutionID string
+	Steps, ToolCalls int
+}
 type agentOption struct{ ID, Name, Role, Status, Capabilities string }
 type identityView struct{ ID, WorkspaceID, DefinitionID, Name, Description, Role, Status, Capabilities string }
 type taskView struct {
@@ -358,6 +364,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
+	g.GET("/agent-runs/:id", h.requireSession(), h.agentRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
 	g.POST("/workspaces/quickstart", h.requireSession(), h.createQuickstartWorkspace)
 	g.POST("/workflows/quickstart", h.requireSession(), h.createQuickstartWorkflowTemplate)
@@ -774,15 +781,71 @@ func (h *Handler) submitNewAgentTask(c *gin.Context) {
 		return
 	}
 	result, err := h.agentCatalog.Run(c.Request.Context(), agentID, workspaceID, prompt)
-	if err != nil {
+	runResult, runErr := h.agentCatalog.Run(c.Request.Context(), agentID, workspaceID, prompt)
+	if runResult.TaskID != "" {
+		if runID := h.agentRunIDForTask(c.Request.Context(), runResult.TaskID); runID != "" {
+			c.Redirect(http.StatusSeeOther, "/dashboard/agent-runs/"+url.PathEscape(runID))
+			return
+		}
+	}
+	if runErr != nil {
 		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-run")
 		return
 	}
-	if executionID := h.executionForTask(c.Request.Context(), result.TaskID); executionID != "" {
-		c.Redirect(http.StatusSeeOther, "/dashboard/executions/"+url.PathEscape(executionID))
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-run-"+string(runResult.Status))
+}
+
+func (h *Handler) agentRunIDForTask(ctx context.Context, taskID string) string {
+	if h.db == nil || taskID == "" {
+		return ""
+	}
+	var id string
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM agent_runs WHERE task_id=?", taskID).Scan(&id); err != nil {
+		return ""
+	}
+	return id
+}
+
+func (h *Handler) agentRun(c *gin.Context) {
+	if h.agentCatalog == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-run-"+string(result.Status))
+	run, err := h.agentCatalog.GetRun(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	detail := &agentRunDetailView{
+		ID: run.ID, DefinitionID: run.DefinitionID, TaskID: run.TaskID,
+		Status: run.Status, Error: run.Error,
+		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339),
+		ExecutionID: h.executionForTask(c.Request.Context(), run.TaskID),
+	}
+	if definition, getErr := h.agentCatalog.Get(c.Request.Context(), run.DefinitionID); getErr == nil {
+		detail.AgentName = definition.Name
+	}
+	if run.FinishedAt != nil {
+		detail.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	if run.Result != nil {
+		detail.Content = run.Result.Content
+		detail.Steps = run.Result.Steps
+		detail.ToolCalls = run.Result.ToolCalls
+		if !run.Result.StartedAt.IsZero() {
+			detail.StartedAt = run.Result.StartedAt.UTC().Format(time.RFC3339)
+		}
+		if !run.Result.FinishedAt.IsZero() {
+			detail.FinishedAt = run.Result.FinishedAt.UTC().Format(time.RFC3339)
+		}
+		if detail.Error == "" {
+			detail.Error = run.Result.Error
+		}
+		if !run.Result.StartedAt.IsZero() && !run.Result.FinishedAt.IsZero() {
+			detail.Duration = run.Result.FinishedAt.Sub(run.Result.StartedAt).Round(time.Millisecond).String()
+		}
+	}
+	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agents", AgentRun: detail}, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
