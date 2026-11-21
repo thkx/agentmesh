@@ -396,6 +396,7 @@ func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *te
 	body := rec.Body.String()
 	for _, want := range []string{
 		"4 / 5",
+		"已完成 Agent 任务",
 		"Recommended next step: Run your first Agent task",
 		"href=\"/dashboard/agents\">Continue</a>",
 	} {
@@ -428,6 +429,7 @@ func TestOverviewEmptyDatabaseRecommendsConnectingProvider(t *testing.T) {
 		"CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL)",
 		"CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
 		"CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL)",
+		"CREATE TABLE agent_runs(id TEXT PRIMARY KEY, status TEXT NOT NULL)",
 		"CREATE TABLE workflows(id TEXT PRIMARY KEY)",
 	} {
 		if _, err := db.Exec(statement); err != nil {
