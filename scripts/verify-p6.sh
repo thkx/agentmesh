@@ -6,7 +6,7 @@ cd "$ROOT"
 echo "== AgentMesh P6 verification =="
 go version
 echo "== Shell syntax =="
-bash -n scripts/verify-p6.sh scripts/accept-p6-coding.sh
+bash -n scripts/verify-p6.sh scripts/accept-p6-coding.sh scripts/prepare-p6-live-fixture.sh
 echo "== Frontend source boundary =="
 if find internal -type f \( -name '*.html' -o -name '*.css' -o -name '*.js' \) -print -quit | grep -q .; then
   echo "Browser-facing source must live under repository-root web/." >&2
