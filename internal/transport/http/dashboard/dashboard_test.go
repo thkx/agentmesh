@@ -625,3 +625,29 @@ func TestWorkflowQuickstartDisablesCreationWithoutModelOrWorkspace(t *testing.T)
 		}
 	}
 }
+
+
+// TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists keeps
+// first-time users from being blocked by a missing prerequisite.
+func TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active:       "workflows",
+		ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render workflows page: %v", err)
+	}
+	for _, want := range []string{
+		"No workspace is available yet",
+		"action=\"/dashboard/workspaces/quickstart\"",
+		"Workspace name",
+		"Workspace slug",
+		"Create workspace",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("empty-workspace quickstart missing %q", want)
+		}
+	}
+}
