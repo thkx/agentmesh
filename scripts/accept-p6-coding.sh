@@ -13,9 +13,11 @@ TOKEN_FILE="${AGENTMESH_API_TOKEN_FILE:-$ROOT/data/api-token}"
 if [[ -z "$TOKEN" && -f "$TOKEN_FILE" ]]; then
   TOKEN="$(cat "$TOKEN_FILE")"
 fi
-REPOSITORY="${P6_REPOSITORY_PATH:-}"
-MODEL_ID="${P6_MODEL_ID:-}"
-TEST_COMMAND="${P6_TEST_COMMAND_JSON:-}"
+# Defaults target the disposable fixture and GLM model used by the P6 live gate.
+# Override any value through the corresponding P6_* environment variable when needed.
+REPOSITORY="${P6_REPOSITORY_PATH:-$ROOT/data/p6-live-fixture}"
+MODEL_ID="${P6_MODEL_ID:-model-glm-53-flash}"
+TEST_COMMAND="${P6_TEST_COMMAND_JSON:-{\"program\":\"go\",\"args\":[\"test\",\"./...\"]}}"
 TASK_PROMPT="${P6_TASK_PROMPT:-Create a file named p6-live-acceptance.txt containing exactly this line: AgentMesh P6 live coding acceptance passed. Do not change any other files.}"
 TIMEOUT_SECONDS="${P6_TIMEOUT_SECONDS:-1800}"
 POLL_SECONDS="${P6_POLL_SECONDS:-5}"
