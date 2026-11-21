@@ -726,15 +726,20 @@ func (h *Handler) overview(c *gin.Context) {
 }
 
 func (h *Handler) callCatalog(c *gin.Context, method, path string, payload any) bool {
+	status := h.callCatalogStatus(c, method, path, payload)
+	return status >= http.StatusOK && status < http.StatusMultipleChoices
+}
+
+func (h *Handler) callCatalogStatus(c *gin.Context, method, path string, payload any) int {
 	if h.catalogAPI == nil {
-		return false
+		return 0
 	}
 	var body []byte
 	if payload != nil {
 		var err error
 		body, err = json.Marshal(payload)
 		if err != nil {
-			return false
+			return 0
 		}
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -742,7 +747,7 @@ func (h *Handler) callCatalog(c *gin.Context, method, path string, payload any) 
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	h.catalogAPI.ServeHTTP(rec, req)
-	return rec.Code >= 200 && rec.Code < 300
+	return rec.Code
 }
 
 func (h *Handler) createProvider(c *gin.Context) {
@@ -819,11 +824,17 @@ func (h *Handler) testProvider(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if !h.callCatalog(c, http.MethodPost, "/api/v1/providers/"+c.Param("id")+"/test", map[string]any{}) {
-		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test")
-		return
+	status := h.callCatalogStatus(c, http.MethodPost, "/api/v1/providers/"+c.Param("id")+"/test", map[string]any{})
+	switch {
+	case status >= http.StatusOK && status < http.StatusMultipleChoices:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=provider-tested")
+	case status == http.StatusConflict:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-model")
+	case status == http.StatusGatewayTimeout:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-timeout")
+	default:
+		c.Redirect(http.StatusSeeOther, "/dashboard/providers?error=provider-test-failed")
 	}
-	c.Redirect(http.StatusSeeOther, "/dashboard/providers?message=provider-tested")
 }
 func (h *Handler) createModel(c *gin.Context) {
 	if !sameOrigin(c.Request) {
@@ -2001,7 +2012,15 @@ func (h *Handler) cancelExecution(c *gin.Context) {
 }
 
 func (h *Handler) render(c *gin.Context, data pageData, status int) {
-	if c.Query("error") != "" {
+	switch c.Query("error") {
+	case "provider-test-model":
+		data.Error = "No enabled model is available for this provider. Add and enable a model before testing the connection."
+	case "provider-test-timeout":
+		data.Error = "The connection test timed out. Check the provider URL and network access, then try again."
+	case "provider-test-failed":
+		data.Error = "The connection test failed. Check the API key, provider URL, and API model name."
+	case "":
+	default:
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
 	}
 	switch c.Query("message") {
