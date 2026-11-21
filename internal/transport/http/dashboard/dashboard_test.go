@@ -358,7 +358,6 @@ func TestCodingDashboardRendersTaskCreationAndRecentTasks(t *testing.T) {
 	}
 }
 
-
 func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
