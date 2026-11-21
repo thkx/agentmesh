@@ -357,3 +357,83 @@ func TestCodingDashboardRendersTaskCreationAndRecentTasks(t *testing.T) {
 		}
 	}
 }
+
+
+func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	schema := `
+		CREATE TABLE providers(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+		CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL);
+		CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+		CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL);
+		CREATE TABLE workflows(id TEXT PRIMARY KEY);
+		INSERT INTO providers(id, enabled) VALUES ('provider-1', 1);
+		INSERT INTO models(id, provider_id, enabled) VALUES ('model-1', 'provider-1', 1);
+		INSERT INTO agent_definitions(id, enabled) VALUES ('agent-1', 1);
+		INSERT INTO executions(id, kind, status) VALUES
+			('agent-queued', 'agent', 'queued'),
+			('agent-failed', 'agent', 'failed'),
+			('workflow-run', 'workflow', 'succeeded');
+		INSERT INTO workflows(id) VALUES ('workflow-1');
+	`
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	New(Dependencies{DB: db}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		"4 / 5",
+		"Recommended next step: Run your first Agent task",
+		"href=\"/dashboard/agents\">Continue</a>",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("overview missing %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "agent_executions</span></div>") {
+		t.Fatal("agent execution counter should not be shown as a separate setup requirement")
+	}
+}
+
+func TestOverviewEmptyDatabaseRecommendsConnectingProvider(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{
+		"CREATE TABLE providers(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
+		"CREATE TABLE models(id TEXT PRIMARY KEY, provider_id TEXT NOT NULL, enabled INTEGER NOT NULL)",
+		"CREATE TABLE agent_definitions(id TEXT PRIMARY KEY, enabled INTEGER NOT NULL)",
+		"CREATE TABLE executions(id TEXT PRIMARY KEY, kind TEXT NOT NULL, status TEXT NOT NULL)",
+		"CREATE TABLE workflows(id TEXT PRIMARY KEY)",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	router := gin.New()
+	New(Dependencies{DB: db}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("overview status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"0 / 5", "Recommended next step: Connect a model provider", "href=\"/dashboard/providers\">Continue</a>"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("empty overview missing %q: %s", want, rec.Body.String())
+		}
+	}
+}

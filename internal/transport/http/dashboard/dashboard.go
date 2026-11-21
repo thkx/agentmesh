@@ -103,6 +103,7 @@ type pageData struct {
 	Title                       string
 	Active                      string
 	SetupSteps                  []setupStepView
+	NextSetupStep               setupStepView
 	SetupDone                   int
 	SetupTotal                  int
 	Error                       string
@@ -691,10 +692,10 @@ func (h *Handler) overview(c *gin.Context) {
 		}
 		queries := map[string]string{
 			"executions":       "SELECT COUNT(*) FROM executions",
-			"agent_executions": "SELECT COUNT(*) FROM executions WHERE kind='agent'",
-			"agents":           "SELECT COUNT(*) FROM agent_definitions",
-			"providers":        "SELECT COUNT(*) FROM providers",
-			"models":           "SELECT COUNT(*) FROM models",
+			"agent_executions": "SELECT COUNT(*) FROM executions WHERE kind='agent' AND status='succeeded'",
+			"agents":           "SELECT COUNT(*) FROM agent_definitions WHERE enabled=1",
+			"providers":        "SELECT COUNT(*) FROM providers WHERE enabled=1",
+			"models":           "SELECT COUNT(*) FROM models m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=1 AND p.enabled=1",
 			"workflows":        "SELECT COUNT(*) FROM workflows",
 		}
 		for name, query := range queries {
@@ -715,6 +716,10 @@ func (h *Handler) overview(c *gin.Context) {
 	for _, step := range data.SetupSteps {
 		if step.Done {
 			data.SetupDone++
+			continue
+		}
+		if data.NextSetupStep.Title == "" {
+			data.NextSetupStep = step
 		}
 	}
 	h.render(c, data, http.StatusOK)
