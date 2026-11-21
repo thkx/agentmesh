@@ -3,9 +3,9 @@ package workspace
 import (
 	"context"
 	"errors"
-	"testing"
 	"os"
 	"path/filepath"
+	"testing"
 )
 
 func TestManagerCreateRemoveAndTraversal(t *testing.T) {
