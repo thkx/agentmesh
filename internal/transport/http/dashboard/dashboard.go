@@ -696,10 +696,18 @@ func (h *Handler) usage(c *gin.Context) {
 
 func (h *Handler) newTask(c *gin.Context) {
 	data := pageData{Title: "Start a task", Active: "new-task", AgentRows: []agentView{}, WorkspaceOptions: []workspaceOption{}}
+	enabledProviders := make(map[domainprovider.ID]bool)
+	if h.providerRegistry != nil {
+		for _, provider := range h.providerRegistry.List() {
+			if provider.Enabled {
+				enabledProviders[provider.ID] = true
+			}
+		}
+	}
 	enabledModels := make(map[string]bool)
 	if h.modelRegistry != nil {
 		for _, model := range h.modelRegistry.List() {
-			if model.Enabled {
+			if model.Enabled && enabledProviders[model.ProviderID] {
 				enabledModels[model.ID] = true
 			}
 		}
@@ -735,7 +743,7 @@ func (h *Handler) submitNewAgentTask(c *gin.Context) {
 		c.AbortWithStatus(http.StatusForbidden)
 		return
 	}
-	if h.agentCatalog == nil || h.workspaces == nil {
+	if h.agentCatalog == nil || h.workspaces == nil || h.modelRegistry == nil || h.providerRegistry == nil {
 		c.AbortWithStatus(http.StatusServiceUnavailable)
 		return
 	}
@@ -748,6 +756,16 @@ func (h *Handler) submitNewAgentTask(c *gin.Context) {
 	}
 	agent, err := h.agentCatalog.Get(c.Request.Context(), agentID)
 	if err != nil || !agent.Enabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
+		return
+	}
+	model, ok := h.modelRegistry.Get(agent.ModelID)
+	if !ok || !model.Enabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
+		return
+	}
+	provider, err := h.providerRegistry.Get(model.ProviderID)
+	if err != nil || !provider.Enabled {
 		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
 		return
 	}
