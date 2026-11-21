@@ -692,7 +692,7 @@ func (h *Handler) overview(c *gin.Context) {
 		}
 		queries := map[string]string{
 			"executions":       "SELECT COUNT(*) FROM executions",
-			"agent_executions": "SELECT COUNT(*) FROM executions WHERE kind='agent' AND status='succeeded'",
+			"agent_tasks_completed": "SELECT COUNT(*) FROM executions WHERE kind='agent' AND status='succeeded'",
 			"agents":           "SELECT COUNT(*) FROM agent_definitions WHERE enabled=1",
 			"providers":        "SELECT COUNT(*) FROM providers WHERE enabled=1",
 			"models":           "SELECT COUNT(*) FROM models m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=1 AND p.enabled=1",
@@ -709,7 +709,7 @@ func (h *Handler) overview(c *gin.Context) {
 		{Title: "Connect a model provider", Description: "Add the service or local model endpoint that AgentMesh will call.", Href: "/dashboard/providers", Done: data.Counts["providers"] > 0},
 		{Title: "Enable a model", Description: "Register an available model and make sure its credentials are configured.", Href: "/dashboard/models", Done: data.Counts["models"] > 0},
 		{Title: "Create your first Agent", Description: "Give an Agent a model, a role and a clear task description.", Href: "/dashboard/agents", Done: data.Counts["agents"] > 0},
-		{Title: "Run your first Agent task", Description: "Submit a small task and inspect its Execution history.", Href: "/dashboard/agents", Done: data.Counts["agent_executions"] > 0},
+		{Title: "Run your first Agent task", Description: "Submit a small task and inspect its Execution history.", Href: "/dashboard/agents", Done: data.Counts["agent_tasks_completed"] > 0},
 		{Title: "Build a reusable Workflow", Description: "Combine Agents and other activities into a repeatable process.", Href: "/dashboard/workflows", Done: data.Counts["workflows"] > 0},
 	}
 	data.SetupTotal = len(data.SetupSteps)
