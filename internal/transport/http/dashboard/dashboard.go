@@ -128,6 +128,8 @@ type pageData struct {
 	WorkspaceOptions            []workspaceOption
 	ProviderOptions             []providerOption
 	ModelOptions                []modelOption
+	AllProviderOptions          []providerOption
+	AllModelOptions             []modelOption
 	WorkflowRows                []workflowView
 	WorkflowRuns                []workflowRunListView
 	WorkflowRun                 *workflowRunDetailView
@@ -947,8 +949,10 @@ func (h *Handler) models(c *gin.Context) {
 	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
 	if h.providerRegistry != nil {
 		for _, provider := range h.providerRegistry.List() {
+			option := providerOption{ID: string(provider.ID), Name: provider.Name}
+			data.AllProviderOptions = append(data.AllProviderOptions, option)
 			if provider.Enabled {
-				data.ProviderOptions = append(data.ProviderOptions, providerOption{ID: string(provider.ID), Name: provider.Name})
+				data.ProviderOptions = append(data.ProviderOptions, option)
 			}
 		}
 	}
@@ -1309,12 +1313,14 @@ func (h *Handler) agents(c *gin.Context) {
 	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
 	if h.modelRegistry != nil {
 		for _, model := range h.modelRegistry.List() {
+			name := model.DisplayName
+			if name == "" {
+				name = model.Name
+			}
+			option := modelOption{ID: model.ID, Name: name}
+			data.AllModelOptions = append(data.AllModelOptions, option)
 			if model.Enabled {
-				name := model.DisplayName
-				if name == "" {
-					name = model.Name
-				}
-				data.ModelOptions = append(data.ModelOptions, modelOption{ID: model.ID, Name: name})
+				data.ModelOptions = append(data.ModelOptions, option)
 			}
 		}
 	}
