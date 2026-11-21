@@ -457,6 +457,7 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 			"Tell AgentMesh which model to call",
 			"Model ID is an internal unique ID",
 			"API model name is sent to the provider",
+			"Select provider",
 		}},
 	} {
 		var body bytes.Buffer
@@ -474,7 +475,7 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
 	h := New(Dependencies{})
 	var body bytes.Buffer
-	data := pageData{Active: "agents", AgentRows: []agentView{{ID: "agent-1", Name: "Helper"}}, WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
+	data := pageData{Active: "agents", ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}}, AgentRows: []agentView{{ID: "agent-1", Name: "Helper"}}, WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
 	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
 		t.Fatalf("render agents page: %v", err)
 	}
@@ -484,6 +485,7 @@ func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
 		"Select workspace",
 		"Default workspace",
 		"Describe one small task for this Agent",
+		"Select enabled model",
 	} {
 		if !strings.Contains(body.String(), want) {
 			t.Errorf("agents page missing first-task guidance %q", want)
@@ -510,6 +512,29 @@ func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
 		h.render(ctx, pageData{Title: "Providers", Active: "providers"}, http.StatusOK)
 		if !strings.Contains(rec.Body.String(), tc.want) {
 			t.Errorf("error %q missing guidance %q: %s", tc.query, tc.want, rec.Body.String())
+		}
+	}
+}
+
+
+func TestModelAndAgentCreationUseCatalogSelections(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		data pageData
+		wants []string
+	}{
+		{active: "models", data: pageData{Active: "models", ProviderOptions: []providerOption{{ID: "provider-1", Name: "Primary provider"}}}, wants: []string{`<select name="provider_id" required>`, "Primary provider"}},
+		{active: "agents", data: pageData{Active: "agents", ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}}}, wants: []string{`<select name="model_id" required>`, "Main model"}},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", tc.data); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s page missing selection %q", tc.active, want)
+			}
 		}
 	}
 }
