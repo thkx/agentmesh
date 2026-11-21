@@ -111,6 +111,17 @@ func TestDashboardListsAndShowsPersistedWorkflowRuns(t *testing.T) {
 			t.Fatalf("workflow detail missing %q: %s", want, detail.Body.String())
 		}
 	}
+	for _, unwanted := range []string{
+		"STEP 4 · WORKFLOW QUICKSTART",
+		"No enabled models are available",
+		"No workspace is available yet",
+		"No workflow runs have been recorded yet",
+		"No workflow templates are saved",
+	} {
+		if strings.Contains(detail.Body.String(), unwanted) {
+			t.Fatalf("workflow run detail should not render workflow index content %q", unwanted)
+		}
+	}
 }
 
 type dashboardNoopAgent struct{}
