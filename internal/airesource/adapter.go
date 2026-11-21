@@ -52,13 +52,13 @@ func classifyTransportError(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "request_timeout"
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		return "request_timeout"
-	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		return "dns_error"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "request_timeout"
 	}
 	var authorityErr x509.UnknownAuthorityError
 	if errors.As(err, &authorityErr) {
