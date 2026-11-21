@@ -662,3 +662,77 @@ func TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists(t *testi
 		}
 	}
 }
+
+func TestNewTaskPageShowsComposerAndAdvancedPaths(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active: "new-task",
+		AgentRows: []agentView{{ID: "agent-1", Name: "Research assistant", ModelID: "model-1"}},
+		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render new task page: %v", err)
+	}
+	for _, want := range []string{
+		"What would you like AgentMesh to do?",
+		"action=\"/dashboard/new-task/agent\"",
+		"Research assistant · model-1",
+		"Default workspace",
+		"Describe the task",
+		"Start Agent task",
+		"href=\"/dashboard/coding\"",
+		"href=\"/dashboard/workflows\"",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("new task page missing %q", want)
+		}
+	}
+}
+
+func TestNewTaskPageExplainsMissingPrerequisites(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: "new-task"}); err != nil {
+		t.Fatalf("render empty new task page: %v", err)
+	}
+	for _, want := range []string{
+		"Set up an Agent first",
+		"href=\"/dashboard/agents\"",
+		"href=\"/dashboard/providers\"",
+		"href=\"/dashboard/models\"",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("new task empty state missing %q", want)
+		}
+	}
+}
+
+func TestNewTaskRouteRejectsCrossOriginSubmission(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/new-task/agent", strings.NewReader("agent_id=a&workspace_id=w&prompt=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://attacker.example")
+	req.Host = "agentmesh.local"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin submission status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNewTaskRouteRequiresAgentAndWorkspaceServices(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/new-task/agent", strings.NewReader("agent_id=a&workspace_id=w&prompt=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://agentmesh.local")
+	req.Host = "agentmesh.local"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing dependencies status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
