@@ -666,6 +666,7 @@ func (s *Service) Recover(ctx context.Context) (int64, error) {
 			if task.WorkspacePath != "" || pathErr == nil {
 				_ = s.repo.Event(ctx, task.ID, "workspace.recovery_unavailable", map[string]string{
 					"reason": "the retained Worktree could not be safely reattached",
+					"diagnostic": limit(inspectErr.Error(), 1000),
 				})
 			}
 			continue
