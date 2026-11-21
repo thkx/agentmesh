@@ -126,6 +126,8 @@ type pageData struct {
 	IdentityRows                []identityView
 	TaskRows                    []taskView
 	WorkspaceOptions            []workspaceOption
+	ProviderOptions             []providerOption
+	ModelOptions                []modelOption
 	WorkflowRows                []workflowView
 	WorkflowRuns                []workflowRunListView
 	WorkflowRun                 *workflowRunDetailView
@@ -172,6 +174,8 @@ type operationsHealthView struct {
 }
 
 type providerView struct{ ID, Name, Type, Kind, BaseURL, Status, CredentialStatus string }
+type providerOption struct{ ID, Name string }
+type modelOption struct{ ID, Name string }
 type modelView struct {
 	ID, ProviderID, Name, DisplayName, Status, Source string
 	ContextWindow, MaxOutputTokens                    int
@@ -941,6 +945,13 @@ func (h *Handler) deleteCredential(c *gin.Context) {
 
 func (h *Handler) models(c *gin.Context) {
 	data := pageData{Title: "Models", Active: "models", ModelRows: []modelView{}}
+	if h.providerRegistry != nil {
+		for _, provider := range h.providerRegistry.List() {
+			if provider.Enabled {
+				data.ProviderOptions = append(data.ProviderOptions, providerOption{ID: string(provider.ID), Name: provider.Name})
+			}
+		}
+	}
 	if h.catalogAPI != nil {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/models", nil).WithContext(c.Request.Context())
 		rec := httptest.NewRecorder()
@@ -1296,6 +1307,15 @@ func (h *Handler) deleteAgentIdentity(c *gin.Context) {
 
 func (h *Handler) agents(c *gin.Context) {
 	data := pageData{Title: "Agents", Active: "agents", AgentRows: []agentView{}}
+	if h.modelRegistry != nil {
+		for _, model := range h.modelRegistry.List() {
+			if model.Enabled {
+				name := model.DisplayName
+				if name == "" { name = model.Name }
+				data.ModelOptions = append(data.ModelOptions, modelOption{ID: model.ID, Name: name})
+			}
+		}
+	}
 	if h.collaboration != nil {
 		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
 		if err == nil {
