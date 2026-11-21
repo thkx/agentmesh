@@ -2014,7 +2014,7 @@ func (h *Handler) cancelExecution(c *gin.Context) {
 func (h *Handler) render(c *gin.Context, data pageData, status int) {
 	switch c.Query("error") {
 	case "provider-test-model":
-		data.Error = "No enabled model is available for this provider. Add and enable a model before testing the connection."
+		data.Error = "The provider is disabled or has no enabled model. Enable the provider and add or enable one of its models before testing."
 	case "provider-test-timeout":
 		data.Error = "The connection test timed out. Check the provider URL and network access, then try again."
 	case "provider-test-failed":
