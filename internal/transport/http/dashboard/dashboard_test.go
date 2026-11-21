@@ -475,7 +475,7 @@ func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
 		query string
 		want  string
 	}{
-		{query: "provider-test-model", want: "Add and enable a model"},
+		{query: "provider-test-model", want: "add or enable one of its models"},
 		{query: "provider-test-timeout", want: "Check the provider URL and network access"},
 		{query: "provider-test-failed", want: "Check the API key, provider URL, and API model name"},
 	} {
