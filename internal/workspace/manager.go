@@ -51,6 +51,7 @@ func (m *Manager) Create(ctx context.Context, id string) (Workspace, error) {
 	}
 	return Workspace{ID: id, Path: path}, nil
 }
+
 // Ensure creates a missing workspace directory and validates existing paths.
 // It is safe to call repeatedly when reconciling persisted workspace records.
 func (m *Manager) Ensure(ctx context.Context, id string) (Workspace, error) {
