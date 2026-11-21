@@ -352,4 +352,11 @@ func TestRouterFailsOverAfterEndpointTimeout(t *testing.T) {
 	if failures != 1 || statusCode != 0 {
 		t.Fatalf("timed out attempt was not recorded as a network timeout: failures=%d status_code=%d", failures, statusCode)
 	}
+	var diagnosticCode string
+	if err = db.QueryRow("SELECT error_code FROM ai_request_logs WHERE credential_id='timeout-credential-first' AND status='failure'").Scan(&diagnosticCode); err != nil {
+		t.Fatal(err)
+	}
+	if diagnosticCode != "request_timeout" {
+		t.Fatalf("timed out request diagnostic = %q, want request_timeout", diagnosticCode)
+	}
 }
