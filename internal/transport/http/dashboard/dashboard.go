@@ -691,12 +691,12 @@ func (h *Handler) overview(c *gin.Context) {
 			data.Readiness = "Database ready"
 		}
 		queries := map[string]string{
-			"executions":       "SELECT COUNT(*) FROM executions",
+			"executions":            "SELECT COUNT(*) FROM executions",
 			"agent_tasks_completed": "SELECT COUNT(*) FROM executions WHERE kind='agent' AND status='succeeded'",
-			"agents":           "SELECT COUNT(*) FROM agent_definitions WHERE enabled=1",
-			"providers":        "SELECT COUNT(*) FROM providers WHERE enabled=1",
-			"models":           "SELECT COUNT(*) FROM models m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=1 AND p.enabled=1",
-			"workflows":        "SELECT COUNT(*) FROM workflows",
+			"agents":                "SELECT COUNT(*) FROM agent_definitions WHERE enabled=1",
+			"providers":             "SELECT COUNT(*) FROM providers WHERE enabled=1",
+			"models":                "SELECT COUNT(*) FROM models m JOIN providers p ON p.id=m.provider_id WHERE m.enabled=1 AND p.enabled=1",
+			"workflows":             "SELECT COUNT(*) FROM workflows",
 		}
 		for name, query := range queries {
 			var count int64
