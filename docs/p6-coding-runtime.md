@@ -8,7 +8,7 @@ The source audit is in [P6 Coding Runtime Source Audit](p6-coding-runtime-audit.
 
 ## Implementation status
 
-M57–M60 implementation is being integrated on this branch. The Dashboard, Workflow Coding node, Coding Execution adapter, test/repair/review pipeline, Artifact/Evidence publisher, repository allowlist and live acceptance script are present. Do not mark P6 accepted until the latest branch commit passes GitHub Actions and the opt-in live acceptance below passes on the user's AgentMesh host.
+M57–M60 implementation is present on this branch. The Dashboard, Workflow Coding node, Coding Execution adapter, test/repair/review pipeline, Artifact/Evidence publisher, repository allowlist and live acceptance script are included. Automated CI and the user's opt-in live acceptance remain release gates; do not call P6 accepted until both are verified for the exact release commit.
 
 Coding repository access is deny-by-default. Add trusted absolute repository roots to the active configuration:
 
