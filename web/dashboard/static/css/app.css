@@ -26,3 +26,6 @@
 .task-path-grid article{padding:20px;background:#121c31;border:1px solid #293650;border-radius:12px}
 .task-path-grid h3{margin:0 0 8px}.task-path-grid p{color:#aebbd2;min-height:48px}
 @media(max-width:650px){.task-launcher{padding:18px}.task-composer,.task-path-grid{grid-template-columns:1fr}.task-launcher h1{font-size:23px}}
+
+.overview-primary-action{margin:18px 0 0}.overview-primary-action a{display:inline-block;padding:11px 18px;border-radius:8px;background:#477fe0;color:#fff;text-decoration:none;font-weight:700}
+.overview-primary-action a:hover{background:#5b8ee8}
