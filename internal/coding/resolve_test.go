@@ -148,7 +148,13 @@ func TestRecoverReattachesWorktreeCreatedBeforeTaskMetadataPersisted(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.WorkspaceID != workspaceID || got.WorkspacePath != ws.Path || got.BranchName != branch {
+	// Inspect canonicalizes the recovered path through EvalSymlinks. On macOS,
+	// the original CreateBranch path may use /var while the recovered path uses
+	// /private/var; compare filesystem identity rather than path strings.
+	createdWorkspaceInfo, createdWorkspaceErr := os.Stat(ws.Path)
+	recoveredWorkspaceInfo, recoveredWorkspaceErr := os.Stat(got.WorkspacePath)
+	workspacePathMatches := createdWorkspaceErr == nil && recoveredWorkspaceErr == nil && os.SameFile(createdWorkspaceInfo, recoveredWorkspaceInfo)
+	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.WorkspaceID != workspaceID || !workspacePathMatches || got.BranchName != branch {
 		events, eventsErr := service.Events(ctx, task.ID)
 		t.Fatalf("interrupted task Worktree was not reattached: task=%+v events=%+v events_err=%v", got, events, eventsErr)
 	}
