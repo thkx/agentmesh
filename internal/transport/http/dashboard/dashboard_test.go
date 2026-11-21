@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"bytes"
 	"database/sql"
 	"net/http"
 	"net/http/httptest"
@@ -433,6 +434,37 @@ func TestOverviewEmptyDatabaseRecommendsConnectingProvider(t *testing.T) {
 	for _, want := range []string{"0 / 5", "Recommended next step: Connect a model provider", "href=\"/dashboard/providers\">Continue</a>"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("empty overview missing %q: %s", want, rec.Body.String())
+		}
+	}
+}
+
+func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		wants  []string
+	}{
+		{active: "providers", wants: []string{
+			"Connect the AI service you want AgentMesh to use",
+			"Create provider",
+			"Save credentials",
+			"Add and enable a model",
+			"test the connection",
+		}},
+		{active: "models", wants: []string{
+			"Tell AgentMesh which model to call",
+			"Model ID is an internal unique ID",
+			"API model name is sent to the provider",
+		}},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: tc.active}); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s page missing setup guidance %q", tc.active, want)
+			}
 		}
 	}
 }
