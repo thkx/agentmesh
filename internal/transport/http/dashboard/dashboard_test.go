@@ -668,8 +668,8 @@ func TestNewTaskPageShowsComposerAndAdvancedPaths(t *testing.T) {
 	h := New(Dependencies{})
 	var body bytes.Buffer
 	data := pageData{
-		Active: "new-task",
-		AgentRows: []agentView{{ID: "agent-1", Name: "Research assistant", ModelID: "model-1"}},
+		Active:           "new-task",
+		AgentRows:        []agentView{{ID: "agent-1", Name: "Research assistant", ModelID: "model-1"}},
 		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
 	}
 	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
@@ -736,4 +736,3 @@ func TestNewTaskRouteRequiresAgentAndWorkspaceServices(t *testing.T) {
 		t.Fatalf("missing dependencies status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
-
