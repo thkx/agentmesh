@@ -28,7 +28,7 @@ func TestDashboardRendersWithoutExternalAssets(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
 	}
-	for _, want := range []string{"AgentMesh", "Overview", "Providers", "Executions"} {
+	for _, want := range []string{"AgentMesh", "Overview", "Providers", "Executions", "Your first AgentMesh workflow", "Connect a model provider", "Run your first Agent task"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Fatalf("dashboard response missing %q", want)
 		}

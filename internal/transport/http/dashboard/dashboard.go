@@ -92,9 +92,19 @@ type Handler struct {
 
 type workspaceOption struct{ ID, Name string }
 
+type setupStepView struct {
+	Title       string
+	Description string
+	Href        string
+	Done        bool
+}
+
 type pageData struct {
 	Title                       string
 	Active                      string
+	SetupSteps                  []setupStepView
+	SetupDone                   int
+	SetupTotal                  int
 	Error                       string
 	Message                     string
 	Readiness                   string
@@ -680,16 +690,31 @@ func (h *Handler) overview(c *gin.Context) {
 			data.Readiness = "Database ready"
 		}
 		queries := map[string]string{
-			"executions": "SELECT COUNT(*) FROM executions",
-			"agents":     "SELECT COUNT(*) FROM agent_definitions",
-			"providers":  "SELECT COUNT(*) FROM providers",
-			"workflows":  "SELECT COUNT(*) FROM workflows",
+			"executions":       "SELECT COUNT(*) FROM executions",
+			"agent_executions": "SELECT COUNT(*) FROM executions WHERE kind='agent'",
+			"agents":           "SELECT COUNT(*) FROM agent_definitions",
+			"providers":        "SELECT COUNT(*) FROM providers",
+			"models":           "SELECT COUNT(*) FROM models",
+			"workflows":        "SELECT COUNT(*) FROM workflows",
 		}
 		for name, query := range queries {
 			var count int64
 			if err := h.db.QueryRowContext(c.Request.Context(), query).Scan(&count); err == nil {
 				data.Counts[name] = count
 			}
+		}
+	}
+	data.SetupSteps = []setupStepView{
+		{Title: "Connect a model provider", Description: "Add the service or local model endpoint that AgentMesh will call.", Href: "/dashboard/providers", Done: data.Counts["providers"] > 0},
+		{Title: "Enable a model", Description: "Register an available model and make sure its credentials are configured.", Href: "/dashboard/models", Done: data.Counts["models"] > 0},
+		{Title: "Create your first Agent", Description: "Give an Agent a model, a role and a clear task description.", Href: "/dashboard/agents", Done: data.Counts["agents"] > 0},
+		{Title: "Run your first Agent task", Description: "Submit a small task and inspect its Execution history.", Href: "/dashboard/agents", Done: data.Counts["agent_executions"] > 0},
+		{Title: "Build a reusable Workflow", Description: "Combine Agents and other activities into a repeatable process.", Href: "/dashboard/workflows", Done: data.Counts["workflows"] > 0},
+	}
+	data.SetupTotal = len(data.SetupSteps)
+	for _, step := range data.SetupSteps {
+		if step.Done {
+			data.SetupDone++
 		}
 	}
 	h.render(c, data, http.StatusOK)
