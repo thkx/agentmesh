@@ -468,3 +468,23 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 		}
 	}
 }
+
+func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "provider-test-model", want: "Add and enable a model"},
+		{query: "provider-test-timeout", want: "Check the provider URL and network access"},
+		{query: "provider-test-failed", want: "Check the API key, provider URL, and API model name"},
+	} {
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/dashboard/providers?error="+tc.query, nil)
+		h.render(ctx, pageData{Title: "Providers", Active: "providers"}, http.StatusOK)
+		if !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("error %q missing guidance %q: %s", tc.query, tc.want, rec.Body.String())
+		}
+	}
+}
