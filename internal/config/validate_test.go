@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"testing"
 	"time"
 )
@@ -92,5 +93,40 @@ func TestValidateWithAPIAuthAllowsRemoteHostOnlyWithAuth(t *testing.T) {
 	}
 	if err := ValidateWithAPIAuth(cfg, true); err != nil {
 		t.Fatalf("authenticated remote listener should validate: %v", err)
+	}
+}
+
+func TestResolveAPITokenFromSecureFile(t *testing.T) {
+	t.Setenv("AGENTMESH_API_TOKEN", "")
+	path := t.TempDir() + "/api-token"
+	if err := os.WriteFile(path, []byte("01234567890123456789012345678901\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	token, err := ResolveAPIToken(path)
+	if err != nil {
+		t.Fatalf("resolve token: %v", err)
+	}
+	if token != "01234567890123456789012345678901" {
+		t.Fatalf("unexpected token value")
+	}
+}
+
+func TestResolveAPITokenRejectsInsecurePermissions(t *testing.T) {
+	t.Setenv("AGENTMESH_API_TOKEN", "")
+	path := t.TempDir() + "/api-token"
+	if err := os.WriteFile(path, []byte("01234567890123456789012345678901"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveAPIToken(path); err == nil {
+		t.Fatal("expected insecure token file permissions to be rejected")
+	}
+}
+
+func TestResolveAPITokenEnvironmentOverridesFile(t *testing.T) {
+	path := t.TempDir() + "/missing"
+	t.Setenv("AGENTMESH_API_TOKEN", "environment-token-that-is-long-enough-123")
+	token, err := ResolveAPIToken(path)
+	if err != nil || token != "environment-token-that-is-long-enough-123" {
+		t.Fatalf("environment token should override file: token=%q err=%v", token, err)
 	}
 }

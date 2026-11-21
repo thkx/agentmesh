@@ -2,6 +2,8 @@ package modelgateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -9,6 +11,9 @@ import (
 
 	appcredential "github.com/thkx/agentmesh/internal/credential"
 	"github.com/thkx/agentmesh/internal/domain/provider"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 var (
@@ -42,12 +47,64 @@ type DynamicRouter interface {
 	Generate(context.Context, GenerateRequest) (*GenerateResponse, error)
 }
 
+type Observer interface {
+	ObserveModelGateway(operation, outcome string, elapsed time.Duration)
+}
+
+type UsageObserver interface {
+	ObserveModelUsage(context.Context, provider.ID, string, Usage, time.Time, string)
+}
+
+type executionProvenanceKey struct{}
+type requestIDContextKey struct{}
+
+// WithRequestID attaches the inbound HTTP correlation ID to downstream model
+// calls so usage records can be joined back to the originating request.
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	if requestID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, requestIDContextKey{}, requestID)
+}
+
+// RequestIDFromContext returns the request correlation ID, if one was attached.
+func RequestIDFromContext(ctx context.Context) string {
+	requestID, _ := ctx.Value(requestIDContextKey{}).(string)
+	return requestID
+}
+
+type ExecutionProvenance struct {
+	ExecutionID string
+	AttemptID   string
+}
+
+// WithExecutionProvenance attaches durable execution identity to a model request context.
+func WithExecutionProvenance(ctx context.Context, executionID, attemptID string) context.Context {
+	return context.WithValue(ctx, executionProvenanceKey{}, ExecutionProvenance{ExecutionID: executionID, AttemptID: attemptID})
+}
+
+// ExecutionProvenanceFromContext returns explicit provenance without inspecting prompts or request payloads.
+func ExecutionProvenanceFromContext(ctx context.Context) ExecutionProvenance {
+	value, _ := ctx.Value(executionProvenanceKey{}).(ExecutionProvenance)
+	return value
+}
+
 type Gateway struct {
+	observer      Observer
+	usageObserver UsageObserver
 	registry      *Registry
 	resolver      Resolver
 	providers     *provider.ProviderRegistry
 	dynamicRouter DynamicRouter
 }
+
+// SetObserver installs an optional bounded-cardinality operational observer.
+func (g *Gateway) SetObserver(observer Observer) {
+	g.observer = observer
+}
+
+// SetUsageObserver installs the durable usage ledger observer before serving requests.
+func (g *Gateway) SetUsageObserver(observer UsageObserver) { g.usageObserver = observer }
 
 // SetDynamicRouter installs the optional database-backed credential router.
 // Bootstrap must call this before the gateway starts serving requests.
@@ -84,7 +141,16 @@ func NewGatewayWithProviders(registry *Registry, resolver Resolver, providers *p
 }
 
 // Generate executes a non-streaming model request.
-func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (response *GenerateResponse, resultErr error) {
+	started := time.Now()
+	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.generate")
+	defer func() {
+		if resultErr != nil {
+			span.SetStatus(codes.Error, "model request failed")
+		}
+		span.End()
+	}()
+	defer func() { g.observe("generate", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
@@ -94,6 +160,9 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	}
 
 	model, adapter, resolvedReq, err := g.resolve(ctx, req)
+	if err == nil {
+		span.SetAttributes(attribute.String("agentmesh.provider_id", string(model.ProviderID)), attribute.String("agentmesh.model_id", string(model.ID)))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -111,6 +180,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 				return nil, ErrNilResponse
 			}
 			normalizeResponse(resp, model)
+			g.observeUsage(ctx, resp, usageKey(resp.ID))
 			return resp, nil
 		}
 	}
@@ -134,6 +204,7 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 	}
 
 	normalizeResponse(resp, model)
+	g.observeUsage(ctx, resp, usageKey(resp.ID))
 
 	return resp, nil
 }
@@ -146,7 +217,16 @@ func (g *Gateway) Generate(ctx context.Context, req GenerateRequest) (*GenerateR
 //
 // The returned channel is closed when the provider stream ends
 // or the request context is canceled.
-func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan StreamEvent, error) {
+func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (events <-chan StreamEvent, resultErr error) {
+	started := time.Now()
+	ctx, span := otel.Tracer("agentmesh/modelgateway").Start(ctx, "modelgateway.stream")
+	defer func() {
+		if resultErr != nil {
+			span.SetStatus(codes.Error, "model stream failed")
+		}
+		span.End()
+	}()
+	defer func() { g.observe("stream_open", started, resultErr) }()
 	if err := req.Validate(); err != nil {
 		return nil, fmt.Errorf("validate request: %w", err)
 	}
@@ -180,17 +260,36 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 				return nil, ErrNilStream
 			}
 			output := make(chan StreamEvent)
+			requestKey := usageKey("")
 			go func() {
+				streamStarted := time.Now()
+				usageRecorded := false
 				defer close(output)
 				for {
 					select {
 					case <-ctx.Done():
+						g.observe("stream", streamStarted, ctx.Err())
 						return
 					case event, open := <-source:
 						if !open {
+							g.observe("stream", streamStarted, errors.New("provider stream ended without completion"))
 							return
 						}
 						normalizeStreamEvent(&event, model)
+						if event.Type == StreamEventError {
+							g.observe("stream", streamStarted, errors.New("provider stream failed"))
+						}
+						if event.Type == StreamEventCompleted {
+							g.observe("stream", streamStarted, nil)
+						}
+						if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
+							g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
+							usageRecorded = true
+						}
+						if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil {
+							g.observeUsage(ctx, event.Response, requestKey)
+							usageRecorded = true
+						}
 						select {
 						case output <- event:
 						case <-ctx.Done():
@@ -233,21 +332,40 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	}
 
 	output := make(chan StreamEvent)
+	requestKey := usageKey("")
 
 	go func() {
+		streamStarted := time.Now()
+		usageRecorded := false
 		defer close(output)
 
 		for {
 			select {
 			case <-ctx.Done():
+				g.observe("stream", streamStarted, ctx.Err())
 				return
 
 			case event, ok := <-source:
 				if !ok {
+					g.observe("stream", streamStarted, errors.New("provider stream ended without completion"))
 					return
 				}
 
 				normalizeStreamEvent(&event, model)
+				if event.Type == StreamEventError {
+					g.observe("stream", streamStarted, errors.New("provider stream failed"))
+				}
+				if event.Type == StreamEventCompleted {
+					g.observe("stream", streamStarted, nil)
+				}
+				if !usageRecorded && event.Type == StreamEventUsage && event.Usage != nil {
+					g.observeUsageValues(ctx, event.ProviderID, event.ModelID, *event.Usage, event.CreatedAt, requestKey)
+					usageRecorded = true
+				}
+				if !usageRecorded && event.Type == StreamEventCompleted && event.Response != nil {
+					g.observeUsage(ctx, event.Response, requestKey)
+					usageRecorded = true
+				}
 
 				select {
 				case output <- event:
@@ -263,6 +381,47 @@ func (g *Gateway) Stream(ctx context.Context, req GenerateRequest) (<-chan Strea
 	}()
 
 	return output, nil
+}
+
+func (g *Gateway) observeUsage(ctx context.Context, response *GenerateResponse, key string) {
+	if response == nil {
+		return
+	}
+	g.observeUsageValues(ctx, response.ProviderID, response.ModelID, response.Usage, response.CreatedAt, key)
+}
+func (g *Gateway) observeUsageValues(ctx context.Context, providerID provider.ID, modelID string, usage Usage, occurredAt time.Time, key string) {
+	if g == nil || g.usageObserver == nil || providerID == "" || modelID == "" {
+		return
+	}
+	usage.Normalize()
+	if occurredAt.IsZero() {
+		occurredAt = time.Now().UTC()
+	}
+	g.usageObserver.ObserveModelUsage(ctx, providerID, modelID, usage, occurredAt, key)
+}
+func usageKey(existing string) string {
+	if existing != "" {
+		return existing
+	}
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err == nil {
+		return hex.EncodeToString(b[:])
+	}
+	return fmt.Sprintf("usage-%d", time.Now().UnixNano())
+}
+
+func (g *Gateway) observe(operation string, started time.Time, err error) {
+	if g == nil || g.observer == nil {
+		return
+	}
+	outcome := "success"
+	if err != nil {
+		outcome = "error"
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			outcome = "canceled"
+		}
+	}
+	g.observer.ObserveModelGateway(operation, outcome, time.Since(started))
 }
 
 // SupportsNativeToolCalling reports whether the resolved adapter implements provider-native function calling.

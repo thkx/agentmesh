@@ -49,6 +49,9 @@ func main() {
 	select {
 	case <-signalCtx.Done():
 		container.Logger.Info("shutdown signal received")
+	case <-container.ShutdownRequests:
+		container.Logger.Info("graceful shutdown requested through operations API")
+		stop()
 	case err := <-serverErr:
 		if err != nil {
 			container.Logger.Error("HTTP server failed", "error", err)

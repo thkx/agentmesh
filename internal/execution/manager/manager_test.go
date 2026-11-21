@@ -51,6 +51,7 @@ func (s *memoryStore) ListAttempts(_ context.Context, executionID string) ([]dom
 			out = append(out, a)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
 	return out, nil
 }
 

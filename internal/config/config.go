@@ -11,6 +11,7 @@ type Config struct {
 	Models    []ModelConfig    `koanf:"models"`
 	Agent     AgentConfig      `koanf:"agent"`
 	Scheduler SchedulerConfig  `koanf:"scheduler"`
+	Tracing   TracingConfig    `koanf:"tracing"`
 }
 
 type AppConfig struct {
@@ -21,6 +22,7 @@ type AppConfig struct {
 type ServerConfig struct {
 	Host            string        `koanf:"host"`
 	Port            int           `koanf:"port"`
+	APITokenFile    string        `koanf:"api_token_file"`
 	ReadTimeout     time.Duration `koanf:"read_timeout"`
 	WriteTimeout    time.Duration `koanf:"write_timeout"`
 	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
@@ -100,4 +102,10 @@ type SchedulerConfig struct {
 	PollInterval  time.Duration `koanf:"poll_interval"`
 	LeaseDuration time.Duration `koanf:"lease_duration"`
 	MaxAttempts   int           `koanf:"max_attempts"`
+}
+
+type TracingConfig struct {
+	Enabled      bool   `koanf:"enabled"`
+	OTLPEndpoint string `koanf:"otlp_endpoint"`
+	HeadersEnv   string `koanf:"headers_env"`
 }

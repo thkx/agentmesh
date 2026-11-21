@@ -1,0 +1,343 @@
+package dashboard
+
+import (
+	"database/sql"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/thkx/agentmesh/internal/observability"
+	_ "modernc.org/sqlite"
+)
+
+func testRouter(token string) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	New(Dependencies{APIToken: token}).RegisterRoutes(r)
+	return r
+}
+
+func TestDashboardRendersWithoutExternalAssets(t *testing.T) {
+	r := testRouter("")
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"AgentMesh", "Overview", "Providers", "Executions"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("dashboard response missing %q", want)
+		}
+	}
+}
+
+func TestDashboardRequiresBrowserSessionWhenAPITokenConfigured(t *testing.T) {
+	r := testRouter("secret-api-token")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/dashboard/login" {
+		t.Fatalf("expected login redirect, got %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestDashboardLoginIssuesOpaqueSignedCookie(t *testing.T) {
+	const token = "secret-api-token"
+	r := testRouter(token)
+	login := httptest.NewRecorder()
+	r.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/dashboard/login", nil))
+	if login.Code != http.StatusOK || !strings.Contains(login.Body.String(), "API token") {
+		t.Fatalf("login page failed: %d %s", login.Code, login.Body.String())
+	}
+
+	form := strings.NewReader("token=" + token)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/login", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://127.0.0.1")
+	req.Host = "127.0.0.1"
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("login status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var session *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == sessionCookie {
+			session = cookie
+		}
+	}
+	if session == nil {
+		t.Fatal("session cookie was not set")
+	}
+	if strings.Contains(session.Value, token) || !session.HttpOnly || session.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("unsafe session cookie: %#v", session)
+	}
+
+	page := httptest.NewRecorder()
+	pageReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	pageReq.AddCookie(session)
+	r.ServeHTTP(page, pageReq)
+	if page.Code != http.StatusOK {
+		t.Fatalf("authenticated dashboard status = %d", page.Code)
+	}
+}
+
+func TestDashboardRejectsCrossOriginLogin(t *testing.T) {
+	r := testRouter("secret-api-token")
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token=secret-api-token"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://attacker.example")
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected forbidden, got %d", rec.Code)
+	}
+}
+
+func TestDashboardServesVendoredHTMXAsset(t *testing.T) {
+	r := testRouter("")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/assets/htmx.min.js", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "javascript") || !strings.Contains(rec.Body.String(), "htmx") {
+		t.Fatal("vendored HTMX asset was not served")
+	}
+}
+
+func TestDashboardServesStylesheetFromEmbeddedWebAssets(t *testing.T) {
+	r := testRouter("")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/assets/app.css", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stylesheet status = %d", rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "text/css") || !strings.Contains(rec.Body.String(), ".shell") {
+		t.Fatal("dashboard stylesheet was not served from embedded web assets")
+	}
+}
+
+func TestDashboardLoginRateLimit(t *testing.T) {
+	r := testRouter("expected-token")
+	for attempt := 1; attempt <= 6; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token=wrong"))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "http://127.0.0.1")
+		req.Host = "127.0.0.1"
+		req.RemoteAddr = "127.0.0.1:12345"
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		if attempt <= 5 && rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected unauthorized, got %d", attempt, rec.Code)
+		}
+		if attempt == 6 && rec.Code != http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: expected rate limit, got %d", attempt, rec.Code)
+		}
+	}
+}
+
+func TestDashboardRejectsTamperedAndExpiredSessions(t *testing.T) {
+	const token = "session-token"
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	h := New(Dependencies{APIToken: token})
+	h.RegisterRoutes(r)
+
+	loginReq := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token="+token))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginReq.Header.Set("Origin", "http://127.0.0.1")
+	loginReq.Host = "127.0.0.1"
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	var session *http.Cookie
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == sessionCookie {
+			session = cookie
+		}
+	}
+	if session == nil {
+		t.Fatal("login did not issue a session cookie")
+	}
+
+	tampered := *session
+	parts := strings.Split(tampered.Value, ".")
+	if len(parts) != 2 || len(parts[1]) == 0 {
+		t.Fatalf("unexpected session cookie format: %q", tampered.Value)
+	}
+	replacement := byte('A')
+	if parts[1][0] == replacement {
+		replacement = 'B'
+	}
+	parts[1] = string(replacement) + parts[1][1:]
+	tampered.Value = strings.Join(parts, ".")
+	tamperedReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	tamperedReq.AddCookie(&tampered)
+	tamperedRec := httptest.NewRecorder()
+	r.ServeHTTP(tamperedRec, tamperedReq)
+	if tamperedRec.Code != http.StatusSeeOther {
+		t.Fatalf("tampered session status = %d", tamperedRec.Code)
+	}
+
+	expiredReq := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	expiredReq.AddCookie(&http.Cookie{Name: sessionCookie, Value: "1.invalid"})
+	expiredRec := httptest.NewRecorder()
+	r.ServeHTTP(expiredRec, expiredReq)
+	if expiredRec.Code != http.StatusSeeOther {
+		t.Fatalf("expired session status = %d", expiredRec.Code)
+	}
+}
+
+func TestDashboardRejectsCrossOriginLogout(t *testing.T) {
+	const token = "logout-token"
+	r := testRouter(token)
+	loginReq := httptest.NewRequest(http.MethodPost, "/dashboard/login", strings.NewReader("token="+token))
+	loginReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	loginReq.Header.Set("Origin", "http://127.0.0.1")
+	loginReq.Host = "127.0.0.1"
+	loginReq.RemoteAddr = "127.0.0.1:12345"
+	loginRec := httptest.NewRecorder()
+	r.ServeHTTP(loginRec, loginReq)
+	var session *http.Cookie
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == sessionCookie {
+			session = cookie
+		}
+	}
+	if session == nil {
+		t.Fatal("login did not issue a session cookie")
+	}
+
+	logoutReq := httptest.NewRequest(http.MethodPost, "/dashboard/logout", nil)
+	logoutReq.Header.Set("Origin", "https://attacker.example")
+	logoutReq.Host = "127.0.0.1"
+	logoutReq.AddCookie(session)
+	logoutRec := httptest.NewRecorder()
+	r.ServeHTTP(logoutRec, logoutReq)
+	if logoutRec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin logout status = %d", logoutRec.Code)
+	}
+}
+
+func TestDashboardOptionalDependenciesRenderEmptyStates(t *testing.T) {
+	r := testRouter("")
+	for _, path := range []string{"/dashboard/providers", "/dashboard/models", "/dashboard/agents", "/dashboard/tasks", "/dashboard/workflows", "/dashboard/executions"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d: %s", path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestDashboardOperationsMetricsPage(t *testing.T) {
+	metrics := observability.NewMetrics()
+	metrics.ObserveHTTPRequest(http.MethodGet, "/api/v1/models", http.StatusOK, 20*time.Millisecond)
+	metrics.ObserveModelGateway("generate", "success", 100*time.Millisecond)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	New(Dependencies{Metrics: metrics}).RegisterRoutes(router)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operations metrics status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"Operations Metrics", "HTTP requests", "Model Gateway requests", "Prometheus text format"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("operations metrics page missing %q", want)
+		}
+	}
+}
+
+func TestDashboardOperationsShowsActiveAndResolvedAlerts(t *testing.T) {
+	metrics := observability.NewMetrics()
+	alerts := observability.NewAlertEvaluator(10)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	New(Dependencies{Metrics: metrics, Alerts: alerts}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Database unavailable") || !strings.Contains(rec.Body.String(), "Runtime worker stopped") {
+		t.Fatalf("operational alerts not rendered: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboardGracefulShutdownRequiresSameOriginAndConfirmation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requests := make(chan struct{}, 1)
+	router := gin.New()
+	New(Dependencies{RequestShutdown: requests}).RegisterRoutes(router)
+
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "Gracefully stop AgentMesh") {
+		t.Fatalf("operations page missing shutdown action: status=%d", page.Code)
+	}
+
+	crossOrigin := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=yes"))
+	crossOrigin.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	crossOrigin.Header.Set("Origin", "https://attacker.example")
+	crossOrigin.Host = "127.0.0.1"
+	rejected := httptest.NewRecorder()
+	router.ServeHTTP(rejected, crossOrigin)
+	if rejected.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin shutdown status=%d", rejected.Code)
+	}
+
+	unconfirmed := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=no"))
+	unconfirmed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unconfirmed.Header.Set("Origin", "http://127.0.0.1")
+	unconfirmed.Host = "127.0.0.1"
+	unconfirmedRec := httptest.NewRecorder()
+	router.ServeHTTP(unconfirmedRec, unconfirmed)
+	if unconfirmedRec.Code != http.StatusForbidden {
+		t.Fatalf("unconfirmed shutdown status=%d", unconfirmedRec.Code)
+	}
+
+	confirmed := httptest.NewRequest(http.MethodPost, "/dashboard/operations/shutdown", strings.NewReader("confirm=yes"))
+	confirmed.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	confirmed.Header.Set("Origin", "http://127.0.0.1")
+	confirmed.Host = "127.0.0.1"
+	confirmedRec := httptest.NewRecorder()
+	router.ServeHTTP(confirmedRec, confirmed)
+	if confirmedRec.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed shutdown status=%d body=%s", confirmedRec.Code, confirmedRec.Body.String())
+	}
+	select {
+	case <-requests:
+	default:
+		t.Fatal("graceful shutdown request was not sent")
+	}
+}
+
+func TestOperationsDashboardShowsSQLiteAndWorkerHealth(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err = db.Exec("CREATE TABLE schema_migrations(version INTEGER,dirty BOOLEAN); INSERT INTO schema_migrations(version,dirty) VALUES(44,0); CREATE TABLE executions(id TEXT,status TEXT);"); err != nil {
+		t.Fatal(err)
+	}
+	metrics := observability.NewMetrics()
+	metrics.AddRuntimeWorkers(1)
+	router := gin.New()
+	New(Dependencies{DB: db, Metrics: metrics}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/operations/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("operations status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{"System health", "SQLite integrity", "Schema version", "44", "running", "Gracefully stop AgentMesh"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("operations dashboard missing %q", want)
+		}
+	}
+}

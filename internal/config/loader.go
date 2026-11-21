@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -60,7 +58,10 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 
-	token := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
+	token, err := ResolveAPIToken(cfg.Server.APITokenFile)
+	if err != nil {
+		return Config{}, fmt.Errorf("load API token: %w", err)
+	}
 	if err := ValidateWithAPIAuth(cfg, len(token) >= 32); err != nil {
 		return Config{}, err
 	}

@@ -12,7 +12,13 @@ This page is the documentation index. Use the root README for the project overvi
 | [P3 Agent Collaboration](p3-collaboration.md) | Workspace, Agent Identity, Channels, Tasks, Inbox, Handoff, Decision Gate and approvals |
 | [P4 Unified Execution Core](p4-unified-execution-core.md) | Cross-runtime Task, Execution, Attempt, Event, Evidence, Artifact, lifecycle and recovery contract |
 | [P4 M42 Audit](p4-m42-audit.md) | Source-level mapping of existing P2/P3 contracts and M43/M44 implementation gaps |
-| [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |\n| [P4 Part 3 Implementation](p4-part3-implementation.md) | M47/M48 unified execution detail, merged history timeline and release acceptance |
+| [P4 Part 2 Implementation](p4-part2-implementation.md) | M45/M46 lifecycle enforcement, cancellation intent and safe recovery |
+| [P4 Part 3 Implementation](p4-part3-implementation.md) | M47/M48 unified execution detail, merged history timeline and release acceptance |
+| [P5 Product Control Plane](p5-product-control-plane.md) | M49–M52 Dashboard architecture, security boundary and acceptance contract |
+| [P5 Part 1 Checklist](p5-part1-checklist.md) | M49–M52 implementation tasks and final acceptance gates |
+| [P5 Part 1 Implementation](p5-part1-implementation.md) | Dashboard implementation record and exact verification gates |
+| [P5 Part 2 Operations & Observability](p5-part2-operations.md) | M53–M56 web asset boundary, telemetry, usage/cost, backup/restore, upgrades and diagnostics |
+| [P5 M53 Implementation Status](p5-m53-implementation.md) | Current M53 implementation record, limitations and verification command |
 
 ## Architecture and implementation history
 
@@ -56,7 +62,7 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 ## P3: Agent Collaboration Plane
 
 - P3 collaboration contract: [p3-collaboration.md](p3-collaboration.md)
-- Verification entry point: bash scripts/verify-p3.sh
+- Verification entry point: `bash scripts/verify-p3.sh`
 - Database migrations: 000024_collaboration_core and 000025_collaboration_governance
 
 ## P4 Part 2
@@ -65,4 +71,17 @@ Historical validation sections are snapshots. They must not be interpreted as ev
 - Verification entry point: `bash scripts/verify-p4-part2.sh`
 - Migration: `internal/platform/database/migrations/000043_execution_lifecycle_enforcement.*.sql`
 
-\n## P4 Part 3\n\n- Implementation record: [p4-part3-implementation.md](p4-part3-implementation.md)\n- Verification entry point: `bash scripts/verify-p4-part3.sh`\n- Additive HTTP read APIs: `/api/v1/managed-executions/:id/detail` and `/api/v1/managed-executions/:id/timeline`\n
+## P4 Part 3
+
+- Implementation record: [p4-part3-implementation.md](p4-part3-implementation.md)
+- Verification entry point: `bash scripts/verify-p4-part3.sh`
+- Additive HTTP read APIs: `/api/v1/managed-executions/:id/detail` and `/api/v1/managed-executions/:id/timeline`
+
+## P5
+
+- Part 1 architecture: [p5-product-control-plane.md](p5-product-control-plane.md)
+- Part 1 implementation record: [p5-part1-implementation.md](p5-part1-implementation.md)
+- Part 1 delivery checklist: [p5-part1-checklist.md](p5-part1-checklist.md)
+- Part 1 verification entry point: `bash scripts/verify-p5-part1.sh`
+- Part 2 architecture and delivery plan: [p5-part2-operations.md](p5-part2-operations.md)
+- M53 implementation status: [p5-m53-implementation.md](p5-m53-implementation.md)

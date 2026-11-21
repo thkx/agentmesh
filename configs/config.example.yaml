@@ -6,6 +6,9 @@ app:
 server:
   host: 127.0.0.1
   port: 8080
+  # Optional. Enable Bearer authentication for API, Dashboard and /metrics.
+  # Create this file with chmod 600; never commit the token.
+  # api_token_file: ./data/api-token
   read_timeout: 15s
   write_timeout: 30s
   shutdown_timeout: 15s
@@ -98,3 +101,9 @@ scheduler:
   poll_interval: 500ms
   lease_duration: 30s
   max_attempts: 3
+
+# Distributed tracing is disabled by default. Enable only with an operator-managed collector.
+tracing:
+  enabled: false
+  otlp_endpoint: "" # e.g. http://127.0.0.1:4318 or https://collector.example:4318
+  headers_env: AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS

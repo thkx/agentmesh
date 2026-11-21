@@ -1,10 +1,15 @@
 package http
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/json"
 	"net/http"
+	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -25,17 +30,26 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	"github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"log/slog"
+
+	"github.com/thkx/agentmesh/internal/observability"
+	"github.com/thkx/agentmesh/internal/operations/diagnostics"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
+	"github.com/thkx/agentmesh/internal/transport/http/dashboard"
 	"github.com/thkx/agentmesh/internal/transport/http/handlers"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
 )
 
 type Dependencies struct {
+	Logger                *slog.Logger
+	Metrics               *observability.Metrics
 	DB                    *sql.DB
 	Providers             *provider.ProviderRegistry
 	Models                *provider.ModelRegistry
@@ -67,14 +81,29 @@ type Dependencies struct {
 	Collaboration         *collaboration.Service
 	CodingService         *coding.Service
 	APIToken              string
+	Alerts                *observability.AlertEvaluator
+	RequestShutdown       chan<- struct{}
+	LogBuffer             *logger.RingBuffer
 }
 
 func NewRouter(deps Dependencies) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	metrics := deps.Metrics
+	if metrics == nil {
+		metrics = observability.NewMetrics()
+	}
+	router.Use(requestCorrelationMiddleware(deps.Logger))
+	router.Use(requestMetricsMiddleware(metrics))
 	if deps.APIToken != "" {
 		router.Use(func(c *gin.Context) {
+			// The Dashboard has its own short-lived browser session; API routes
+			// continue to require the Bearer token.
+			if strings.HasPrefix(c.Request.URL.Path, "/dashboard") {
+				c.Next()
+				return
+			}
 			if c.Request.Method == http.MethodGet && (c.Request.URL.Path == "/workflow-editor" || c.Request.URL.Path == "/workflow-editor/app.js") {
 				c.Next()
 				return
@@ -96,6 +125,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		c.Next()
 	})
 	registerWorkflowEditor(router)
+	router.GET("/metrics", func(c *gin.Context) {
+		_ = operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		metrics.Handler().ServeHTTP(c.Writer, c.Request)
+	})
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
 		if deps.DB == nil || deps.Providers == nil || deps.Models == nil || deps.Adapters == nil || deps.ProviderRuntime == nil || deps.Gateway == nil || deps.Repository == nil || deps.AgentExecutor == nil || deps.AgentRuntime == nil || deps.Workspaces == nil {
@@ -110,10 +143,93 @@ func NewRouter(deps Dependencies) http.Handler {
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
+	alerts := deps.Alerts
+	if alerts == nil {
+		alerts = observability.NewAlertEvaluator(100)
+	}
 	api := router.Group("/api/v1")
+	api.GET("/operations/health", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer dbCancel()
+		dbState := collectSQLiteDiagnostics(dbCtx, deps.DB, false)
+		m := metrics.Snapshot()
+		status := http.StatusOK
+		if !snapshot.DatabaseAvailable || !snapshot.WorkerRunning || dbState.MigrationDirty {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"database_available": snapshot.DatabaseAvailable, "schema_version": dbState.SchemaVersion, "migration_dirty": dbState.MigrationDirty, "database_size_bytes": dbState.SizeBytes, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_requests": snapshot.ProviderRequests, "provider_failures": snapshot.ProviderFailures, "usage_write_failures": m.UsageWriteFailures, "uptime_seconds": m.ProcessUptimeSeconds, "observed_at": snapshot.ObservedAt})
+	})
+	api.POST("/operations/shutdown", func(c *gin.Context) {
+		if deps.RequestShutdown == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "graceful shutdown is not configured"})
+			return
+		}
+		select {
+		case deps.RequestShutdown <- struct{}{}:
+			c.JSON(http.StatusAccepted, gin.H{"status": "shutdown_requested"})
+		default:
+			c.JSON(http.StatusConflict, gin.H{"status": "shutdown_already_requested"})
+		}
+	})
+	api.GET("/operations/alerts", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		active := alerts.Evaluate(snapshot)
+		c.JSON(http.StatusOK, gin.H{"active": active, "history": alerts.History(), "observed_at": snapshot.ObservedAt})
+	})
+	api.GET("/diagnostics/report", func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer cancel()
+		dbState := collectSQLiteDiagnostics(ctx, deps.DB, true)
+		version := "development"
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+			version = info.Main.Version
+		}
+		snap := metrics.Snapshot()
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(snap.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbState.Ready, SchemaVersion: dbState.SchemaVersion, MigrationDirty: dbState.MigrationDirty, DatabaseIntegrity: dbState.Integrity, DatabaseSizeBytes: dbState.SizeBytes, RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(snap.HTTPRequestCount), "model_requests": int64(snap.ModelGatewayCount), "http_in_flight": snap.HTTPRequestsInFlight}}, time.Now().UTC())
+		c.JSON(http.StatusOK, report)
+	})
+	api.GET("/diagnostics/bundle", func(c *gin.Context) {
+		snapshot := operationalAlertSnapshot(c.Request.Context(), deps.DB, metrics)
+		dbCtx, dbCancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+		defer dbCancel()
+		dbState := collectSQLiteDiagnostics(dbCtx, deps.DB, true)
+		m := metrics.Snapshot()
+		version := "development"
+		if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {
+			version = info.Main.Version
+		}
+		report := diagnostics.Build(diagnostics.Input{Version: version, StartedAt: time.Now().Add(-time.Duration(m.ProcessUptimeSeconds * float64(time.Second))), DatabaseReady: dbState.Ready, SchemaVersion: dbState.SchemaVersion, MigrationDirty: dbState.MigrationDirty, DatabaseIntegrity: dbState.Integrity, DatabaseSizeBytes: dbState.SizeBytes, WorkerCount: int(m.RuntimeWorkers), RecentLogs: recentLogSnapshot(deps.LogBuffer), Metrics: map[string]int64{"http_requests": int64(m.HTTPRequestCount), "model_requests": int64(m.ModelGatewayCount), "http_in_flight": m.HTTPRequestsInFlight, "execution_backlog": m.ExecutionBacklog, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "usage_write_failures": int64(m.UsageWriteFailures)}}, time.Now().UTC())
+		reportJSON, _ := json.MarshalIndent(report, "", "  ")
+		var metricsBuffer bytes.Buffer
+		metrics.Handler().ServeHTTP(&metricsResponseWriter{header: make(http.Header), body: &metricsBuffer}, c.Request)
+		healthJSON, _ := json.MarshalIndent(gin.H{"database_available": snapshot.DatabaseAvailable, "database_integrity": dbState.Integrity, "database_size_bytes": dbState.SizeBytes, "schema_version": dbState.SchemaVersion, "migration_dirty": dbState.MigrationDirty, "worker_running": snapshot.WorkerRunning, "runtime_workers": m.RuntimeWorkers, "active_executions": m.ActiveExecutions, "execution_backlog": m.ExecutionBacklog, "provider_failures": m.ProviderFailures, "usage_write_failures": m.UsageWriteFailures}, "", "  ")
+		var bundle bytes.Buffer
+		zw := zip.NewWriter(&bundle)
+		for name, data := range map[string][]byte{"diagnostics.json": reportJSON, "metrics.prom": metricsBuffer.Bytes(), "health.json": healthJSON} {
+			entry, err := zw.Create(name)
+			if err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+			if _, err = entry.Write(data); err != nil {
+				c.Status(http.StatusInternalServerError)
+				return
+			}
+		}
+		if err := zw.Close(); err != nil {
+			c.Status(http.StatusInternalServerError)
+			return
+		}
+		c.Header("Content-Type", "application/zip")
+		c.Header("Content-Disposition", `attachment; filename="agentmesh-support.zip"`)
+		c.Header("Cache-Control", "no-store")
+		c.Data(http.StatusOK, "application/zip", bundle.Bytes())
+	})
 	if deps.DB != nil {
 		handlers.NewExecutionEventsHandler(deps.DB).RegisterRoutes(api)
 		handlers.NewUnifiedExecutionHandler(deps.DB).RegisterRoutes(api)
+		handlers.NewUsageHandler(deps.DB).RegisterRoutes(api)
 	}
 	if deps.CodingService != nil {
 		handlers.NewCodingHandler(deps.CodingService).RegisterRoutes(api)
@@ -191,5 +307,98 @@ func NewRouter(deps Dependencies) http.Handler {
 	if deps.AIResourceHandler != nil {
 		deps.AIResourceHandler.RegisterRoutes(router)
 	}
-	return router
+	dashboard.New(dashboard.Dependencies{DB: deps.DB, Metrics: metrics, Alerts: alerts, APIToken: deps.APIToken, RequestShutdown: deps.RequestShutdown, ExecutionManager: deps.ExecutionManager, Providers: deps.Providers, Models: deps.Models, Credentials: deps.CredentialManager, AgentDefinitions: deps.AgentDefinitions, Collaboration: deps.Collaboration, WorkflowEngine: deps.WorkflowEngine, WorkflowMaxAttempts: deps.WorkflowMaxAttempts, Catalog: h}).RegisterRoutes(router)
+	return otelhttp.NewHandler(router, "agentmesh.http")
+}
+
+type sqliteDiagnosticSnapshot struct {
+	Ready          bool
+	SchemaVersion  uint
+	MigrationDirty bool
+	Integrity      string
+	SizeBytes      int64
+}
+
+// collectSQLiteDiagnostics reports only allow-listed SQLite facts; it never returns
+// database paths or raw driver errors. quick_check is reserved for diagnostics calls.
+func collectSQLiteDiagnostics(ctx context.Context, db *sql.DB, checkIntegrity bool) sqliteDiagnosticSnapshot {
+	state := sqliteDiagnosticSnapshot{Integrity: "unknown"}
+	if db == nil {
+		return state
+	}
+	if db.PingContext(ctx) == nil {
+		state.Ready = true
+	}
+	var version uint
+	var dirty bool
+	if err := db.QueryRowContext(ctx, "SELECT version,dirty FROM schema_migrations ORDER BY version DESC LIMIT 1").Scan(&version, &dirty); err == nil {
+		state.SchemaVersion = version
+		state.MigrationDirty = dirty
+	}
+	rows, err := db.QueryContext(ctx, "PRAGMA database_list")
+	if err == nil {
+		for rows.Next() {
+			var sequence int
+			var name, file string
+			if rows.Scan(&sequence, &name, &file) == nil && name == "main" && file != "" {
+				if info, statErr := os.Stat(file); statErr == nil && info.Mode().IsRegular() {
+					state.SizeBytes = info.Size()
+				}
+			}
+		}
+		_ = rows.Close()
+	}
+	if checkIntegrity {
+		var result string
+		if err := db.QueryRowContext(ctx, "PRAGMA quick_check").Scan(&result); err == nil {
+			if strings.EqualFold(strings.TrimSpace(result), "ok") {
+				state.Integrity = "ok"
+			} else {
+				state.Integrity = "failed"
+			}
+		}
+	}
+	return state
+}
+
+// operationalAlertSnapshot reads only bounded operational facts; query failures never expose raw SQL errors.
+func operationalAlertSnapshot(ctx context.Context, db *sql.DB, metrics *observability.Metrics) observability.AlertSnapshot {
+	s := observability.AlertSnapshot{ObservedAt: time.Now().UTC()}
+	if db != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		s.DatabaseAvailable = db.PingContext(pingCtx) == nil
+		cancel()
+		var active, backlog int64
+		_ = db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN status='running' THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN status IN ('queued','reconciling') THEN 1 ELSE 0 END),0) FROM executions`).Scan(&active, &backlog)
+		if metrics != nil {
+			metrics.SetExecutionState(active, backlog)
+		}
+		s.ReconciliationBacklog = backlog
+	}
+	if metrics != nil {
+		m := metrics.Snapshot()
+		s.WorkerRunning = m.RuntimeWorkers > 0
+		s.ProviderRequests = m.ProviderRequests
+		s.ProviderFailures = m.ProviderFailures
+		s.UsageWriteFailures = m.UsageWriteFailures
+		s.ReconciliationBacklog = m.ExecutionBacklog
+	}
+	return s
+}
+
+type metricsResponseWriter struct {
+	header http.Header
+	body   *bytes.Buffer
+	status int
+}
+
+func (w *metricsResponseWriter) Header() http.Header            { return w.header }
+func (w *metricsResponseWriter) WriteHeader(status int)         { w.status = status }
+func (w *metricsResponseWriter) Write(data []byte) (int, error) { return w.body.Write(data) }
+
+func recentLogSnapshot(buffer *logger.RingBuffer) []string {
+	if buffer == nil {
+		return nil
+	}
+	return buffer.Snapshot()
 }

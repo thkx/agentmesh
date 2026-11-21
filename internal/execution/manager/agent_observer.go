@@ -12,6 +12,7 @@ import (
 	agentdom "github.com/thkx/agentmesh/internal/domain/agent"
 	dom "github.com/thkx/agentmesh/internal/domain/execution"
 	"github.com/thkx/agentmesh/internal/execution/repository"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type AgentObserver struct{ store repository.Store }
@@ -35,6 +36,16 @@ func (o *AgentObserver) find(ctx context.Context, taskID string) (dom.Entity, er
 		return dom.Entity{}, fmt.Errorf("multiple unified executions reference agent task %q", taskID)
 	}
 	return items[0], nil
+}
+
+// Context attaches the exact managed Execution and Attempt identity to downstream Gateway calls.
+func (o *AgentObserver) Context(ctx context.Context, job scheduler.Job) context.Context {
+	entity, err := o.find(ctx, job.Task.ID)
+	if err != nil {
+		return ctx
+	}
+	attemptID := entity.ID + "-a-" + strconv.Itoa(job.Attempts)
+	return modelgateway.WithExecutionProvenance(ctx, entity.ID, attemptID)
 }
 
 func (o *AgentObserver) Started(ctx context.Context, job scheduler.Job) error {

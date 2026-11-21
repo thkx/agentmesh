@@ -35,6 +35,8 @@ go run ./cmd/agentmesh --config configs/config.yaml
 
 示例配置默认监听 `127.0.0.1:8080`，本地数据存放在 `./data`。请根据实际环境修改 `configs/config.yaml`。真实 API Key 通过环境变量提供，不要提交到 Git。
 
+控制台：服务启动后访问 [http://127.0.0.1:8080/dashboard](http://127.0.0.1:8080/dashboard)。如果配置了 API Token，需要使用该 Token 登录；Dashboard 使用独立的短期浏览器会话，不会把 Token 存入 Cookie。详见 [P5 控制台架构](docs/p5-product-control-plane.md) 和 [P5 Part 1 实现记录](docs/p5-part1-implementation.md)。
+
 健康检查：
 
 ```bash

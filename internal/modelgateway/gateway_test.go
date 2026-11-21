@@ -270,3 +270,48 @@ func TestGatewayReportsMissingCloudCredential(t *testing.T) {
 		t.Fatalf("expected missing-credential error, got %v", err)
 	}
 }
+
+type gatewayObserverCall struct {
+	operation string
+	outcome   string
+	elapsed   time.Duration
+}
+
+type gatewayObserverSpy struct {
+	calls []gatewayObserverCall
+}
+
+func (s *gatewayObserverSpy) ObserveModelGateway(operation, outcome string, elapsed time.Duration) {
+	s.calls = append(s.calls, gatewayObserverCall{operation: operation, outcome: outcome, elapsed: elapsed})
+}
+
+func TestGatewayObserverRecordsGenerateAndStreamSetup(t *testing.T) {
+	adapter := &gatewayTestAdapter{response: &GenerateResponse{}}
+	gateway, _ := newGatewayTestFixture(t, validGatewayModel(), true, adapter)
+	observer := &gatewayObserverSpy{}
+	gateway.SetObserver(observer)
+
+	if _, err := gateway.Generate(context.Background(), validGatewayRequest()); err != nil {
+		t.Fatal(err)
+	}
+	source := make(chan StreamEvent)
+	adapter.stream = source
+	stream, err := gateway.Stream(context.Background(), validGatewayRequest())
+	close(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream == nil {
+		t.Fatal("expected non-nil stream")
+	}
+
+	if len(observer.calls) != 2 {
+		t.Fatalf("observer calls = %d, want 2: %+v", len(observer.calls), observer.calls)
+	}
+	if observer.calls[0].operation != "generate" || observer.calls[0].outcome != "success" {
+		t.Fatalf("unexpected generate observation: %+v", observer.calls[0])
+	}
+	if observer.calls[1].operation != "stream_open" || observer.calls[1].outcome != "success" {
+		t.Fatalf("unexpected stream observation: %+v", observer.calls[1])
+	}
+}

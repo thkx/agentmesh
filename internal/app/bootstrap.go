@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -36,6 +35,7 @@ import (
 	geminiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/gemini"
 	ollamaadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/ollama"
 	openaiadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/openai"
+	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/planning"
 	"github.com/thkx/agentmesh/internal/planworkflow"
 	"github.com/thkx/agentmesh/internal/platform/credentialstore"
@@ -48,10 +48,14 @@ import (
 	"github.com/thkx/agentmesh/internal/tools/builtin"
 	toolpolicy "github.com/thkx/agentmesh/internal/tools/policy"
 	httptransport "github.com/thkx/agentmesh/internal/transport/http"
+	"github.com/thkx/agentmesh/internal/usage"
 	workflowcheckpoint "github.com/thkx/agentmesh/internal/workflow/checkpoint"
 	workflowpolicy "github.com/thkx/agentmesh/internal/workflow/policy"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 // buildRuntime constructs isolated provider instances and the model registry from the persisted catalog.
@@ -151,9 +155,12 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load application config: %w", err)
 	}
-	apiToken := strings.TrimSpace(os.Getenv("AGENTMESH_API_TOKEN"))
+	apiToken, err := config.ResolveAPIToken(cfg.Server.APITokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("load API token: %w", err)
+	}
 	if apiToken != "" && len(apiToken) < 32 {
-		return nil, fmt.Errorf("AGENTMESH_API_TOKEN must contain at least 32 characters")
+		return nil, fmt.Errorf("API token must contain at least 32 characters")
 	}
 	host := strings.Trim(cfg.Server.Host, "[]")
 	ip := net.ParseIP(host)
@@ -162,10 +169,13 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("AGENTMESH_API_TOKEN is required when server host is not loopback")
 	}
 
-	log, err := logger.New(cfg.Log.Level, cfg.Log.Format)
+	log, logBuffer, err := logger.NewBuffered(cfg.Log.Level, cfg.Log.Format, 100)
 	if err != nil {
 		return nil, fmt.Errorf("initialize logger: %w", err)
 	}
+
+	metrics := observability.NewMetrics()
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 
 	log.InfoContext(ctx, "starting AgentMesh",
 		"environment", cfg.App.Environment,
@@ -270,6 +280,39 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	if err != nil {
 		_ = sqliteDB.Close()
 		return nil, fmt.Errorf("initialize provider runtime: %w", err)
+	}
+	gateway.SetObserver(metrics)
+	usageLedger, err := usage.NewLedger(sqliteDB.DB)
+	if err != nil {
+		_ = sqliteDB.Close()
+		return nil, fmt.Errorf("initialize model usage ledger: %w", err)
+	}
+	gateway.SetUsageObserver(usage.GatewayObserver{Ledger: usageLedger, OnError: metrics.ObserveUsageWriteFailure})
+	var traceProvider *trace.TracerProvider
+	traceConfigured := false
+	if cfg.Tracing.Enabled {
+		headersEnv := cfg.Tracing.HeadersEnv
+		if headersEnv == "" {
+			headersEnv = "AGENTMESH_OTEL_EXPORTER_OTLP_HEADERS"
+		}
+		headers, headerErr := observability.OTLPHeadersFromEnv(headersEnv)
+		if headerErr != nil {
+			_ = sqliteDB.Close()
+			return nil, fmt.Errorf("parse OTLP headers: %w", headerErr)
+		}
+		traceProvider, err = observability.NewOTLPTraceProvider(cfg.Tracing.OTLPEndpoint, headers)
+		if err != nil {
+			_ = sqliteDB.Close()
+			return nil, fmt.Errorf("initialize OTLP tracing: %w", err)
+		}
+		otel.SetTracerProvider(traceProvider)
+		defer func() {
+			if !traceConfigured && traceProvider != nil {
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = traceProvider.Shutdown(shutdownCtx)
+			}
+		}()
 	}
 	// Agent Runtime, Workflow, Planner and Evaluator all share this gateway.
 	// Matching AI resource model keys are routed through the persisted
@@ -421,8 +464,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 			primaryWorker = worker
 		}
 		workerWG.Add(1)
+		metrics.AddRuntimeWorkers(1)
 		go func(w *scheduler.Worker) {
 			defer workerWG.Done()
+			defer metrics.AddRuntimeWorkers(-1)
 			if runErr := w.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 				log.Error("agent scheduler worker stopped", "error", runErr)
 			}
@@ -493,8 +538,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("register workflow execution adapter: %w", err)
 	}
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		executionManager.RunReconciler(workerCtx, 15*time.Second, 200, func(err error) {
 			log.WarnContext(workerCtx, "execution reconciliation failed", "error", err)
 		})
@@ -585,13 +632,22 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize memory service: %w", err)
 	}
 	planExecutionService.SetMemoryRetriever(memoryService)
+	workflowExecutionContext := func(workCtx context.Context, runID string) context.Context {
+		var executionID, attemptID string
+		err := sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM executions WHERE runtime='workflow' AND (runtime_ref=? OR task_id=?) ORDER BY created_at DESC LIMIT 1`, runID, runID).Scan(&executionID)
+		if err != nil {
+			return workCtx
+		}
+		_ = sqliteDB.DB.QueryRowContext(workCtx, `SELECT id FROM execution_attempts WHERE execution_id=? AND status='running' ORDER BY attempt_number DESC LIMIT 1`, executionID).Scan(&attemptID)
+		return modelgateway.WithExecutionProvenance(workCtx, executionID, attemptID)
+	}
 	workflowWorkers := make([]*wfruntime.Worker, 0, workerCount)
 	for i := 0; i < workerCount; i++ {
 		workerID := cfg.Scheduler.WorkerID
 		if workerID != "" {
 			workerID = fmt.Sprintf("%s-workflow-%d", workerID, i+1)
 		}
-		workflowWorker, workerErr := wfruntime.NewWorker(workflowStore, workflowEngine, wfruntime.WorkerConfig{ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration, Logger: log})
+		workflowWorker, workerErr := wfruntime.NewWorker(workflowStore, workflowEngine, wfruntime.WorkerConfig{ID: workerID, PollInterval: cfg.Scheduler.PollInterval, LeaseDuration: cfg.Scheduler.LeaseDuration, Logger: log, ExecutionContext: workflowExecutionContext})
 		if workerErr != nil {
 			workerCancel()
 			workerWG.Wait()
@@ -600,8 +656,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		}
 		workflowWorkers = append(workflowWorkers, workflowWorker)
 		workerWG.Add(1)
+		metrics.AddRuntimeWorkers(1)
 		go func(w *wfruntime.Worker) {
 			defer workerWG.Done()
+			defer metrics.AddRuntimeWorkers(-1)
 			if runErr := w.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 				log.Error("workflow worker stopped", "error", runErr)
 			}
@@ -638,8 +696,10 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 		return nil, fmt.Errorf("initialize collaboration dispatcher: %w", err)
 	}
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		if runErr := collaborationDispatcher.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 			log.Error("collaboration dispatcher stopped", "error", runErr)
 		}
@@ -675,21 +735,26 @@ func Bootstrap(ctx context.Context, configPath string) (*Container, error) {
 	}
 	wakeupWorker.SetTaskResultEvaluator(resultEvaluator)
 	workerWG.Add(1)
+	metrics.AddRuntimeWorkers(1)
 	go func() {
 		defer workerWG.Done()
+		defer metrics.AddRuntimeWorkers(-1)
 		if runErr := wakeupWorker.Run(workerCtx); runErr != nil && !errors.Is(runErr, context.Canceled) {
 			log.Error("collaboration wakeup worker stopped", "error", runErr)
 		}
 	}()
 
+	shutdownRequests := make(chan struct{}, 1)
 	container := &Container{
-		Config: cfg, Logger: log, DB: sqliteDB.DB, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
+		Config: cfg, Logger: log, LogBuffer: logBuffer, Metrics: metrics, DB: sqliteDB.DB, ShutdownRequests: shutdownRequests, RuntimeRepository: runtimeRepo, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService,
 		CredentialStore: credentialStore, CredentialResolver: credentialResolver, CredentialManager: credentialManager,
 		Providers: providers, Models: models, Adapters: adapters, Gateway: gateway, ProviderRuntime: providerRuntime, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, CLIExecutionAdapter: cliExecutionAdapter, WorkflowEngine: workflowEngine, WorkflowWorkers: workflowWorkers, SchedulerStore: schedulerStore, SchedulerWorker: primaryWorker, workerCancel: workerCancel, workerDone: workerDone, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, AIResources: aiResources, AIRouter: aiRouter,
 	}
 	container.HTTPHandler = httptransport.NewRouter(httptransport.Dependencies{
+		Logger: log, Metrics: metrics,
 		DB: sqliteDB.DB, Providers: providers, Models: models, Adapters: adapters,
-		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, AIResources: aiResources, APIToken: apiToken,
+		ProviderRuntime: providerRuntime, Repository: runtimeRepo, Gateway: gateway, CredentialManager: credentialManager, AgentExecutor: agentExec, AgentRuntime: agentRuntime, ExecutionManager: executionManager, WorkflowEngine: workflowEngine, GoalService: goalService, PlanningService: planningService, PlanExecutionService: planExecutionService, GoalEvaluationService: goalEvaluationService, ReflectionService: reflectionService, MemoryService: memoryService, SchedulerStore: schedulerStore, SchedulerMaxAttempts: cfg.Scheduler.MaxAttempts, WorkflowMaxAttempts: cfg.Scheduler.MaxAttempts, Workspaces: workspaceManager, CodingService: codingService, ToolRegistry: toolRegistry, ToolEngine: toolEngine, ToolAudit: toolAudit, AgentDefinitions: agentDefinitions, Collaboration: collaborationService, AIResourceHandler: aiHTTP, AIResources: aiResources, APIToken: apiToken, RequestShutdown: shutdownRequests,
 	})
+	traceConfigured = true
 	return container, nil
 }

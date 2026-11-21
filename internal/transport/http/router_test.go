@@ -20,6 +20,9 @@ import (
 	ollamaadapter "github.com/thkx/agentmesh/internal/modelgateway/adapters/ollama"
 	"github.com/thkx/agentmesh/internal/platform/database"
 	httptransport "github.com/thkx/agentmesh/internal/transport/http"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func TestCatalogHTTPProviderModelLifecycle(t *testing.T) {
@@ -124,6 +127,32 @@ func TestCatalogHTTPProviderModelLifecycle(t *testing.T) {
 	rr = do(http.MethodDelete, "/api/v1/providers/ollama-local", "")
 	if rr.Code != http.StatusNoContent {
 		t.Fatalf("delete provider: status=%d body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestMetricsEndpointUsesBearerTokenAndRequestCorrelation(t *testing.T) {
+	token := strings.Repeat("m", 40)
+	router := httptransport.NewRouter(httptransport.Dependencies{APIToken: token})
+
+	unauthorized := httptest.NewRecorder()
+	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized metrics status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("X-Request-ID", "metrics-test-1")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, request)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authorized metrics status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("X-Request-ID") != "metrics-test-1" || rec.Header().Get("X-Trace-ID") == "" {
+		t.Fatalf("correlation response headers missing: %#v", rec.Header())
+	}
+	if !strings.Contains(rec.Body.String(), "agentmesh_http_requests_total") {
+		t.Fatalf("metrics response missing exposition: %s", rec.Body.String())
 	}
 }
 
@@ -272,5 +301,30 @@ func TestAPITokenProtectsWorkflowEditorNonStaticPaths(t *testing.T) {
 				t.Fatalf("status=%d want=%d body=%s", rr.Code, tc.want, rr.Body.String())
 			}
 		})
+	}
+}
+
+func TestHTTPTraceparentUsesSameTraceIDForCorrelationAndServerSpan(t *testing.T) {
+	oldProvider := otel.GetTracerProvider()
+	oldPropagator := otel.GetTextMapPropagator()
+	provider := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	defer func() {
+		_ = provider.Shutdown(context.Background())
+		otel.SetTracerProvider(oldProvider)
+		otel.SetTextMapPropagator(oldPropagator)
+	}()
+
+	handler := httptransport.NewRouter(httptransport.Dependencies{})
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("health request status=%d", rec.Code)
+	}
+	if got := rec.Header().Get("X-Trace-ID"); got != "0123456789abcdef0123456789abcdef" {
+		t.Fatalf("correlation trace ID=%q does not match incoming W3C traceparent", got)
 	}
 }

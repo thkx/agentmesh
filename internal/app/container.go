@@ -24,18 +24,24 @@ import (
 	"github.com/thkx/agentmesh/internal/goalevaluation"
 	memoryservice "github.com/thkx/agentmesh/internal/memory"
 	"github.com/thkx/agentmesh/internal/modelgateway"
+	"github.com/thkx/agentmesh/internal/observability"
 	"github.com/thkx/agentmesh/internal/planning"
 	planworkflow "github.com/thkx/agentmesh/internal/planworkflow"
+	"github.com/thkx/agentmesh/internal/platform/logger"
 	"github.com/thkx/agentmesh/internal/reflection"
 	"github.com/thkx/agentmesh/internal/tools"
 	"github.com/thkx/agentmesh/internal/tools/audit"
 	wfruntime "github.com/thkx/agentmesh/internal/workflow/runtime"
 	"github.com/thkx/agentmesh/internal/workspace"
+	"go.opentelemetry.io/otel/sdk/trace"
 )
 
 type Container struct {
 	Config                config.Config
 	Logger                *slog.Logger
+	LogBuffer             *logger.RingBuffer
+	TraceProvider         *trace.TracerProvider
+	Metrics               *observability.Metrics
 	DB                    *sql.DB
 	RuntimeRepository     provider.CatalogRepository
 	CredentialStore       appcredential.Store
@@ -71,6 +77,7 @@ type Container struct {
 	AIResources           *airesource.Service
 	AIRouter              *airesource.Router
 	HTTPHandler           http.Handler
+	ShutdownRequests      chan struct{}
 }
 
 func (c *Container) Close() error {
@@ -99,6 +106,14 @@ func (c *Container) Close() error {
 		case <-c.workerDone:
 		case <-shutdownCtx.Done():
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown workers: %w", shutdownCtx.Err()))
+		}
+	}
+	if c.TraceProvider != nil {
+		if err := c.TraceProvider.ForceFlush(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("flush tracing provider: %w", err))
+		}
+		if err := c.TraceProvider.Shutdown(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("shutdown tracing provider: %w", err))
 		}
 	}
 	if shutdownErr != nil {
