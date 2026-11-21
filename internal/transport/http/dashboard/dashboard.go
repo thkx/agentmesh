@@ -1082,7 +1082,7 @@ func (h *Handler) runWorkflow(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-run")
 		return
 	}
-	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workflow-run-"+string(run.Status))
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflow-runs/"+url.PathEscape(run.ID))
 }
 
 func (h *Handler) updateAgent(c *gin.Context) {
