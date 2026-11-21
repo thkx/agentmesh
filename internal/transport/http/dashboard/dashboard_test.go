@@ -496,6 +496,47 @@ func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
 	}
 }
 
+func TestEditFormsUseCatalogSelectionsAndPreserveCurrentAssignments(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		active string
+		data   pageData
+		wants  []string
+	}{
+		{
+			active: "agents",
+			data: pageData{
+				Active: "agents",
+				AgentRows: []agentView{{ID: "agent-1", Name: "Helper", ModelID: "model-disabled"}},
+				AllModelOptions: []modelOption{{ID: "model-disabled", Name: "Legacy model"}},
+			},
+			wants: []string{`<select name="model_id" aria-label="Model">`,
+				`<option value="model-disabled" selected>Legacy model · model-disabled</option>`},
+		},
+		{
+			active: "models",
+			data: pageData{
+				Active: "models",
+				ModelRows: []modelView{{ID: "model-1", ProviderID: "provider-disabled", Source: "provider"}},
+				AllProviderOptions: []providerOption{{ID: "provider-disabled", Name: "Legacy provider"}},
+			},
+			wants: []string{
+				`<select name="provider_id" aria-label="Provider">`,
+				`<option value="provider-disabled" selected>Legacy provider · provider-disabled</option>`},
+		},
+	} {
+		var body bytes.Buffer
+		if err := h.tmpl.ExecuteTemplate(&body, "page", tc.data); err != nil {
+			t.Fatalf("render %s page: %v", tc.active, err)
+		}
+		for _, want := range tc.wants {
+			if !strings.Contains(body.String(), want) {
+				t.Errorf("%s edit form missing %q", tc.active, want)
+			}
+		}
+	}
+}
+
 func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
 	h := New(Dependencies{})
 	for _, tc := range []struct {
