@@ -189,9 +189,9 @@ type modelView struct {
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
 type agentRunDetailView struct {
-	ID, DefinitionID, AgentName, TaskID, Status string
+	ID, DefinitionID, AgentName, TaskID, Status                             string
 	Error, Content, CreatedAt, StartedAt, FinishedAt, Duration, ExecutionID string
-	Steps, ToolCalls int
+	Steps, ToolCalls                                                        int
 }
 type agentOption struct{ ID, Name, Role, Status, Capabilities string }
 type identityView struct{ ID, WorkspaceID, DefinitionID, Name, Description, Role, Status, Capabilities string }
@@ -818,7 +818,7 @@ func (h *Handler) agentRun(c *gin.Context) {
 	detail := &agentRunDetailView{
 		ID: run.ID, DefinitionID: run.DefinitionID, TaskID: run.TaskID,
 		Status: run.Status, Error: run.Error,
-		CreatedAt: run.CreatedAt.UTC().Format(time.RFC3339),
+		CreatedAt:   run.CreatedAt.UTC().Format(time.RFC3339),
 		ExecutionID: h.executionForTask(c.Request.Context(), run.TaskID),
 	}
 	if definition, getErr := h.agentCatalog.Get(c.Request.Context(), run.DefinitionID); getErr == nil {
