@@ -1311,7 +1311,9 @@ func (h *Handler) agents(c *gin.Context) {
 		for _, model := range h.modelRegistry.List() {
 			if model.Enabled {
 				name := model.DisplayName
-				if name == "" { name = model.Name }
+				if name == "" {
+					name = model.Name
+				}
 				data.ModelOptions = append(data.ModelOptions, modelOption{ID: model.ID, Name: name})
 			}
 		}

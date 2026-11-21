@@ -516,13 +516,12 @@ func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
 	}
 }
 
-
 func TestModelAndAgentCreationUseCatalogSelections(t *testing.T) {
 	h := New(Dependencies{})
 	for _, tc := range []struct {
 		active string
-		data pageData
-		wants []string
+		data   pageData
+		wants  []string
 	}{
 		{active: "models", data: pageData{Active: "models", ProviderOptions: []providerOption{{ID: "provider-1", Name: "Primary provider"}}}, wants: []string{`<select name="provider_id" required>`, "Primary provider"}},
 		{active: "agents", data: pageData{Active: "agents", ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}}}, wants: []string{`<select name="model_id" required>`, "Main model"}},
