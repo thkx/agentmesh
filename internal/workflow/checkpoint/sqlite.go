@@ -123,6 +123,32 @@ func (s *Store) saveRun(ctx context.Context, r workflow.Run, owner string, fence
 		return err
 	}
 	defer tx.Rollback()
+
+	// Acquire SQLite's writer reservation before reading the current snapshot.
+	// In WAL mode, a deferred read transaction that later upgrades to a writer
+	// can fail with SQLITE_BUSY when a heartbeat commits in between. This
+	// conditional no-op update serializes checkpoint writes with heartbeats
+	// before the transaction establishes its read snapshot.
+	var lockResult sql.Result
+	if fenced {
+		lockResult, err = tx.ExecContext(ctx, `UPDATE workflow_runs SET updated_at=updated_at
+			WHERE id=? AND EXISTS (
+				SELECT 1 FROM workflow_jobs j WHERE j.run_id=? AND j.status='running'
+				AND j.lease_owner=? AND j.fencing_token=? AND j.lease_until>?
+			)`, r.ID, r.ID, owner, fenceToken, time.Now().Unix())
+	} else {
+		lockResult, err = tx.ExecContext(ctx, `UPDATE workflow_runs SET updated_at=updated_at WHERE id=?`, r.ID)
+	}
+	if err != nil {
+		return err
+	}
+	if n, _ := lockResult.RowsAffected(); n != 1 {
+		if fenced {
+			return errors.New("workflow checkpoint rejected by fencing token")
+		}
+		return workflow.ErrNotFound
+	}
+
 	var oldJSON string
 	if err = tx.QueryRowContext(ctx, `SELECT state_json FROM workflow_runs WHERE id=?`, r.ID).Scan(&oldJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
