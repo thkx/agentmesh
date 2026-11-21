@@ -780,7 +780,6 @@ func (h *Handler) submitNewAgentTask(c *gin.Context) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-workspace")
 		return
 	}
-	result, err := h.agentCatalog.Run(c.Request.Context(), agentID, workspaceID, prompt)
 	runResult, runErr := h.agentCatalog.Run(c.Request.Context(), agentID, workspaceID, prompt)
 	if runResult.TaskID != "" {
 		if runID := h.agentRunIDForTask(c.Request.Context(), runResult.TaskID); runID != "" {
@@ -845,7 +844,7 @@ func (h *Handler) agentRun(c *gin.Context) {
 			detail.Duration = run.Result.FinishedAt.Sub(run.Result.StartedAt).Round(time.Millisecond).String()
 		}
 	}
-	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agent-run", AgentRun: detail}, http.StatusOK)
+	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agents", AgentRun: detail}, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
