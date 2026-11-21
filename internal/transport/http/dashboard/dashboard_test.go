@@ -737,12 +737,11 @@ func TestNewTaskRouteRequiresAgentAndWorkspaceServices(t *testing.T) {
 	}
 }
 
-
 func TestAgentRunDetailRendersSuccessAndFailureResults(t *testing.T) {
 	h := New(Dependencies{})
 	for _, tc := range []struct {
-		name string
-		run  *agentRunDetailView
+		name  string
+		run   *agentRunDetailView
 		wants []string
 	}{
 		{
