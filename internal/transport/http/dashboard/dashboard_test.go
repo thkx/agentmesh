@@ -507,7 +507,7 @@ func TestEditFormsUseCatalogSelectionsAndPreserveCurrentAssignments(t *testing.T
 			active: "agents",
 			data: pageData{
 				Active:          "agents",
-				AgentRows: []agentView{{ID: "agent-1", Name: "Helper", ModelID: "model-disabled"}},
+				AgentRows:       []agentView{{ID: "agent-1", Name: "Helper", ModelID: "model-disabled"}},
 				AllModelOptions: []modelOption{{ID: "model-disabled", Name: "Legacy model"}},
 			},
 			wants: []string{`<select name="model_id" aria-label="Model">`,
@@ -517,7 +517,7 @@ func TestEditFormsUseCatalogSelectionsAndPreserveCurrentAssignments(t *testing.T
 			active: "models",
 			data: pageData{
 				Active:             "models",
-				ModelRows: []modelView{{ID: "model-1", ProviderID: "provider-disabled", Source: "provider"}},
+				ModelRows:          []modelView{{ID: "model-1", ProviderID: "provider-disabled", Source: "provider"}},
 				AllProviderOptions: []providerOption{{ID: "provider-disabled", Name: "Legacy provider"}},
 			},
 			wants: []string{
