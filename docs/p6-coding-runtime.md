@@ -225,7 +225,7 @@ The following implementation work is now present in the branch:
 - **M58:** `NodeCoding` is part of the Workflow domain/compiler/runtime. The app-owned bridge submits through the existing Execution Manager with a deterministic task ID and idempotency key, observes the canonical Execution, and refuses automatic replay for interrupted or ambiguous outcomes.
 - **M59:** test steps retain command, exit code, duration and output; a separate read-only Reviewer Agent must return a structured `approve` verdict; final patch snapshots retain Execution/Attempt IDs and SHA-256; the existing Collaboration Artifact Version and Evidence services publish a code-patch artifact plus diff/test/reviewer evidence with the same canonical provenance and run deterministic artifact verification.
 - **M60:** Dashboard Coding list/create/detail, Worktree/diff, Steps, Events, test/review evidence, cancellation, guarded revert and cleanup are available under `/dashboard/coding`. The page discloses Docker image and network mode, supports explicit allowlisted test commands, and links to the canonical Execution detail. Browser assets remain under `web/`.
-- Added migrations `000045`–`000048`, adapter/workflow/artifact provenance tests, `scripts/verify-p6.sh`, and the opt-in real model + Docker gate `scripts/accept-p6-coding.sh`.
+- Added migrations `000045`–`000051` for interruption/provenance, test evidence, snapshot and step immutability, and Usage lookup; added adapter/workflow/artifact provenance tests, `scripts/verify-p6.sh`, and the opt-in real model + Docker gate `scripts/accept-p6-coding.sh`.
 
 ### Required local configuration
 
