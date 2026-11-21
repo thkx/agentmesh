@@ -88,7 +88,14 @@ func (m *Manager) Inspect(ctx context.Context, repo, id string) (workspace.Works
 	if err != nil {
 		return workspace.Workspace{}, "", err
 	}
-	if worktreeCommon != repoCommon {
+	// macOS can expose the same directory through /var and /private/var
+	// paths. Comparing cleaned strings rejects a valid linked Worktree when
+	// Git reports those aliases differently after a restart. Compare the
+	// canonical filesystem objects instead; this still rejects a Worktree
+	// whose git-common-dir belongs to another repository.
+	worktreeCommonInfo, worktreeStatErr := os.Stat(worktreeCommon)
+	repoCommonInfo, repoStatErr := os.Stat(repoCommon)
+	if worktreeStatErr != nil || repoStatErr != nil || !os.SameFile(worktreeCommonInfo, repoCommonInfo) {
 		return workspace.Workspace{}, "", fmt.Errorf("worktree belongs to a different repository")
 	}
 	branch, err := gitOutput(ctx, actual, "branch", "--show-current")
