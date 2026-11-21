@@ -131,7 +131,7 @@ func TestQueueingWorkflowRedirectsToDurableRunDetail(t *testing.T) {
 		`CREATE TABLE workflow_runs (id TEXT PRIMARY KEY NOT NULL, workflow_id TEXT NOT NULL, workflow_version INTEGER NOT NULL, status TEXT NOT NULL, current_node TEXT, state_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`,
 		`CREATE TABLE workflow_events (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, node_id TEXT, worker_id TEXT, occurred_at INTEGER NOT NULL, data_json TEXT NOT NULL DEFAULT '{}')`,
 		`CREATE TABLE workflow_node_executions (run_id TEXT NOT NULL,node_id TEXT NOT NULL,idempotency_key TEXT NOT NULL,status TEXT NOT NULL,owner TEXT,lease_until INTEGER,output_json TEXT,error_text TEXT,attempt INTEGER NOT NULL DEFAULT 1,started_at INTEGER NOT NULL,finished_at INTEGER,PRIMARY KEY(run_id,node_id))`,
-		`CREATE TABLE workflow_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,available_at INTEGER NOT NULL,lease_owner TEXT,lease_until INTEGER,last_error TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
+		`CREATE TABLE workflow_jobs (id TEXT PRIMARY KEY,run_id TEXT NOT NULL UNIQUE,status TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,max_attempts INTEGER NOT NULL DEFAULT 3,available_at INTEGER NOT NULL,lease_owner TEXT,lease_until INTEGER,last_error TEXT,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL)`,
 	} {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatal(err)
