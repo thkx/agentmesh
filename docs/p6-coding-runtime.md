@@ -253,14 +253,35 @@ The implementation and verification scripts have been committed to this branch, 
 
 ## 8. Live acceptance invocation
 
-After configuring an absolute approved repository root in `coding.allowed_repository_roots`, ensure the selected Model is configured, Docker is running, and the selected Git repository has at least one commit. Then run from the AgentMesh checkout:
+The repository includes a safe, dependency-free Go fixture so the live gate does not need network access from inside the test container.
 
-```bash
-export AGENTMESH_API_TOKEN_FILE=./data/api-token
-export P6_REPOSITORY_PATH=/absolute/path/to/approved/git-repository
-export P6_MODEL_ID=your-configured-model-id
-export P6_TEST_COMMAND_JSON='{"program":"go","args":["test","./..."]}'
-bash scripts/accept-p6-coding.sh
-```
+1. From the AgentMesh checkout, create or reuse the fixture:
 
-Use the test command appropriate for the repository. If it needs to download dependencies, explicitly set `agent.tools.sandbox_network_enabled: true` in the active AgentMesh configuration for this acceptance run; otherwise use vendored/preloaded dependencies or an offline test command. Network remains disabled by default. The script retains the Worktree and does not commit or push.
+   ```bash
+   bash scripts/prepare-p6-live-fixture.sh
+   ```
+
+   The script prints the fixture's absolute path. It never overwrites an existing non-clean directory.
+
+2. Add that exact absolute path to the local `coding.allowed_repository_roots` list. Do not allowlist the whole home directory or the entire AgentMesh `data/` directory:
+
+   ```yaml
+   coding:
+     allowed_repository_roots:
+       - /absolute/path/printed/by/the/fixture/script
+   ```
+
+   Restart AgentMesh after changing the configuration. The default API token file `./data/api-token` is read automatically by the acceptance script; no token environment variable is required.
+
+3. Ensure the selected Model is enabled and Docker is running, then run:
+
+   ```bash
+   P6_REPOSITORY_PATH="$(pwd)/data/p6-live-fixture" \
+   P6_MODEL_ID=your-configured-model-id \
+   P6_TEST_COMMAND_JSON='{"program":"go","args":["test","./..."]}' \
+   bash scripts/accept-p6-coding.sh
+   ```
+
+   Replace `your-configured-model-id` with the exact Model ID shown in AgentMesh. The fixture uses only the Go standard library, so the Docker Sandbox can keep network disabled.
+
+The script retains the generated Worktree and branch for inspection. It does not commit, push or clean up the Worktree. After reviewing the diff and evidence in `/dashboard/coding`, use the Dashboard cleanup control when you are ready.
