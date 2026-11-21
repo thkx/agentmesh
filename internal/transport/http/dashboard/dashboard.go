@@ -353,6 +353,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
+	g.POST("/workflows/quickstart", h.requireSession(), h.createQuickstartWorkflowTemplate)
 	g.POST("/workflows/:id/apply", h.requireSession(), h.applyWorkflowTemplate)
 	g.POST("/workflows/:id/run", h.requireSession(), h.runWorkflow)
 	g.POST("/workflows/:id/delete", h.requireSession(), h.deleteWorkflowTemplate)
@@ -1173,6 +1174,61 @@ func (h *Handler) deleteAgent(c *gin.Context) {
 	}
 	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-deleted")
 }
+func (h *Handler) createQuickstartWorkflowTemplate(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.workflowRepo == nil || h.modelRegistry == nil || h.collaboration == nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+
+	name := strings.TrimSpace(c.PostForm("name"))
+	modelID := strings.TrimSpace(c.PostForm("model_id"))
+	workspaceID := strings.TrimSpace(c.PostForm("workspace_id"))
+	prompt := strings.TrimSpace(c.PostForm("prompt"))
+	if name == "" || len(name) > 160 || modelID == "" || workspaceID == "" || prompt == "" || len(prompt) > 10000 {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+
+	modelEnabled := false
+	for _, model := range h.modelRegistry.List() {
+		if model.ID == modelID && model.Enabled {
+			modelEnabled = true
+			break
+		}
+	}
+	if !modelEnabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-model")
+		return
+	}
+	if _, err := h.collaboration.GetWorkspace(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart-workspace")
+		return
+	}
+
+	id := "quickstart-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
+	definition := domainworkflow.Definition{
+		ID: id, Name: name, Version: 1, Entry: "start",
+		Nodes: []domainworkflow.Node{
+			{ID: "start", Type: domainworkflow.NodeStart},
+			{ID: "agent", Type: domainworkflow.NodeAgent, Name: "Run Agent task", Agent: &domainworkflow.AgentConfig{
+				ModelID: modelID, WorkspaceID: workspaceID, Prompt: prompt, MaxSteps: 10, MaxToolCalls: 10,
+			}},
+			{ID: "end", Type: domainworkflow.NodeEnd},
+		},
+		Edges: []domainworkflow.Edge{{From: "start", To: "agent"}, {From: "agent", To: "end"}},
+	}
+	template := authoring.Template{ID: id, Name: name, Description: "Starter Workflow created from the guided quickstart.", Definition: definition}
+	if err := h.workflowRepo.SaveTemplate(c.Request.Context(), template); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workflow-quickstart")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/workflows?message=workflow-quickstart-saved")
+}
+
 func (h *Handler) createWorkflowTemplate(c *gin.Context) {
 	if !sameOrigin(c.Request) {
 		c.AbortWithStatus(http.StatusForbidden)
@@ -1478,6 +1534,28 @@ func (h *Handler) executionForAnyTask(ctx context.Context, taskID string) string
 
 func (h *Handler) workflows(c *gin.Context) {
 	data := pageData{Title: "Workflows", Active: "workflows", WorkflowRows: []workflowView{}, WorkflowRuns: []workflowRunListView{}}
+	if h.modelRegistry != nil {
+		for _, model := range h.modelRegistry.List() {
+			if !model.Enabled {
+				continue
+			}
+			name := model.DisplayName
+			if name == "" {
+				name = model.Name
+			}
+			data.ModelOptions = append(data.ModelOptions, modelOption{ID: model.ID, Name: name})
+		}
+	}
+	if h.collaboration != nil {
+		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
+		if err == nil {
+			for _, workspace := range workspaces {
+				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: workspace.ID, Name: workspace.Name})
+			}
+		} else {
+			data.Error = "Could not load workspaces for the Workflow quickstart"
+		}
+	}
 	if h.db != nil {
 		rows, err := h.db.QueryContext(c.Request.Context(), `SELECT r.id,r.workflow_id,r.workflow_version,r.status,r.created_at,r.updated_at,COALESCE(w.name,r.workflow_id)
 			FROM workflow_runs r LEFT JOIN workflows w ON w.id=r.workflow_id AND w.version=r.workflow_version
@@ -2047,6 +2125,12 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Error = "The connection test timed out. Check the provider URL and network access, then try again."
 	case "provider-test-failed":
 		data.Error = "The connection test failed. Check the API key, provider URL, and API model name."
+	case "workflow-quickstart":
+		data.Error = "Enter a Workflow name, choose an enabled model and workspace, and provide a task instruction."
+	case "workflow-quickstart-model":
+		data.Error = "The selected model is no longer enabled. Enable a model and try again."
+	case "workflow-quickstart-workspace":
+		data.Error = "The selected workspace could not be found. Choose an existing workspace and try again."
 	case "":
 	default:
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."
@@ -2068,6 +2152,8 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Message = "Provider configuration saved."
 	case "provider-deleted":
 		data.Message = "Provider deleted."
+	case "workflow-quickstart-saved":
+		data.Message = "Starter Workflow saved. Review it below, apply it to the Workflow Runtime, then queue a run."
 	case "provider-tested":
 		data.Message = "Provider connectivity test completed successfully."
 	case "model-saved":
