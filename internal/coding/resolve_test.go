@@ -149,7 +149,8 @@ func TestRecoverReattachesWorktreeCreatedBeforeTaskMetadataPersisted(t *testing.
 		t.Fatal(err)
 	}
 	if got.Status != StatusInterrupted || !got.OutcomeUnknown || got.WorkspaceID != workspaceID || got.WorkspacePath != ws.Path || got.BranchName != branch {
-		t.Fatalf("interrupted task Worktree was not reattached: %+v", got)
+		events, eventsErr := service.Events(ctx, task.ID)
+		t.Fatalf("interrupted task Worktree was not reattached: task=%+v events=%+v events_err=%v", got, events, eventsErr)
 	}
 	diff, err := service.Diff(ctx, task.ID)
 	if err != nil || !strings.Contains(diff, "partial-change.txt") {
