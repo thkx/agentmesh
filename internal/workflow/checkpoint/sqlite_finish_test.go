@@ -2,7 +2,6 @@ package checkpoint_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -112,6 +111,3 @@ func TestFinishRunRejectsStaleFencingToken(t *testing.T) {
 	}
 }
 
-// Keep database/sql referenced here to make the expected no-row contract
-// explicit for future checkpoint tests.
-var _ = sql.ErrNoRows
