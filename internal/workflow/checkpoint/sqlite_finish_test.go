@@ -117,7 +117,6 @@ func TestFinishRunRejectsStaleFencingToken(t *testing.T) {
 	}
 }
 
-
 func TestSaveRunFencedSerializesWithConcurrentHeartbeats(t *testing.T) {
 	_, store := newM9Store(t)
 	createM9Run(t, store, "checkpoint-heartbeat-race")
