@@ -1186,9 +1186,9 @@ func (h *Handler) createQuickstartWorkspace(c *gin.Context) {
 	}
 
 	name := strings.TrimSpace(c.PostForm("name"))
-	slug := strings.TrimSpace(c.PostForm("slug"))
+	slug := strings.ToLower(strings.TrimSpace(c.PostForm("slug")))
 	description := strings.TrimSpace(c.PostForm("description"))
-	if name == "" || len(name) > 160 || slug == "" || len(slug) > 100 {
+	if name == "" || len(name) > 160 || !validWorkspaceSlug(slug) {
 		c.Redirect(http.StatusSeeOther, "/dashboard/workflows?error=workspace-create")
 		return
 	}
@@ -2220,6 +2220,19 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 	if err := h.tmpl.ExecuteTemplate(c.Writer, "layout", data); err != nil {
 		return
 	}
+}
+
+func validWorkspaceSlug(slug string) bool {
+	if slug == "" || len(slug) > 100 {
+		return false
+	}
+	for i, r := range slug {
+		isAlphaNumeric := r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
+		if !isAlphaNumeric && (r != '-' || i == 0 || i == len(slug)-1) {
+			return false
+		}
+	}
+	return true
 }
 
 func sameOrigin(r *http.Request) bool {
