@@ -585,8 +585,8 @@ func TestWorkflowQuickstartExplainsTheGeneratedStepsAndRequiresExistingResources
 	h := New(Dependencies{})
 	var body bytes.Buffer
 	data := pageData{
-		Active: "workflows",
-		ModelOptions: []modelOption{{ID: "model-1", Name: "Main model"}},
+		Active:           "workflows",
+		ModelOptions:     []modelOption{{ID: "model-1", Name: "Main model"}},
 		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
 	}
 	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
