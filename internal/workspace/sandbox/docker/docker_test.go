@@ -31,6 +31,7 @@ func TestRunnerProvidesEphemeralBuildCachesWithoutRelaxingReadOnlyRoot(t *testin
 	for _, expected := range []string{
 		"--read-only",
 		"--network\nnone",
+		"/tmp:rw,exec,nosuid,size=512m",
 		"/go/pkg/mod:rw,nosuid,size=1g",
 		"/root/.cargo:rw,nosuid,size=1g",
 		"GOMODCACHE=/go/pkg/mod",
