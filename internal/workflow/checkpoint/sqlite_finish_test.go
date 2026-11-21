@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -116,3 +117,52 @@ func TestFinishRunRejectsStaleFencingToken(t *testing.T) {
 	}
 }
 
+
+func TestSaveRunFencedSerializesWithConcurrentHeartbeats(t *testing.T) {
+	_, store := newM9Store(t)
+	createM9Run(t, store, "checkpoint-heartbeat-race")
+	ctx := context.Background()
+
+	job, err := store.ClaimRun(ctx, "worker-race", 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 80; i++ {
+			if err := store.HeartbeatRun(ctx, job, 30*time.Second); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 80; i++ {
+			run, err := store.GetRun(ctx, job.RunID)
+			if err != nil {
+				errs <- err
+				return
+			}
+			run.UpdatedAt = time.Now().UTC()
+			if err = store.SaveRunFenced(ctx, run, job.Owner, job.FenceToken); err != nil {
+				errs <- err
+				return
+			}
+		}
+	}()
+
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent heartbeat/checkpoint operation failed: %v", err)
+	}
+}
