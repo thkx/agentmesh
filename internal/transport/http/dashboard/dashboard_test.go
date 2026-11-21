@@ -469,6 +469,29 @@ func TestProviderAndModelPagesExplainFirstTimeSetup(t *testing.T) {
 	}
 }
 
+func TestAgentPageExplainsFirstTaskAndUsesWorkspaceSelection(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{Active: "agents", WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}}}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render agents page: %v", err)
+	}
+	for _, want := range []string{
+		"Create an Agent, then give it one small task",
+		"unique ID, a name, the enabled Model ID",
+		"Select workspace",
+		"Default workspace",
+		"Describe one small task for this Agent",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("agents page missing first-task guidance %q", want)
+		}
+	}
+	if strings.Contains(body.String(), `name="workspace_id" placeholder="Workspace ID"`) {
+		t.Fatal("run form should select a known workspace instead of requiring users to copy an ID")
+	}
+}
+
 func TestProviderConnectionErrorsGiveActionableGuidance(t *testing.T) {
 	h := New(Dependencies{})
 	for _, tc := range []struct {
