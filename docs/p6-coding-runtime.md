@@ -8,7 +8,7 @@ The source audit is in [P6 Coding Runtime Source Audit](p6-coding-runtime-audit.
 
 ## Implementation status
 
-M57–M60 implementation is present on this branch. The Dashboard, Workflow Coding node, Coding Execution adapter, test/repair/review pipeline, Artifact/Evidence publisher, repository allowlist and live acceptance script are included. Automated CI and the user's opt-in live acceptance remain release gates; do not call P6 accepted until both are verified for the exact release commit.
+M57–M60 implementation is present on this branch. The Dashboard, Workflow Coding node, Coding Execution adapter, test/repair/review pipeline, Artifact/Evidence publisher, repository allowlist and live acceptance script are included. The user's opt-in live Coding Workflow acceptance has now passed; see [P6 Live Acceptance Record](p6-live-acceptance.md). Final branch CI for the current head and manual inspection of the retained Worktree remain release-hygiene checks.
 
 Coding repository access is deny-by-default. Add trusted absolute repository roots to the active configuration:
 
@@ -241,7 +241,7 @@ Use the actual absolute path on the machine running AgentMesh. The service canon
 
 ### Verification status
 
-The implementation and verification scripts have been committed to this branch, but **no Go test, race test, build, vet, real model run, or Docker live acceptance is claimed as executed by the assistant**. Run `bash scripts/verify-p6.sh` on the target machine. Then configure the variables documented in `scripts/accept-p6-coding.sh` and run with `AGENTMESH_RUN_P6_LIVE=1` for the real Coding gate. A PR is required to obtain the repository's pull-request CI result; the branch is not yet merged into `p5/control-plane`.
+The user has reported a successful live run of `bash scripts/accept-p6-coding.sh`; the exact output and generated identifiers are recorded in [P6 Live Acceptance Record](p6-live-acceptance.md). This verifies the real configured model + Docker Sandbox Workflow path, including test and independent review evidence and provenance. The current branch CI must still be checked for the exact latest commit, and the retained Worktree diff should be manually inspected. The branch remains unmerged into `p5/control-plane`.
 
 ## 9. Explicit non-goals
 
