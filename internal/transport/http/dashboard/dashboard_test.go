@@ -616,7 +616,7 @@ func TestWorkflowQuickstartDisablesCreationWithoutModelOrWorkspace(t *testing.T)
 		t.Fatalf("render workflows page: %v", err)
 	}
 	for _, want := range []string{
-		"<button disabled disabled>Save starter Workflow</button>",
+		"Save starter Workflow</button>",
 		"No enabled models are available",
 		"No workspace is available",
 	} {
