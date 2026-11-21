@@ -396,6 +396,7 @@ func TestOverviewShowsFirstIncompleteSetupStepAndCountsSuccessfulAgentRuns(t *te
 	body := rec.Body.String()
 	for _, want := range []string{
 		"4 / 5",
+		"href=\"/dashboard/new-task\">Start a task</a>",
 		"已完成 Agent 任务",
 		"Recommended next step: Run your first Agent task",
 		"href=\"/dashboard/agents\">Continue</a>",
@@ -660,5 +661,131 @@ func TestWorkflowQuickstartOffersWorkspaceCreationWhenNoWorkspaceExists(t *testi
 		if !strings.Contains(body.String(), want) {
 			t.Errorf("empty-workspace quickstart missing %q", want)
 		}
+	}
+}
+
+func TestNewTaskPageShowsComposerAndAdvancedPaths(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	data := pageData{
+		Active:           "new-task",
+		AgentRows:        []agentView{{ID: "agent-1", Name: "Research assistant", ModelID: "model-1"}},
+		WorkspaceOptions: []workspaceOption{{ID: "workspace-1", Name: "Default workspace"}},
+	}
+	if err := h.tmpl.ExecuteTemplate(&body, "page", data); err != nil {
+		t.Fatalf("render new task page: %v", err)
+	}
+	for _, want := range []string{
+		"What would you like AgentMesh to do?",
+		"action=\"/dashboard/new-task/agent\"",
+		"Research assistant · model-1",
+		"Default workspace",
+		"Describe the task",
+		"Start Agent task",
+		"href=\"/dashboard/coding\"",
+		"href=\"/dashboard/workflows\"",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("new task page missing %q", want)
+		}
+	}
+}
+
+func TestNewTaskPageExplainsMissingPrerequisites(t *testing.T) {
+	h := New(Dependencies{})
+	var body bytes.Buffer
+	if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{Active: "new-task"}); err != nil {
+		t.Fatalf("render empty new task page: %v", err)
+	}
+	for _, want := range []string{
+		"Set up an Agent first",
+		"href=\"/dashboard/agents\"",
+		"href=\"/dashboard/providers\"",
+		"href=\"/dashboard/models\"",
+	} {
+		if !strings.Contains(body.String(), want) {
+			t.Errorf("new task empty state missing %q", want)
+		}
+	}
+}
+
+func TestNewTaskRouteRejectsCrossOriginSubmission(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/new-task/agent", strings.NewReader("agent_id=a&workspace_id=w&prompt=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "https://attacker.example")
+	req.Host = "agentmesh.local"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin submission status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestNewTaskRouteRequiresAgentAndWorkspaceServices(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	req := httptest.NewRequest(http.MethodPost, "/dashboard/new-task/agent", strings.NewReader("agent_id=a&workspace_id=w&prompt=hello"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://agentmesh.local")
+	req.Host = "agentmesh.local"
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing dependencies status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAgentRunDetailRendersSuccessAndFailureResults(t *testing.T) {
+	h := New(Dependencies{})
+	for _, tc := range []struct {
+		name  string
+		run   *agentRunDetailView
+		wants []string
+	}{
+		{
+			name: "success",
+			run: &agentRunDetailView{
+				ID: "run-success", DefinitionID: "agent-1", AgentName: "Research Agent",
+				TaskID: "task-1", Status: "succeeded", Content: "Workspace summary",
+				CreatedAt: "2026-11-21T12:00:00Z", StartedAt: "2026-11-21T12:00:01Z",
+				FinishedAt: "2026-11-21T12:00:03Z", Duration: "2s", Steps: 2, ToolCalls: 1,
+			},
+			wants: []string{"AGENT RUN RESULT", "Research Agent", "succeeded", "Workspace summary", "2s", "task-1", "Start another task"},
+		},
+		{
+			name: "failure",
+			run: &agentRunDetailView{
+				ID: "run-failed", DefinitionID: "agent-1", TaskID: "task-2",
+				Status: "failed", Error: "agent reached maximum steps: limit=2",
+				CreatedAt: "2026-11-21T12:00:00Z",
+			},
+			wants: []string{"failed", "Failure reason", "agent reached maximum steps: limit=2"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body bytes.Buffer
+			if err := h.tmpl.ExecuteTemplate(&body, "page", pageData{
+				Title: "Agent Run " + tc.run.ID, Active: "agents", AgentRun: tc.run,
+			}); err != nil {
+				t.Fatalf("render Agent Run detail: %v", err)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(body.String(), want) {
+					t.Errorf("Agent Run detail missing %q: %s", want, body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestAgentRunRouteRequiresAgentCatalog(t *testing.T) {
+	router := gin.New()
+	New(Dependencies{}).RegisterRoutes(router)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/agent-runs/run-1", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing Agent catalog status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
