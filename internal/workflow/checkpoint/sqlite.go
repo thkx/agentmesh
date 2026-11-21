@@ -779,31 +779,64 @@ func (s *Store) HeartbeatRun(ctx context.Context, job Job, lease time.Duration) 
 }
 
 func (s *Store) FinishRun(ctx context.Context, job Job, run workflow.Run, runErr error) error {
+	// A worker can fail before its first checkpoint (for example, when SQLite
+	// rejects a checkpoint write). Persist that failure on the run itself so
+	// the run and queue record cannot disagree.
+	if runErr != nil && run.Status != workflow.RunSucceeded && run.Status != workflow.RunFailed &&
+		run.Status != workflow.RunCanceled && run.Status != workflow.RunRejected &&
+		run.Status != workflow.RunWaitingApproval {
+		run.Status = workflow.RunFailed
+		if run.Error == "" {
+			run.Error = runErr.Error()
+		}
+		run.FinishedAt = time.Now().UTC()
+	}
+
 	status := "succeeded"
 	switch run.Status {
 	case workflow.RunCanceled:
 		status = "canceled"
 	case workflow.RunFailed:
 		status = "failed"
-	default:
-		if runErr != nil {
-			status = "failed"
-		}
 	}
+
+	stateJSON, err := json.Marshal(run)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Unix()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `UPDATE workflow_jobs SET status=?,last_error=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE run_id=? AND status='running' AND lease_owner=? AND fencing_token=? AND lease_until>?`, status, errorString(runErr), time.Now().Unix(), job.RunID, job.Owner, job.FenceToken, time.Now().Unix())
+
+	// Update the run first while the lease is still valid. The following job
+	// update uses the same fencing identity; both changes commit atomically.
+	runResult, err := tx.ExecContext(ctx, `UPDATE workflow_runs SET status=?,current_node=?,state_json=?,updated_at=?
+		WHERE id=? AND EXISTS (
+			SELECT 1 FROM workflow_jobs j WHERE j.run_id=? AND j.status='running'
+			AND j.lease_owner=? AND j.fencing_token=? AND j.lease_until>?
+		)`, run.Status, nullableString(run.CurrentNode), string(stateJSON), now,
+		job.RunID, job.RunID, job.Owner, job.FenceToken, now)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n != 1 {
+	if n, _ := runResult.RowsAffected(); n != 1 {
 		return errors.New("workflow lease lost before completion")
 	}
-	if err = appendEventTx(ctx, tx, job.RunID, "worker.finished", "", job.Owner, map[string]any{"job_status": status, "run_status": run.Status, "error": errorString(runErr)}); err != nil {
+
+	res, err := tx.ExecContext(ctx, `UPDATE workflow_jobs SET status=?,last_error=?,lease_owner=NULL,lease_until=NULL,updated_at=?
+		WHERE run_id=? AND status='running' AND lease_owner=? AND fencing_token=? AND lease_until>?`,
+		status, errorString(runErr), now, job.RunID, job.Owner, job.FenceToken, now)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		return errors.New("workflow lease lost before completion")
+	}
+	if err = appendEventTx(ctx, tx, job.RunID, "worker.finished", "", job.Owner,
+		map[string]any{"job_status": status, "run_status": run.Status, "error": errorString(runErr)}); err != nil {
 		return err
 	}
 	return tx.Commit()
