@@ -2,6 +2,7 @@ package openai
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestClassifyHTTPStatus(t *testing.T) {
 		{302, provider.ErrorCodeProvider, false},
 	}
 	for _, tc := range tests {
-		t.Run(strings.Join([]string{"status", string(rune(tc.status))}, "-"), func(t *testing.T) {
+		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
 			code, retryable := classifyHTTPStatus(tc.status)
 			if code != tc.wantCode || retryable != tc.retryable {
 				t.Fatalf("classifyHTTPStatus(%d) = (%q, %t), want (%q, %t)", tc.status, code, retryable, tc.wantCode, tc.retryable)
