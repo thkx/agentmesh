@@ -177,7 +177,7 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(result_id,recipient_agent_id) DO NOTHING`,
 		item.ID, item.ResultID, item.WorkspaceID, item.TaskID, item.AssignmentID, item.RecipientAgentID,
 		item.Outcome, item.Reason, item.Confidence, string(item.Evidence), item.CreatedAt.UTC().UnixMilli(),
-		item.ReviewMethod, item.ReviewerModelID, item.ReviewerProviderID, item.ModelResponseID, boolInt(item.ModelInvoked), item.InputTokens, item.OutputTokens)
+		item.ReviewMethod, item.ReviewerModelID, item.ReviewerProviderID, item.ModelResponseID, taskResultAssessmentBoolInt(item.ModelInvoked), item.InputTokens, item.OutputTokens)
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 	return tx.Commit()
 }
 
-func boolInt(value bool) int {
+func taskResultAssessmentBoolInt(value bool) int {
 	if value {
 		return 1
 	}
