@@ -74,7 +74,7 @@ type taskResultModelDecision struct {
 func humanReviewAssessment(reason string) TaskResultAssessment {
 	return TaskResultAssessment{
 		Outcome: "human_review", Reason: reason, Confidence: 0,
-		Evidence: json.RawMessage("[]"),
+		Evidence: json.RawMessage("[]"), ReviewMethod: "policy",
 	}
 }
 
@@ -118,38 +118,50 @@ func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Conte
 	if err != nil {
 		return TaskResultAssessment{}, fmt.Errorf("evaluate collaboration task result with model %q: %w", modelID, err)
 	}
+	modelAssessment := func(assessment TaskResultAssessment) TaskResultAssessment {
+		assessment.ReviewMethod = "model"
+		assessment.ReviewerModelID = modelID
+		assessment.ModelInvoked = true
+		if response != nil {
+			assessment.ReviewerProviderID = string(response.ProviderID)
+			assessment.ModelResponseID = response.ID
+			assessment.InputTokens = response.Usage.InputTokens
+			assessment.OutputTokens = response.Usage.OutputTokens
+		}
+		return assessment
+	}
 	if response == nil || strings.TrimSpace(response.Content) == "" || len(response.Content) > 32<<10 {
-		return humanReviewAssessment("reviewer returned an empty or oversized decision; human review is required"), nil
+		return modelAssessment(humanReviewAssessment("reviewer returned an empty or oversized decision; human review is required")), nil
 	}
 
 	var decision taskResultModelDecision
 	decoder := json.NewDecoder(bytes.NewBufferString(response.Content))
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&decision); err != nil {
-		return humanReviewAssessment("reviewer returned invalid structured output; human review is required"), nil
+		return modelAssessment(humanReviewAssessment("reviewer returned invalid structured output; human review is required")), nil
 	}
 	var extra any
 	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return humanReviewAssessment("reviewer returned trailing output; human review is required"), nil
+		return modelAssessment(humanReviewAssessment("reviewer returned trailing output; human review is required")), nil
 	}
 	decision.Outcome = strings.TrimSpace(decision.Outcome)
 	decision.Reason = boundedText(strings.TrimSpace(decision.Reason), 4000)
 	if decision.Reason == "" || decision.Confidence < 0 || decision.Confidence > 1 ||
 		(decision.Outcome != "accepted" && decision.Outcome != "rejected" && decision.Outcome != "human_review") {
-		return humanReviewAssessment("reviewer decision failed validation; human review is required"), nil
+		return modelAssessment(humanReviewAssessment("reviewer decision failed validation; human review is required")), nil
 	}
 	if decision.Outcome == "human_review" || decision.Confidence < minTaskResultConfidence {
-		return TaskResultAssessment{
+		return modelAssessment(TaskResultAssessment{
 			Outcome: "human_review", Reason: decision.Reason, Confidence: decision.Confidence,
 			Evidence: marshalEvidenceRefs(decision.EvidenceRefs),
-		}, nil
+		}), nil
 	}
 
 	// Plain text tasks have no Artifact records. Their auditable evidence is the
 	// immutable task requirement and persisted result, referenced by exact IDs.
 	// This path does not weaken the stricter Artifact acceptance rules below.
 	if len(evaluation.Artifacts) == 0 {
-		return evaluatePlainTaskResultDecision(decision, evaluation), nil
+		return modelAssessment(evaluatePlainTaskResultDecision(decision, evaluation)), nil
 	}
 
 	validRefs := make(map[string]struct{})
@@ -187,25 +199,25 @@ func (e *LLMTaskResultEvaluator) EvaluateTaskResultWithContext(ctx context.Conte
 		}
 	}
 	if len(decision.EvidenceRefs) == 0 {
-		return humanReviewAssessment("reviewer decision did not cite evidence; human review is required"), nil
+		return modelAssessment(humanReviewAssessment("reviewer decision did not cite evidence; human review is required")), nil
 	}
 	for _, ref := range decision.EvidenceRefs {
 		if _, ok := validRefs[ref]; !ok {
-			return humanReviewAssessment("reviewer cited evidence outside the supplied context; human review is required"), nil
+			return modelAssessment(humanReviewAssessment("reviewer cited evidence outside the supplied context; human review is required")), nil
 		}
 		if decision.Outcome == "accepted" {
 			if _, ok := acceptanceRefs[ref]; !ok {
-				return humanReviewAssessment("acceptance evidence must belong to the exact submitted Artifact Version"), nil
+				return modelAssessment(humanReviewAssessment("acceptance evidence must belong to the exact submitted Artifact Version")), nil
 			}
 		}
 	}
 	if decision.Outcome == "accepted" && !hasPassedVerification {
-		return humanReviewAssessment("acceptance requires a passed verification for the exact submitted Artifact Version"), nil
+		return modelAssessment(humanReviewAssessment("acceptance requires a passed verification for the exact submitted Artifact Version")), nil
 	}
-	return TaskResultAssessment{
+	return modelAssessment(TaskResultAssessment{
 		Outcome: decision.Outcome, Reason: decision.Reason, Confidence: decision.Confidence,
 		Evidence: marshalEvidenceRefs(decision.EvidenceRefs),
-	}, nil
+	}), nil
 }
 
 func evaluatePlainTaskResultDecision(decision taskResultModelDecision, evaluation TaskResultEvaluationContext) TaskResultAssessment {
