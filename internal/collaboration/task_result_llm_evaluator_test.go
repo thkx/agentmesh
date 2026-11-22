@@ -240,6 +240,9 @@ func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	if string(assessment.Evidence) != `["task:task-plain","result:result-plain"]` {
 		t.Fatalf("plain-result references were not persisted: %s", assessment.Evidence)
 	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked || assessment.ReviewerModelID != "deepseek-reviewer-model" {
+		t.Fatalf("review model provenance missing: %+v", assessment)
+	}
 }
 
 func TestLLMTaskResultEvaluatorRejectsInventedPlainResultReferences(t *testing.T) {
