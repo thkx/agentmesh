@@ -1311,3 +1311,64 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 		t.Fatalf("persisted evidence provenance mismatch: %+v", items)
 	}
 }
+
+
+func TestTaskResultAssessmentPersistsReviewerModelProvenance(t *testing.T) {
+	ctx := context.Background()
+	service, db := testService(t)
+	defer db.Close()
+
+	workspace, err := service.CreateWorkspace(ctx, collaboration.Workspace{Name: "Review Provenance", Slug: "review-provenance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := service.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: workspace.ID, Name: "Reviewer", Role: "reviewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateTask(ctx, collaboration.Task{WorkspaceID: workspace.ID, Title: "Review a plain result"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := service.AssignTask(ctx, task.ID, agent.ID, "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := service.ClaimAssignment(ctx, assignment.ID, "review-provenance-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.CompleteAssignment(ctx, assignment.ID, "review-provenance-test", claimed.ClaimVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.StoreTaskResult(ctx, agent.ID, task.ID, assignment.ID, "execution-review-provenance", json.RawMessage(`{"content":"completed"}`)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.GetTaskResult(ctx, agent.ID, assignment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment := collaboration.TaskResultAssessment{
+		ResultID: result.ID, WorkspaceID: workspace.ID, TaskID: task.ID,
+		AssignmentID: assignment.ID, RecipientAgentID: agent.ID,
+		Outcome: "accepted", Reason: "The result satisfies the task.",
+		Confidence: 0.96, Evidence: json.RawMessage(`["task:task","result:result"]`),
+		ReviewMethod: "model", ReviewerModelID: "model-deepseek-reviewer",
+		ReviewerProviderID: "provider-deepseek", ModelResponseID: "response-123",
+		ModelInvoked: true, InputTokens: 1200, OutputTokens: 180,
+	}
+	if err = service.StoreTaskResultAssessment(ctx, assessment); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := service.GetTaskResultAssessment(ctx, agent.ID, assignment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReviewMethod != "model" || !stored.ModelInvoked ||
+		stored.ReviewerModelID != assessment.ReviewerModelID ||
+		stored.ReviewerProviderID != assessment.ReviewerProviderID ||
+		stored.ModelResponseID != assessment.ModelResponseID ||
+		stored.InputTokens != assessment.InputTokens || stored.OutputTokens != assessment.OutputTokens {
+		t.Fatalf("reviewer model provenance was not persisted: %+v", stored)
+	}
+}
