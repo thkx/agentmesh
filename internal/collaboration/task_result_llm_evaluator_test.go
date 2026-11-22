@@ -6,16 +6,22 @@ import (
 	"testing"
 
 	"github.com/thkx/agentmesh/internal/collaboration"
+	"github.com/thkx/agentmesh/internal/domain/provider"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type fixedEvaluationModel struct {
-	content string
-	request modelgateway.GenerateRequest
+	content  string
+	response *modelgateway.GenerateResponse
+	request  modelgateway.GenerateRequest
 }
 
 func (m *fixedEvaluationModel) Generate(_ context.Context, request modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
 	m.request = request
+	if m.response != nil {
+		response := *m.response
+		return &response, nil
+	}
 	return &modelgateway.GenerateResponse{Content: m.content}, nil
 }
 
@@ -206,7 +212,14 @@ func TestLLMTaskResultEvaluatorUsesLatestVerificationOnly(t *testing.T) {
 
 
 func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
-	model := &fixedEvaluationModel{content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`}
+	model := &fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`,
+		response: &modelgateway.GenerateResponse{
+			ID: "response-plain-review", ProviderID: provider.ID("provider-deepseek"),
+			ModelID: "deepseek-reviewer-model",
+			Usage: modelgateway.Usage{InputTokens: 321, OutputTokens: 87, TotalTokens: 408},
+		},
+	}
 	resolvedAgentID := ""
 	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(_ context.Context, agentID string) (string, error) {
 		resolvedAgentID = agentID
@@ -239,6 +252,13 @@ func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	}
 	if string(assessment.Evidence) != `["task:task-plain","result:result-plain"]` {
 		t.Fatalf("plain-result references were not persisted: %s", assessment.Evidence)
+	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked ||
+		assessment.ReviewerModelID != "deepseek-reviewer-model" ||
+		assessment.ReviewerProviderID != "provider-deepseek" ||
+		assessment.ModelResponseID != "response-plain-review" ||
+		assessment.InputTokens != 321 || assessment.OutputTokens != 87 {
+		t.Fatalf("review model provenance/usage was not captured: %+v", assessment)
 	}
 	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked || assessment.ReviewerModelID != "deepseek-reviewer-model" {
 		t.Fatalf("review model provenance missing: %+v", assessment)
