@@ -203,3 +203,83 @@ func TestLLMTaskResultEvaluatorUsesLatestVerificationOnly(t *testing.T) {
 		t.Fatalf("an older passed verification must not override the latest failed verification, got %+v", assessment)
 	}
 }
+
+
+func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`}
+	resolvedAgentID := ""
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(_ context.Context, agentID string) (string, error) {
+		resolvedAgentID = agentID
+		return "deepseek-reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task: collaboration.Task{
+			ID: "task-plain", Title: "Explain webhook idempotency",
+			Description: "Explain duplicate delivery, idempotency keys, and safe retries.",
+		},
+		Result: collaboration.TaskResult{
+			ID: "result-plain", TaskID: "task-plain", RecipientAgentID: "reviewer-agent",
+			Result: json.RawMessage(`{"content":"The result covers duplicate delivery, unique keys, and safe retries."}`),
+		},
+		Artifacts: []collaboration.TaskArtifactContext{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "accepted" || assessment.Confidence != 0.96 {
+		t.Fatalf("expected accepted plain-text result, got %+v", assessment)
+	}
+	if resolvedAgentID != "reviewer-agent" || model.request.ModelID != "deepseek-reviewer-model" {
+		t.Fatalf("reviewer must use the recipient Agent's pinned model: agent=%q model=%q", resolvedAgentID, model.request.ModelID)
+	}
+	if string(assessment.Evidence) != `["task:task-plain","result:result-plain"]` {
+		t.Fatalf("plain-result references were not persisted: %s", assessment.Evidence)
+	}
+}
+
+func TestLLMTaskResultEvaluatorRejectsInventedPlainResultReferences(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"accepted","reason":"Looks complete.","confidence":0.99,"evidence_refs":["task:task-plain","result:invented"]}`}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Provide a concise explanation."},
+		Result:    collaboration.TaskResult{ID: "result-plain", RecipientAgentID: "reviewer-agent", Result: json.RawMessage(`{"content":"done"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("invented result reference must require human review, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorRequiresBothPlainResultReferences(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"rejected","reason":"The result omits required details.","confidence":0.98,"evidence_refs":["result:result-plain"]}`}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Provide all required details."},
+		Result:    collaboration.TaskResult{ID: "result-plain", RecipientAgentID: "reviewer-agent", Result: json.RawMessage(`{"content":"partial"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("missing task reference must require human review, got %+v", assessment)
+	}
+}
