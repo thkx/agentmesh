@@ -400,8 +400,9 @@ type nativeResponse struct {
 		Type    string `json:"type"`
 		Role    string `json:"role"`
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type    string `json:"type"`
+			Text    string `json:"text"`
+			Refusal string `json:"refusal"`
 		} `json:"content"`
 		CallID    string `json:"call_id"`
 		Name      string `json:"name"`
@@ -494,17 +495,28 @@ func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateR
 		return nil, fmt.Errorf("decode OpenAI Responses API response: %w", err)
 	}
 	result := &modelgateway.GenerateResponse{ID: decoded.ID, ProviderID: providerID, ModelID: req.ModelID, Model: decoded.Model, Usage: modelgateway.Usage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens}}
+	var outputTypes []string
+	var contentTypes []string
 	for _, item := range decoded.Output {
-		if item.Type == "function_call" {
+		switch item.Type {
+		case "function_call":
 			args := json.RawMessage(item.Arguments)
 			result.ToolCalls = append(result.ToolCalls, modelgateway.ToolCall{ID: item.CallID, Name: item.Name, Arguments: args})
-		}
-		if item.Type == "message" {
+		case "message":
 			for _, part := range item.Content {
-				if part.Type == "output_text" || part.Type == "text" {
+				switch part.Type {
+				case "output_text", "text":
 					result.Content += part.Text
+				case "refusal":
+					// Responses API refusals carry their user-facing text in
+					// the "refusal" field, not the ordinary "text" field.
+					result.Content += part.Refusal
+				default:
+					contentTypes = append(contentTypes, part.Type)
 				}
 			}
+		default:
+			outputTypes = append(outputTypes, item.Type)
 		}
 	}
 	if len(result.ToolCalls) > 0 {
@@ -513,5 +525,14 @@ func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateR
 		result.FinishReason = modelgateway.FinishReasonStop
 	}
 	result.Normalize()
+	if len(result.ToolCalls) == 0 && strings.TrimSpace(result.Content) == "" {
+		return nil, fmt.Errorf(
+			"OpenAI Responses API response %q contained no usable assistant output (status=%q, output_types=%q, content_types=%q)",
+			decoded.ID,
+			decoded.Status,
+			strings.Join(outputTypes, ","),
+			strings.Join(contentTypes, ","),
+		)
+	}
 	return result, nil
 }
