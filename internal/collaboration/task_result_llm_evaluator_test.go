@@ -20,6 +20,11 @@ func (m *fixedEvaluationModel) Generate(_ context.Context, request modelgateway.
 	m.request = request
 	if m.response != nil {
 		response := *m.response
+		// Preserve the fixture's decision content while allowing tests to
+		// provide response provenance and usage metadata independently.
+		if response.Content == "" {
+			response.Content = m.content
+		}
 		return &response, nil
 	}
 	return &modelgateway.GenerateResponse{Content: m.content}, nil
