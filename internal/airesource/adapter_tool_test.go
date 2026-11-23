@@ -71,3 +71,54 @@ func TestNormalizeMessagesPreservesAssistantToolCallAndToolResult(t *testing.T) 
 		t.Fatalf("tool conversation was not preserved: %+v", messages)
 	}
 }
+
+func TestGeneratePreservesSystemPromptAndJSONResponseFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Messages       []map[string]any `json:"messages"`
+			ResponseFormat ResponseFormat   `json:"response_format"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if len(payload.Messages) != 2 {
+			t.Errorf("expected system and user messages, got %+v", payload.Messages)
+		} else {
+			if payload.Messages[0]["role"] != "system" || payload.Messages[0]["content"] != "review strictly" {
+				t.Errorf("system prompt was not preserved as first message: %+v", payload.Messages[0])
+			}
+			if payload.Messages[1]["role"] != "user" || payload.Messages[1]["content"] != "review this" {
+				t.Errorf("user message changed: %+v", payload.Messages[1])
+			}
+		}
+		if payload.ResponseFormat.Type != "json_object" {
+			t.Errorf("response_format = %+v, want json_object", payload.ResponseFormat)
+		}
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-json","object":"chat.completion","created":1,"model":"reviewer","choices":[{"index":0,"message":{"role":"assistant","content":"{}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`))
+	}))
+	defer server.Close()
+
+	candidate := Candidate{
+		Provider:      Provider{Protocol: ProtocolOpenAI},
+		Endpoint:      Endpoint{BaseURL: server.URL + "/v1", TimeoutMS: 2000},
+		UpstreamModel: "reviewer",
+		Secret:        "test-secret",
+	}
+	responseFormat := &ResponseFormat{Type: "json_object"}
+	_, status, err := generate(context.Background(), candidate, GenerateRequest{
+		Model: "reviewer",
+		Messages: []Message{
+			{Role: "system", Content: "review strictly"},
+			{Role: "user", Content: "review this"},
+		},
+		ResponseFormat: responseFormat,
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", status, http.StatusOK)
+	}
+}
