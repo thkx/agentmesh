@@ -132,7 +132,9 @@ type ToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
-type ResponseFormat struct { Type string `json:"type"` }
+type ResponseFormat struct {
+	Type string `json:"type"`
+}
 
 type GenerateRequest struct {
 	Model       string    `json:"model"`
@@ -140,7 +142,7 @@ type GenerateRequest struct {
 	Temperature *float64  `json:"temperature,omitempty"`
 	TopP        *float64  `json:"top_p,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
 	Stream      bool      `json:"stream,omitempty"`
 	Tools       []Tool    `json:"tools,omitempty"`
 	ToolChoice  string    `json:"tool_choice,omitempty"`
