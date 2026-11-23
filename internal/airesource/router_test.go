@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/thkx/agentmesh/internal/config"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/platform/cryptography"
 	"github.com/thkx/agentmesh/internal/platform/database"
-	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 func newRouterTestEnvironment(t *testing.T) (*Service, *sql.DB) {
