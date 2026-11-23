@@ -151,7 +151,9 @@ func (r *Router) Generate(ctx context.Context, req GenerateRequest) (GenerateRes
 			}
 		}
 		if len(compatible) == 0 {
-			if req.ResponseFormat != nil { return GenerateResponse{}, ErrStructuredOutputUnsupported }
+			if req.ResponseFormat != nil {
+				return GenerateResponse{}, ErrStructuredOutputUnsupported
+			}
 			return GenerateResponse{}, ErrNativeToolCallingUnsupported
 		}
 		candidates = compatible
