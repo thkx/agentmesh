@@ -87,7 +87,6 @@ func addRouterTestModel(t *testing.T, service *Service, modelID, modelKey string
 	}
 }
 
-
 func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]json.RawMessage
