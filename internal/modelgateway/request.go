@@ -48,8 +48,8 @@ type GenerateRequest struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 	TopP        *float64 `json:"top_p,omitempty"`
 
-	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
-	StopSequences   []string `json:"stop_sequences,omitempty"`
+	MaxOutputTokens int             `json:"max_output_tokens,omitempty"`
+	StopSequences   []string        `json:"stop_sequences,omitempty"`
 	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
 
 	Metadata   map[string]string `json:"metadata,omitempty"`
