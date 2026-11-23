@@ -144,8 +144,8 @@ type GenerateRequest struct {
 	MaxTokens      int             `json:"max_tokens,omitempty"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 	Stream         bool            `json:"stream,omitempty"`
-	Tools          []Tool    `json:"tools,omitempty"`
-	ToolChoice     string    `json:"tool_choice,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
+	ToolChoice     string          `json:"tool_choice,omitempty"`
 }
 type GenerateResponse struct {
 	ID      string      `json:"id"`
@@ -176,13 +176,13 @@ type Candidate struct {
 }
 
 var (
-	ErrInvalid                       = errors.New("invalid AI resource")
-	ErrNotFound                      = errors.New("AI resource not found")
-	ErrNoCandidate                   = errors.New("no healthy credential is available for model")
-	ErrUnsupportedProtocol           = errors.New("unsupported provider protocol")
-	ErrStreamingUnsupported          = errors.New("streaming is not supported by this gateway adapter")
-	ErrNativeToolCallingUnsupported  = errors.New("native tool calling is not supported by this provider protocol")
-	ErrStructuredOutputUnsupported   = errors.New("structured output is not supported by this provider protocol")
+	ErrInvalid                      = errors.New("invalid AI resource")
+	ErrNotFound                     = errors.New("AI resource not found")
+	ErrNoCandidate                  = errors.New("no healthy credential is available for model")
+	ErrUnsupportedProtocol          = errors.New("unsupported provider protocol")
+	ErrStreamingUnsupported         = errors.New("streaming is not supported by this gateway adapter")
+	ErrNativeToolCallingUnsupported = errors.New("native tool calling is not supported by this provider protocol")
+	ErrStructuredOutputUnsupported  = errors.New("structured output is not supported by this provider protocol")
 )
 
 func validateID(v string) error {
