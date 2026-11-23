@@ -117,8 +117,11 @@ func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
 		credentialID string
 		key          string
 	}{{
-		id: "json-endpoint", url: server.URL + "/v1", priority: 1,
-		credentialID: "json-credential", key: "json-secret",
+		id:           "json-endpoint",
+		url:          server.URL + "/v1",
+		priority:     1,
+		credentialID: "json-credential",
+		key:          "json-secret",
 	}})
 	router, err := NewRouter(service)
 	if err != nil {
