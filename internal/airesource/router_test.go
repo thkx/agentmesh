@@ -105,7 +105,7 @@ func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
 			t.Errorf("response_format.type = %q, want json_object", format["type"])
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\\"ok\\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
+		_, _ = w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
 	}))
 	defer server.Close()
 
