@@ -143,7 +143,10 @@ func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, mode
 }
 
 func mapResponseFormat(format *modelgateway.ResponseFormat) *ResponseFormat {
- if format == nil { return nil }; return &ResponseFormat{Type:format.Type}
+ if format == nil {
+		return nil
+	}
+	return &ResponseFormat{Type: format.Type}
 }
 
 func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
