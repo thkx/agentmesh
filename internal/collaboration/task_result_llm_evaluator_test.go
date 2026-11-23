@@ -61,6 +61,7 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 	}
 	if model.request.ModelID != "reviewer-model" || model.request.MaxOutputTokens != 1024 {
 		t.Fatalf("unexpected model request: %+v", model.request)
+	if model.request.ResponseFormat == nil || model.request.ResponseFormat.Type != "json_object" { t.Fatalf("expected JSON response format, got %+v", model.request.ResponseFormat) }
 	}
 }
 
