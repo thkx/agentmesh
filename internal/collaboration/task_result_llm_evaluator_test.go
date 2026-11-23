@@ -218,13 +218,13 @@ func TestLLMTaskResultEvaluatorUsesLatestVerificationOnly(t *testing.T) {
 	}
 }
 
-
 func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	model := &fixedEvaluationModel{
 		content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`,
 		response: &modelgateway.GenerateResponse{
-			ID: "response-plain-review", ProviderID: provider.ID("provider-deepseek"),
-			ModelID: "deepseek-reviewer-model",
+			ID:           "response-plain-review",
+			ProviderID:   provider.ID("provider-deepseek"),
+			ModelID:      "deepseek-reviewer-model",
 			Usage: modelgateway.Usage{InputTokens: 321, OutputTokens: 87, TotalTokens: 408},
 		},
 	}
@@ -273,14 +273,13 @@ func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	}
 }
 
-
 func TestLLMTaskResultEvaluatorTreatsLengthFinishReasonAsTruncated(t *testing.T) {
 	model := &fixedEvaluationModel{
 		content: `{"outcome":"accepted","reason":"The result covers all requirements.","confidence":0.99,"evidence_refs":["task:task-plain","result:result-plain"]}`,
 		response: &modelgateway.GenerateResponse{
-			ID: "response-truncated-review",
-			ProviderID: provider.ID("provider-deepseek"),
-			ModelID: "deepseek-reviewer-model",
+			ID:           "response-truncated-review",
+			ProviderID:   provider.ID("provider-deepseek"),
+			ModelID:      "deepseek-reviewer-model",
 			FinishReason: modelgateway.FinishReasonLength,
 			Usage: modelgateway.Usage{InputTokens: 400, OutputTokens: 1024, TotalTokens: 1424},
 		},
