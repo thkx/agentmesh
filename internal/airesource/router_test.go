@@ -89,21 +89,54 @@ func addRouterTestModel(t *testing.T, service *Service, modelID, modelKey string
 
 
 func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
- srv:=httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-  var p map[string]json.RawMessage; if e:=json.NewDecoder(r.Body).Decode(&p);e!=nil{t.Error(e);w.WriteHeader(400);return}
-  var rf map[string]string;if e:=json.Unmarshal(p["response_format"],&rf);e!=nil{t.Error(e);w.WriteHeader(400);return}
-  if rf["type"]!="json_object"{t.Errorf("got response_format %#v",rf)}
-  w.Header().Set("Content-Type","application/json")
-  _,_=w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
- }))
- defer srv.Close()
- s,_:=newRouterTestEnvironment(t)
- addRouterTestModel(t,s,"json-model","json-model-key",[]struct{id,url string;priority int;credentialID,key string}{{"json-endpoint",srv.URL+"/v1",1,"json-credential","json-secret"}})
- router,e:=NewRouter(s);if e!=nil{t.Fatal(e)}
- bridge:=NewModelGatewayRouter(s,router)
- got,e:=bridge.Generate(context.Background(),modelgateway.GenerateRequest{ModelID:"json-model",ProviderModel:"json-model-key",Messages:[]modelgateway.Message{{Role:modelgateway.RoleUser,Content:"JSON"}} ,ResponseFormat:&modelgateway.ResponseFormat{Type:"json_object"}})
- if e!=nil{t.Fatal(e)}
- if got.Content!=`{"ok":true}`{t.Fatalf("content=%q",got.Content)}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var format map[string]string
+		if err := json.Unmarshal(payload["response_format"], &format); err != nil {
+			t.Errorf("decode response format: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if format["type"] != "json_object" {
+			t.Errorf("response_format.type = %q, want json_object", format["type"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\\"ok\\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
+	}))
+	defer server.Close()
+
+	service, _ := newRouterTestEnvironment(t)
+	addRouterTestModel(t, service, "json-model", "json-model-key", []struct {
+		id           string
+		url          string
+		priority     int
+		credentialID string
+		key          string
+	}{{
+		id: "json-endpoint", url: server.URL + "/v1", priority: 1,
+		credentialID: "json-credential", key: "json-secret",
+	}})
+	router, err := NewRouter(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewModelGatewayRouter(service, router)
+	response, err := bridge.Generate(context.Background(), modelgateway.GenerateRequest{
+		ModelID: "json-model", ProviderModel: "json-model-key",
+		Messages: []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "JSON"}},
+		ResponseFormat: &modelgateway.ResponseFormat{Type: "json_object"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Content != `{"ok":true}` {
+		t.Fatalf("content = %q", response.Content)
+	}
 }
 
 func TestRouterFailsOverAndPersistsHealthAndUsage(t *testing.T) {
