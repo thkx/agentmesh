@@ -130,7 +130,7 @@ func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
 	bridge := NewModelGatewayRouter(service, router)
 	response, err := bridge.Generate(context.Background(), modelgateway.GenerateRequest{
 		ModelID: "json-model", ProviderModel: "json-model-key",
-		Messages: []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "JSON"}},
+		Messages:       []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "JSON"}},
 		ResponseFormat: &modelgateway.ResponseFormat{Type: "json_object"},
 	})
 	if err != nil {
