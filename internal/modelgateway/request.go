@@ -29,7 +29,9 @@ type Message struct {
 }
 
 // ResponseFormat requests a constrained response format from compatible providers.
-type ResponseFormat struct { Type string `json:"type"` }
+type ResponseFormat struct {
+	Type string `json:"type"`
+}
 
 type GenerateRequest struct {
 	// ModelID is the internal AgentMesh model identifier.
@@ -48,7 +50,7 @@ type GenerateRequest struct {
 
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 	StopSequences   []string `json:"stop_sequences,omitempty"`
-	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
 
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	Tools      []ToolDefinition  `json:"tools,omitempty"`
