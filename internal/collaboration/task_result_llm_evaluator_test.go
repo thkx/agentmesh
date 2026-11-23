@@ -222,10 +222,10 @@ func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	model := &fixedEvaluationModel{
 		content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`,
 		response: &modelgateway.GenerateResponse{
-			ID:           "response-plain-review",
-			ProviderID:   provider.ID("provider-deepseek"),
-			ModelID:      "deepseek-reviewer-model",
-			Usage: modelgateway.Usage{InputTokens: 321, OutputTokens: 87, TotalTokens: 408},
+			ID:         "response-plain-review",
+			ProviderID: provider.ID("provider-deepseek"),
+			ModelID:    "deepseek-reviewer-model",
+			Usage:      modelgateway.Usage{InputTokens: 321, OutputTokens: 87, TotalTokens: 408},
 		},
 	}
 	resolvedAgentID := ""
@@ -281,7 +281,7 @@ func TestLLMTaskResultEvaluatorTreatsLengthFinishReasonAsTruncated(t *testing.T)
 			ProviderID:   provider.ID("provider-deepseek"),
 			ModelID:      "deepseek-reviewer-model",
 			FinishReason: modelgateway.FinishReasonLength,
-			Usage: modelgateway.Usage{InputTokens: 400, OutputTokens: 1024, TotalTokens: 1424},
+			Usage:        modelgateway.Usage{InputTokens: 400, OutputTokens: 1024, TotalTokens: 1424},
 		},
 	}
 	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
@@ -293,7 +293,7 @@ func TestLLMTaskResultEvaluatorTreatsLengthFinishReasonAsTruncated(t *testing.T)
 
 	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
 		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
-		Task: collaboration.Task{ID: "task-plain", Description: "Complete all requirements."},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Complete all requirements."},
 		Result: collaboration.TaskResult{
 			ID: "result-plain", RecipientAgentID: "reviewer-agent",
 			Result: json.RawMessage(`{"content":"complete"}`),
