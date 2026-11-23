@@ -137,13 +137,13 @@ type ResponseFormat struct {
 }
 
 type GenerateRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Temperature *float64  `json:"temperature,omitempty"`
-	TopP        *float64  `json:"top_p,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Temperature    *float64        `json:"temperature,omitempty"`
+	TopP           *float64        `json:"top_p,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Stream         bool            `json:"stream,omitempty"`
 	Tools       []Tool    `json:"tools,omitempty"`
 	ToolChoice  string    `json:"tool_choice,omitempty"`
 }
