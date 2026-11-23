@@ -166,8 +166,12 @@ func normalizeMessages(messages []Message) ([]map[string]any, string) {
 	return out, strings.Join(system, "\n\n")
 }
 func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateResponse, int, error) {
-	if len(req.Tools) > 0 && c.Provider.Protocol != ProtocolOpenAI { return GenerateResponse{}, 0, ErrNativeToolCallingUnsupported }
-	if req.ResponseFormat != nil && c.Provider.Protocol != ProtocolOpenAI { return GenerateResponse{}, 0, ErrStructuredOutputUnsupported }
+	if len(req.Tools) > 0 && c.Provider.Protocol != ProtocolOpenAI {
+		return GenerateResponse{}, 0, ErrNativeToolCallingUnsupported
+	}
+	if req.ResponseFormat != nil && c.Provider.Protocol != ProtocolOpenAI {
+		return GenerateResponse{}, 0, ErrStructuredOutputUnsupported
+	}
 	timeout := time.Duration(c.Endpoint.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 60 * time.Second
