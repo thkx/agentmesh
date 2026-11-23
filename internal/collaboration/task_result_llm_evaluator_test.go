@@ -59,7 +59,7 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 	if assessment.Outcome != "accepted" {
 		t.Fatalf("expected grounded acceptance, got %+v", assessment)
 	}
-	if model.request.ModelID != "reviewer-model" || model.request.MaxOutputTokens != 512 {
+	if model.request.ModelID != "reviewer-model" || model.request.MaxOutputTokens != 1024 {
 		t.Fatalf("unexpected model request: %+v", model.request)
 	}
 }
@@ -267,6 +267,49 @@ func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
 	}
 	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked || assessment.ReviewerModelID != "deepseek-reviewer-model" {
 		t.Fatalf("review model provenance missing: %+v", assessment)
+	}
+}
+
+
+func TestLLMTaskResultEvaluatorTreatsLengthFinishReasonAsTruncated(t *testing.T) {
+	model := &fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"The result covers all requirements.","confidence":0.99,"evidence_refs":["task:task-plain","result:result-plain"]}`,
+		response: &modelgateway.GenerateResponse{
+			ID: "response-truncated-review",
+			ProviderID: provider.ID("provider-deepseek"),
+			ModelID: "deepseek-reviewer-model",
+			FinishReason: modelgateway.FinishReasonLength,
+			Usage: modelgateway.Usage{InputTokens: 400, OutputTokens: 1024, TotalTokens: 1424},
+		},
+	}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "deepseek-reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task: collaboration.Task{ID: "task-plain", Description: "Complete all requirements."},
+		Result: collaboration.TaskResult{
+			ID: "result-plain", RecipientAgentID: "reviewer-agent",
+			Result: json.RawMessage(`{"content":"complete"}`),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("length-truncated response must require human review, got %+v", assessment)
+	}
+	if assessment.Reason != "reviewer output was truncated (finish_reason=length); human review is required" {
+		t.Fatalf("unexpected truncation reason: %q", assessment.Reason)
+	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked ||
+		assessment.ModelResponseID != "response-truncated-review" ||
+		assessment.OutputTokens != 1024 {
+		t.Fatalf("model provenance must be preserved for truncated output: %+v", assessment)
 	}
 }
 
