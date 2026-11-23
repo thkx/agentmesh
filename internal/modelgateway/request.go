@@ -28,6 +28,9 @@ type Message struct {
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 }
 
+// ResponseFormat requests a constrained response format from compatible providers.
+type ResponseFormat struct { Type string `json:"type"` }
+
 type GenerateRequest struct {
 	// ModelID is the internal AgentMesh model identifier.
 	ModelID string `json:"model_id"`
@@ -45,6 +48,7 @@ type GenerateRequest struct {
 
 	MaxOutputTokens int      `json:"max_output_tokens,omitempty"`
 	StopSequences   []string `json:"stop_sequences,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 
 	Metadata   map[string]string `json:"metadata,omitempty"`
 	Tools      []ToolDefinition  `json:"tools,omitempty"`
@@ -133,9 +137,7 @@ func (r GenerateRequest) Validate() error {
 		}
 		seenTools[tool.Name] = struct{}{}
 	}
-	if r.MaxOutputTokens < 0 {
-		return ErrInvalidMaxTokens
-	}
-
+	if r.MaxOutputTokens < 0 { return ErrInvalidMaxTokens }
+	if r.ResponseFormat != nil && r.ResponseFormat.Type != "json_object" { return errors.New("response_format type must be json_object") }
 	return nil
 }
