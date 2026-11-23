@@ -58,13 +58,13 @@ type GenerateRequest struct {
 }
 
 var (
-	ErrMissingModelID     = errors.New("model id is required")
-	ErrMissingMessages    = errors.New("at least one message is required")
-	ErrInvalidMessageRole = errors.New("invalid message role")
-	ErrEmptyMessage       = errors.New("message content is empty")
-	ErrInvalidTemperature = errors.New("temperature must be between 0 and 2")
-	ErrInvalidTopP        = errors.New("top_p must be between 0 and 1")
-	ErrInvalidMaxTokens   = errors.New("max output tokens must not be negative")
+	ErrMissingModelID      = errors.New("model id is required")
+	ErrMissingMessages     = errors.New("at least one message is required")
+	ErrInvalidMessageRole  = errors.New("invalid message role")
+	ErrEmptyMessage        = errors.New("message content is empty")
+	ErrInvalidTemperature  = errors.New("temperature must be between 0 and 2")
+	ErrInvalidTopP         = errors.New("top_p must be between 0 and 1")
+	ErrInvalidMaxTokens    = errors.New("max output tokens must not be negative")
 )
 
 func (r GenerateRequest) Validate() error {
@@ -139,7 +139,11 @@ func (r GenerateRequest) Validate() error {
 		}
 		seenTools[tool.Name] = struct{}{}
 	}
-	if r.MaxOutputTokens < 0 { return ErrInvalidMaxTokens }
-	if r.ResponseFormat != nil && r.ResponseFormat.Type != "json_object" { return errors.New("response_format type must be json_object") }
+	if r.MaxOutputTokens < 0 {
+		return ErrInvalidMaxTokens
+	}
+	if r.ResponseFormat != nil && r.ResponseFormat.Type != "json_object" {
+		return errors.New("response_format type must be json_object")
+	}
 	return nil
 }
