@@ -183,6 +183,14 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 	var err error
 	switch c.Provider.Protocol {
 	case ProtocolOpenAI:
+		// OpenAI-compatible chat completions require system/developer
+		// instructions to be represented as messages. normalizeMessages
+		// extracts them for Anthropic/Gemini, so restore them here before
+		// sending the request. Dropping this message silently discards
+		// evaluator and agent system prompts.
+		if system != "" {
+			messages = append([]map[string]any{{"role": "system", "content": system}}, messages...)
+		}
 		payload := map[string]any{"model": c.UpstreamModel, "messages": messages, "stream": false}
 		if req.Temperature != nil {
 			payload["temperature"] = *req.Temperature
