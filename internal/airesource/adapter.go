@@ -186,8 +186,12 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 		if req.TopP != nil {
 			payload["top_p"] = *req.TopP
 		}
-		if req.MaxTokens > 0 { payload["max_tokens"] = req.MaxTokens }
-		if req.ResponseFormat != nil { payload["response_format"] = req.ResponseFormat }
+		if req.MaxTokens > 0 {
+			payload["max_tokens"] = req.MaxTokens
+		}
+		if req.ResponseFormat != nil {
+			payload["response_format"] = req.ResponseFormat
+		}
 		if len(req.Tools) > 0 {
 			payload["tools"] = req.Tools
 			if req.ToolChoice != "" {
