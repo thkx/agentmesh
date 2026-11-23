@@ -94,7 +94,7 @@ func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
   var rf map[string]string;if e:=json.Unmarshal(p["response_format"],&rf);e!=nil{t.Error(e);w.WriteHeader(400);return}
   if rf["type"]!="json_object"{t.Errorf("got response_format %#v",rf)}
   w.Header().Set("Content-Type","application/json")
-  _,_=w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\\"ok\\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
+  _,_=w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
  }))
  defer srv.Close()
  s,_:=newRouterTestEnvironment(t)
