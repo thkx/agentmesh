@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -184,6 +185,50 @@ func (s *Service) RetryAssignment(ctx context.Context, id, requestedBy string) (
 	}
 	if (status != "expired" && status != "rejected") || retries >= maxRetries {
 		return Assignment{}, ErrConflict
+	}
+	// A collaboration retry creates a new Runtime identity, but it is safe only
+	// when every prior Runtime attempt is terminally failed and has no tool intent.
+	// Never replay a job whose side effects may already have escaped the process.
+	for attempt := 0; attempt <= retries; attempt++ {
+		runtimeTaskID := "collab-" + id
+		if attempt > 0 {
+			runtimeTaskID += fmt.Sprintf("-r%d", attempt)
+		}
+		var jobStatus string
+		jobErr := tx.QueryRowContext(ctx, "SELECT status FROM agent_jobs WHERE task_id=?", runtimeTaskID).Scan(&jobStatus)
+		if errors.Is(jobErr, sql.ErrNoRows) {
+			continue
+		}
+		if jobErr != nil {
+			return Assignment{}, jobErr
+		}
+		if jobStatus != "failed" {
+			return Assignment{}, ErrConflict
+		}
+		var toolInvocations int
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_tool_invocations WHERE task_id=?", runtimeTaskID).Scan(&toolInvocations); err != nil {
+			return Assignment{}, err
+		}
+		if toolInvocations > 0 {
+			return Assignment{}, ErrConflict
+		}
+		var stateJSON sql.NullString
+		stateErr := tx.QueryRowContext(ctx, "SELECT state_json FROM agent_task_states WHERE task_id=?", runtimeTaskID).Scan(&stateJSON)
+		if stateErr != nil && !errors.Is(stateErr, sql.ErrNoRows) {
+			return Assignment{}, stateErr
+		}
+		if stateJSON.Valid {
+			var state struct {
+				Result struct {
+					Status    string `json:"status"`
+					ToolCalls int    `json:"tool_calls"`
+					} `json:"result"`
+			}
+			if jsonErr := json.Unmarshal([]byte(stateJSON.String), &state); jsonErr != nil ||
+				state.Result.Status != "failed" || state.Result.ToolCalls != 0 {
+				return Assignment{}, ErrConflict
+			}
+		}
 	}
 	var existingResults int
 	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM agent_task_results WHERE assignment_id=?", id).Scan(&existingResults); err != nil {
