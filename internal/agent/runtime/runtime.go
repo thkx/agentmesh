@@ -365,6 +365,16 @@ func (r *Runtime) Run(ctx context.Context, task dom.Task) (result dom.Result, er
 		}
 		ctl, e := parseControl(resp.Content)
 		if e != nil {
+			// In the non-native-tool path, plain assistant text is a valid final
+			// answer. Only JSON-looking output is treated as a control envelope;
+			// malformed control JSON must never be reinterpreted as user content.
+			if !looksLikeControlOutput(resp.Content) {
+				result.Content = strings.TrimSpace(resp.Content)
+				if result.Content == "" {
+					err = dom.ErrInvalidModelOutput
+				}
+				return
+			}
 			err = e
 			return
 		}
@@ -551,12 +561,21 @@ func (r *Runtime) systemPrompt(workspace string, approved []string, native bool)
 	specs := r.tool.Registry().List()
 	b, _ := json.Marshal(specs)
 	a, _ := json.Marshal(approved)
-	protocol := "Return exactly one JSON object and no markdown. To call a tool: {\"type\":\"tool_call\",\"tool\":\"tool.name\",\"arguments\":{...}}. To finish: {\"type\":\"final\",\"content\":\"answer\"}."
+	protocol := "To call a tool, return exactly one JSON object and no markdown: {\"type\":\"tool_call\",\"tool\":\"tool.name\",\"arguments\":{...}}. To finish, you may return either plain text or exactly one JSON object: {\"type\":\"final\",\"content\":\"answer\"}. Never put tool instructions in plain text; only a valid tool_call object can invoke a tool."
 	if native {
 		protocol = "Use provider-native function calling for tools. When no tool is needed, return a normal assistant response containing the final answer."
 	}
 	return "You are an AgentMesh agent. You may use only the tools listed below. " + protocol + " Do not invent tool results. Read tools may be used normally. Write and execute tools may only be called when their exact names appear in approved_tools; otherwise do not attempt them. approved_tools: " + string(a) + ". Tools: " + string(b) + ". Workspace ID: " + workspace
 }
+func looksLikeControlOutput(s string) bool {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimSpace(strings.TrimPrefix(s, "```json"))
+		s = strings.TrimSpace(strings.TrimPrefix(s, "```"))
+	}
+	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
+}
+
 func parseControl(s string) (control, error) {
 	var c control
 	s = strings.TrimSpace(s)
