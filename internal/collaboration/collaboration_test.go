@@ -1377,7 +1377,6 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 	}
 }
 
-
 func TestTaskResultAssessmentPersistsReviewerModelProvenance(t *testing.T) {
 	ctx := context.Background()
 	service, db := testService(t)
