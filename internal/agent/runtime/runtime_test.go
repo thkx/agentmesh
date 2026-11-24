@@ -240,7 +240,7 @@ func TestRuntimeAllowsSafeRetryBeforeAnyToolInvocation(t *testing.T) {
 }
 
 func TestRuntimeDoesNotRetryTaskAfterToolInvocation(t *testing.T) {
-	rt, _ := newTestRuntime(t, `{"type":"tool_call","tool":"test.echo","arguments":{"value":"once"}}`, "invalid response")
+	rt, _ := newTestRuntime(t, `{"type":"tool_call","tool":"test.echo","arguments":{"value":"once"}}`, `{"type":`)
 	task := dom.Task{ID: "unsafe-retry", ModelID: "model-1", WorkspaceID: "ws-1", Prompt: "do tool"}
 	if _, err := rt.Run(context.Background(), task); err == nil {
 		t.Fatal("expected invalid model output")
