@@ -72,8 +72,20 @@ func TestRuntimeToolCallThenFinal(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", got)
 	}
 }
-func TestRuntimeRejectsInvalidModelControl(t *testing.T) {
-	rt, _ := newTestRuntime(t, "not json")
+func TestRuntimeAcceptsPlainTextFinalResponse(t *testing.T) {
+	const answer = "# Webhook idempotency\n\nPersist the event key with a unique constraint."
+	rt, _ := newTestRuntime(t, answer)
+	got, err := rt.Run(context.Background(), dom.Task{ID: "plain-text-task", ModelID: "model-1", WorkspaceID: "ws-1", Prompt: "explain webhook idempotency"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != dom.StatusSucceeded || got.Content != answer || got.ToolCalls != 0 {
+		t.Fatalf("unexpected plain-text result: %+v", got)
+	}
+}
+
+func TestRuntimeRejectsMalformedControlJSON(t *testing.T) {
+	rt, _ := newTestRuntime(t, `{"type":`)
 	_, err := rt.Run(context.Background(), dom.Task{ID: "task-1", ModelID: "model-1", WorkspaceID: "ws-1", Prompt: "do it"})
 	if !errors.Is(err, dom.ErrInvalidModelOutput) {
 		t.Fatalf("expected invalid output, got %v", err)
