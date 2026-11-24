@@ -830,6 +830,20 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 	if got.Status != "pending" {
 		t.Fatalf("status=%s", got.Status)
 	}
+	dispatcher, err := collaboration.NewDispatcher(db.DB, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
+	var retryInboxCount int
+	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assignment_retried'", a.ID).Scan(&retryInboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if retryInboxCount != 1 {
+		t.Fatalf("assignment retry event was not routed to its agent: %d", retryInboxCount)
+	}
 	for i := 0; i < 3; i++ {
 		claimed, err = s.ClaimAssignment(ctx, as.ID, "runner", time.Minute)
 		if err != nil {
@@ -846,6 +860,57 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 	}
 	if _, err = s.RetryAssignment(ctx, as.ID, "operator"); !errors.Is(err, collaboration.ErrConflict) {
 		t.Fatalf("retry limit: %v", err)
+	}
+}
+
+func TestRetryAssignmentRejectsPriorToolSideEffects(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Unsafe Retry", Slug: "unsafe-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, Title: "Do not replay side effects"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := s.AssignTask(ctx, task.ID, a.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimAssignment(ctx, assignment.ID, "retry-safety-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailAssignmentWithRetry(ctx, claimed.ID, "retry-safety-test", claimed.ClaimVersion, "runtime failed", true); err != nil {
+		t.Fatal(err)
+	}
+	runtimeTaskID := "collab-" + assignment.ID
+	now := time.Now().UnixNano()
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO agent_jobs
+		(id,task_id,task_json,status,attempts,max_attempts,available_at,created_at,updated_at)
+		VALUES(?,?,?,'failed',1,3,?,?,?)`, "unsafe-retry-job", runtimeTaskID, `{"id":"`+runtimeTaskID+`"}`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO agent_tool_invocations
+		(idempotency_key,task_id,tool_call_id,tool_name,status,created_at,updated_at)
+		VALUES(?,?,? ,?,'started',?,?)`, "unsafe-retry-tool", runtimeTaskID, "call-1", "file.write", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RetryAssignment(ctx, assignment.ID, "operator"); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("retry must reject prior tool side effects, got %v", err)
+	}
+	var status string
+	if err = db.DB.QueryRowContext(ctx, "SELECT status FROM task_assignments WHERE id=?", assignment.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "expired" {
+		t.Fatalf("unsafe retry mutated assignment status: %s", status)
 	}
 }
 
