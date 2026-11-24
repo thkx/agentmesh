@@ -252,7 +252,7 @@ func (d *Dispatcher) recordDispatchFailure(ctx context.Context, id string, cause
 // defining and testing its recipient semantics here.
 func routeRecipients(ctx context.Context, tx *sql.Tx, event Event) ([]string, error) {
 	switch event.Type {
-	case "task.assigned":
+	case "task.assigned", "task.assignment_retried":
 		var p struct {
 			AgentID string `json:"agent_id"`
 		}
