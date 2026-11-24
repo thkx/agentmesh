@@ -221,7 +221,7 @@ func (s *Service) RetryAssignment(ctx context.Context, id, requestedBy string) (
 				Result struct {
 					Status    string `json:"status"`
 					ToolCalls int    `json:"tool_calls"`
-					} `json:"result"`
+				} `json:"result"`
 			}
 			if jsonErr := json.Unmarshal([]byte(stateJSON.String), &state); jsonErr != nil ||
 				state.Result.Status != "failed" || state.Result.ToolCalls != 0 {
