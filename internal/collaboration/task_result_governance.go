@@ -197,13 +197,11 @@ func (s *Service) RetryAssignment(ctx context.Context, id, requestedBy string) (
 		}
 		var jobStatus string
 		jobErr := tx.QueryRowContext(ctx, "SELECT status FROM agent_jobs WHERE task_id=?", runtimeTaskID).Scan(&jobStatus)
-		if errors.Is(jobErr, sql.ErrNoRows) {
-			continue
-		}
-		if jobErr != nil {
+		jobExists := jobErr == nil
+		if jobErr != nil && !errors.Is(jobErr, sql.ErrNoRows) {
 			return Assignment{}, jobErr
 		}
-		if jobStatus != "failed" {
+		if jobExists && jobStatus != "failed" {
 			return Assignment{}, ErrConflict
 		}
 		var toolInvocations int
