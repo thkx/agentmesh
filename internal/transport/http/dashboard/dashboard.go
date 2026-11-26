@@ -136,6 +136,7 @@ type pageData struct {
 	WorkflowRows                []workflowView
 	WorkflowRuns                []workflowRunListView
 	WorkflowRun                 *workflowRunDetailView
+	AgentRun                    *agentRunDetailView
 	Credential                  *credentialView
 	FilterStatus                string
 	FilterKind                  string
@@ -187,6 +188,11 @@ type modelView struct {
 	Streaming                                         bool
 }
 type agentRunView struct{ ID, TaskID, Status, CreatedAt, ExecutionID string }
+type agentRunDetailView struct {
+	ID, DefinitionID, AgentName, TaskID, Status                             string
+	Error, Content, CreatedAt, StartedAt, FinishedAt, Duration, ExecutionID string
+	Steps, ToolCalls                                                        int
+}
 type agentOption struct{ ID, Name, Role, Status, Capabilities string }
 type identityView struct{ ID, WorkspaceID, DefinitionID, Name, Description, Role, Status, Capabilities string }
 type taskView struct {
@@ -328,6 +334,8 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/logout", h.requireSession(), h.logout)
 	g.GET("", h.requireSession(), h.overview)
 	g.GET("/", h.requireSession(), h.overview)
+	g.GET("/new-task", h.requireSession(), h.newTask)
+	g.POST("/new-task/agent", h.requireSession(), h.submitNewAgentTask)
 	g.GET("/providers", h.requireSession(), h.providers)
 	g.POST("/providers", h.requireSession(), h.createProvider)
 	g.POST("/providers/:id/update", h.requireSession(), h.updateProvider)
@@ -356,6 +364,7 @@ func (h *Handler) RegisterRoutes(r *gin.Engine) {
 	g.POST("/agents/:id/delete", h.requireSession(), h.deleteAgent)
 	g.GET("/workflows", h.requireSession(), h.workflows)
 	g.GET("/workflow-runs/:id", h.requireSession(), h.workflowRun)
+	g.GET("/agent-runs/:id", h.requireSession(), h.agentRun)
 	g.POST("/workflows", h.requireSession(), h.createWorkflowTemplate)
 	g.POST("/workspaces/quickstart", h.requireSession(), h.createQuickstartWorkspace)
 	g.POST("/workflows/quickstart", h.requireSession(), h.createQuickstartWorkflowTemplate)
@@ -690,6 +699,152 @@ func (h *Handler) usage(c *gin.Context) {
 		}
 	}
 	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) newTask(c *gin.Context) {
+	data := pageData{Title: "Start a task", Active: "new-task", AgentRows: []agentView{}, WorkspaceOptions: []workspaceOption{}}
+	enabledProviders := make(map[domainprovider.ID]bool)
+	if h.providerRegistry != nil {
+		for _, provider := range h.providerRegistry.List() {
+			if provider.Enabled {
+				enabledProviders[provider.ID] = true
+			}
+		}
+	}
+	enabledModels := make(map[string]bool)
+	if h.modelRegistry != nil {
+		for _, model := range h.modelRegistry.List() {
+			if model.Enabled && enabledProviders[model.ProviderID] {
+				enabledModels[model.ID] = true
+			}
+		}
+	}
+	if h.agentCatalog != nil {
+		items, err := h.agentCatalog.List(c.Request.Context())
+		if err != nil {
+			data.Error = "Could not load Agents. Open the Agents page and check the configuration."
+		} else {
+			for _, item := range items {
+				if !item.Enabled || !enabledModels[item.ModelID] {
+					continue
+				}
+				data.AgentRows = append(data.AgentRows, agentView{ID: item.ID, Name: item.Name, ModelID: item.ModelID, Description: item.Description, Enabled: item.Enabled})
+			}
+		}
+	}
+	if h.collaboration != nil {
+		workspaces, err := h.collaboration.ListWorkspaces(c.Request.Context())
+		if err != nil {
+			data.Error = "Could not load workspaces. Check the workspace configuration."
+		} else {
+			for _, item := range workspaces {
+				data.WorkspaceOptions = append(data.WorkspaceOptions, workspaceOption{ID: item.ID, Name: item.Name})
+			}
+		}
+	}
+	h.render(c, data, http.StatusOK)
+}
+
+func (h *Handler) submitNewAgentTask(c *gin.Context) {
+	if !sameOrigin(c.Request) {
+		c.AbortWithStatus(http.StatusForbidden)
+		return
+	}
+	if h.agentCatalog == nil || h.workspaces == nil || h.modelRegistry == nil || h.providerRegistry == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	agentID := strings.TrimSpace(c.PostForm("agent_id"))
+	workspaceID := strings.TrimSpace(c.PostForm("workspace_id"))
+	prompt := strings.TrimSpace(c.PostForm("prompt"))
+	if agentID == "" || workspaceID == "" || prompt == "" || len(prompt) > 10000 {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-input")
+		return
+	}
+	agent, err := h.agentCatalog.Get(c.Request.Context(), agentID)
+	if err != nil || !agent.Enabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
+		return
+	}
+	model, ok := h.modelRegistry.Get(agent.ModelID)
+	if !ok || !model.Enabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
+		return
+	}
+	provider, err := h.providerRegistry.Get(model.ProviderID)
+	if err != nil || !provider.Enabled {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-agent")
+		return
+	}
+	if _, err = h.workspaces.Ensure(c.Request.Context(), workspaceID); err != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-workspace")
+		return
+	}
+	runResult, runErr := h.agentCatalog.Run(c.Request.Context(), agentID, workspaceID, prompt)
+	if runResult.TaskID != "" {
+		if runID := h.agentRunIDForTask(c.Request.Context(), runResult.TaskID); runID != "" {
+			c.Redirect(http.StatusSeeOther, "/dashboard/agent-runs/"+url.PathEscape(runID))
+			return
+		}
+	}
+	if runErr != nil {
+		c.Redirect(http.StatusSeeOther, "/dashboard/new-task?error=new-task-run")
+		return
+	}
+	c.Redirect(http.StatusSeeOther, "/dashboard/agents?message=agent-run-"+string(runResult.Status))
+}
+
+func (h *Handler) agentRunIDForTask(ctx context.Context, taskID string) string {
+	if h.db == nil || taskID == "" {
+		return ""
+	}
+	var id string
+	if err := h.db.QueryRowContext(ctx, "SELECT id FROM agent_runs WHERE task_id=?", taskID).Scan(&id); err != nil {
+		return ""
+	}
+	return id
+}
+
+func (h *Handler) agentRun(c *gin.Context) {
+	if h.agentCatalog == nil {
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+	run, err := h.agentCatalog.GetRun(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	detail := &agentRunDetailView{
+		ID: run.ID, DefinitionID: run.DefinitionID, TaskID: run.TaskID,
+		Status: run.Status, Error: run.Error,
+		CreatedAt:   run.CreatedAt.UTC().Format(time.RFC3339),
+		ExecutionID: h.executionForTask(c.Request.Context(), run.TaskID),
+	}
+	if definition, getErr := h.agentCatalog.Get(c.Request.Context(), run.DefinitionID); getErr == nil {
+		detail.AgentName = definition.Name
+	}
+	if run.FinishedAt != nil {
+		detail.FinishedAt = run.FinishedAt.UTC().Format(time.RFC3339)
+	}
+	if run.Result != nil {
+		detail.Content = run.Result.Content
+		detail.Steps = run.Result.Steps
+		detail.ToolCalls = run.Result.ToolCalls
+		if !run.Result.StartedAt.IsZero() {
+			detail.StartedAt = run.Result.StartedAt.UTC().Format(time.RFC3339)
+		}
+		if !run.Result.FinishedAt.IsZero() {
+			detail.FinishedAt = run.Result.FinishedAt.UTC().Format(time.RFC3339)
+		}
+		if detail.Error == "" {
+			detail.Error = run.Result.Error
+		}
+		if !run.Result.StartedAt.IsZero() && !run.Result.FinishedAt.IsZero() {
+			detail.Duration = run.Result.FinishedAt.Sub(run.Result.StartedAt).Round(time.Millisecond).String()
+		}
+	}
+	h.render(c, pageData{Title: "Agent Run " + run.ID, Active: "agents", AgentRun: detail}, http.StatusOK)
 }
 
 func (h *Handler) overview(c *gin.Context) {
@@ -2189,6 +2344,14 @@ func (h *Handler) render(c *gin.Context, data pageData, status int) {
 		data.Error = "The selected model is no longer enabled. Enable a model and try again."
 	case "workflow-quickstart-workspace":
 		data.Error = "The selected workspace could not be found. Choose an existing workspace and try again."
+	case "new-task-input":
+		data.Error = "Choose an Agent and workspace, then describe the task in 10,000 characters or fewer."
+	case "new-task-agent":
+		data.Error = "That Agent is unavailable or disabled. Choose an enabled Agent."
+	case "new-task-workspace":
+		data.Error = "That workspace is unavailable. Choose an existing workspace."
+	case "new-task-run":
+		data.Error = "The Agent could not start this task. Check its model and configuration, then try again."
 	case "":
 	default:
 		data.Error = "The requested operation could not be completed. Check the submitted values and current object state."

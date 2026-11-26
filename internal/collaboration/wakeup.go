@@ -152,7 +152,7 @@ func (w *WakeupWorker) runOne(ctx context.Context) (bool, error) {
 func (w *WakeupWorker) handle(ctx context.Context, lease InboxLease) error {
 	var processErr error
 	switch lease.EventType {
-	case "task.assigned":
+	case "task.assigned", "task.assignment_retried":
 		var payload struct {
 			TaskID  string `json:"task_id"`
 			AgentID string `json:"agent_id"`
@@ -305,8 +305,8 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if err != nil {
 		return fmt.Errorf("agent runtime binding: %w", err)
 	}
-	if !binding.Enabled || !binding.Definition.Enabled {
-		return errors.New("agent runtime binding or definition is disabled")
+	if !binding.Enabled {
+		return errors.New("agent runtime binding is disabled")
 	}
 	currentDefinition, definitionErr := w.definitions.Get(ctx, binding.DefinitionID)
 	if definitionErr != nil {
@@ -315,6 +315,9 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if !currentDefinition.Enabled {
 		return errors.New("bound agent definition has been disabled")
 	}
+	// GetRuntimeBinding may contain a previously loaded Definition snapshot.
+	// Always build new runtime tasks from the latest catalog version.
+	binding.Definition = currentDefinition
 	if _, err = w.workspaces.Resolve(binding.RuntimeWorkspaceID); err != nil {
 		return fmt.Errorf("resolve bound runtime workspace: %w", err)
 	}
@@ -322,7 +325,16 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if err != nil {
 		return err
 	}
+	var retryCount int
+	if err = w.service.db.QueryRowContext(ctx, "SELECT retry_count FROM task_assignments WHERE id=?", assignment.ID).Scan(&retryCount); err != nil {
+		return fmt.Errorf("load assignment retry count: %w", err)
+	}
 	taskID := "collab-" + assignment.ID
+	idempotencyKey := "collaboration-assignment:" + assignment.ID
+	if retryCount > 0 {
+		taskID += fmt.Sprintf("-r%d", retryCount)
+		idempotencyKey += fmt.Sprintf(":retry:%d", retryCount)
+	}
 	temperature := binding.Definition.Temperature
 	prompt := task.Title
 	if strings.TrimSpace(task.Description) != "" {
@@ -360,7 +372,7 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if err != nil {
 		return err
 	}
-	execution, err := w.executions.Submit(ctx, manager.SubmitRequest{Kind: execdom.KindAgent, Runtime: execdom.RuntimeAgent, TaskID: taskID, Input: input, IdempotencyKey: "collaboration-assignment:" + assignment.ID})
+	execution, err := w.executions.Submit(ctx, manager.SubmitRequest{Kind: execdom.KindAgent, Runtime: execdom.RuntimeAgent, TaskID: taskID, Input: input, IdempotencyKey: idempotencyKey})
 	if err != nil {
 		return err
 	}

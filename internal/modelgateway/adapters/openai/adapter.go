@@ -75,7 +75,7 @@ func (a *Adapter) Generate(ctx context.Context, req modelgateway.GenerateRequest
 		return a.generateNative(ctx, req)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, normalizeOpenAIError(err)
+		return nil, a.normalizeOpenAIError(err)
 	}
 
 	params, err := buildRequest(req)
@@ -85,7 +85,7 @@ func (a *Adapter) Generate(ctx context.Context, req modelgateway.GenerateRequest
 
 	resp, err := a.client.Responses.New(ctx, params)
 	if err != nil {
-		return nil, normalizeOpenAIError(err)
+		return nil, a.normalizeOpenAIError(err)
 	}
 	if resp == nil {
 		return nil, errors.New("openai returned nil response")
@@ -99,7 +99,7 @@ func (a *Adapter) Stream(ctx context.Context, req modelgateway.GenerateRequest) 
 		return nil, errors.New("OpenAI native tool streaming is not implemented")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, normalizeOpenAIError(err)
+		return nil, a.normalizeOpenAIError(err)
 	}
 
 	params, err := buildRequest(req)
@@ -169,7 +169,7 @@ func (a *Adapter) Stream(ctx context.Context, req modelgateway.GenerateRequest) 
 				}
 
 				sendEvent(ctx, output, modelgateway.NewErrorEvent(
-					normalizeOpenAIError(err),
+					a.normalizeOpenAIError(err),
 				))
 				return
 
@@ -199,7 +199,7 @@ func (a *Adapter) Stream(ctx context.Context, req modelgateway.GenerateRequest) 
 				}
 
 				sendEvent(ctx, output, modelgateway.NewErrorEvent(
-					normalizeOpenAIError(errors.New(message)),
+					a.normalizeOpenAIError(errors.New(message)),
 				))
 				return
 			}
@@ -207,7 +207,7 @@ func (a *Adapter) Stream(ctx context.Context, req modelgateway.GenerateRequest) 
 
 		if err := stream.Err(); err != nil {
 			sendEvent(ctx, output, modelgateway.NewErrorEvent(
-				normalizeOpenAIError(err),
+				a.normalizeOpenAIError(err),
 			))
 			return
 		}
@@ -357,7 +357,7 @@ func sendEvent(ctx context.Context, output chan<- modelgateway.StreamEvent, even
 	}
 }
 
-func normalizeOpenAIError(err error) error {
+func (a *Adapter) normalizeOpenAIError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -382,41 +382,7 @@ func normalizeOpenAIError(err error) error {
 
 	var apiErr *sdk.Error
 	if errors.As(err, &apiErr) {
-		status := apiErr.StatusCode
-
-		code := provider.ErrorCodeProvider
-		retryable := false
-
-		switch status {
-		case 400, 422:
-			code = provider.ErrorCodeInvalidRequest
-		case 401:
-			code = provider.ErrorCodeAuthentication
-		case 403:
-			code = provider.ErrorCodePermission
-		case 404:
-			code = provider.ErrorCodeModelNotFound
-		case 408:
-			code = provider.ErrorCodeTimeout
-			retryable = true
-		case 429:
-			code = provider.ErrorCodeRateLimit
-			retryable = true
-		default:
-			if status >= 500 {
-				code = provider.ErrorCodeUnavailable
-				retryable = true
-			}
-		}
-
-		return &provider.Error{
-			ProviderID: providerID,
-			Code:       code,
-			Message:    fmt.Sprintf("OpenAI API request failed (HTTP %d)", status),
-			StatusCode: status,
-			Retryable:  retryable,
-			Cause:      err,
-		}
+		return normalizeSDKHTTPError(apiErr, a.apiKey)
 	}
 
 	return provider.NewError(
@@ -434,8 +400,9 @@ type nativeResponse struct {
 		Type    string `json:"type"`
 		Role    string `json:"role"`
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type    string `json:"type"`
+			Text    string `json:"text"`
+			Refusal string `json:"refusal"`
 		} `json:"content"`
 		CallID    string `json:"call_id"`
 		Name      string `json:"name"`
@@ -514,29 +481,42 @@ func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateR
 	}
 	response, err := client.Do(httpReq)
 	if err != nil {
-		return nil, normalizeOpenAIError(err)
+		return nil, a.normalizeOpenAIError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
-		return nil, fmt.Errorf("OpenAI Responses API failed (HTTP %d)", response.StatusCode)
+		errorBody, _ := io.ReadAll(
+			io.LimitReader(response.Body, maxUpstreamErrorBody),
+		)
+		return nil, normalizeNativeHTTPError(response.StatusCode, errorBody, a.apiKey)
 	}
 	var decoded nativeResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 8<<20)).Decode(&decoded); err != nil {
 		return nil, fmt.Errorf("decode OpenAI Responses API response: %w", err)
 	}
 	result := &modelgateway.GenerateResponse{ID: decoded.ID, ProviderID: providerID, ModelID: req.ModelID, Model: decoded.Model, Usage: modelgateway.Usage{InputTokens: decoded.Usage.InputTokens, OutputTokens: decoded.Usage.OutputTokens}}
+	var outputTypes []string
+	var contentTypes []string
 	for _, item := range decoded.Output {
-		if item.Type == "function_call" {
+		switch item.Type {
+		case "function_call":
 			args := json.RawMessage(item.Arguments)
 			result.ToolCalls = append(result.ToolCalls, modelgateway.ToolCall{ID: item.CallID, Name: item.Name, Arguments: args})
-		}
-		if item.Type == "message" {
+		case "message":
 			for _, part := range item.Content {
-				if part.Type == "output_text" || part.Type == "text" {
+				switch part.Type {
+				case "output_text", "text":
 					result.Content += part.Text
+				case "refusal":
+					// Responses API refusals carry their user-facing text in
+					// the "refusal" field, not the ordinary "text" field.
+					result.Content += part.Refusal
+				default:
+					contentTypes = append(contentTypes, part.Type)
 				}
 			}
+		default:
+			outputTypes = append(outputTypes, item.Type)
 		}
 	}
 	if len(result.ToolCalls) > 0 {
@@ -545,5 +525,14 @@ func (a *Adapter) generateNative(ctx context.Context, req modelgateway.GenerateR
 		result.FinishReason = modelgateway.FinishReasonStop
 	}
 	result.Normalize()
+	if len(result.ToolCalls) == 0 && strings.TrimSpace(result.Content) == "" {
+		return nil, fmt.Errorf(
+			"OpenAI Responses API response %q contained no usable assistant output (status=%q, output_types=%q, content_types=%q)",
+			decoded.ID,
+			decoded.Status,
+			strings.Join(outputTypes, ","),
+			strings.Join(contentTypes, ","),
+		)
+	}
 	return result, nil
 }

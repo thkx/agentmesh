@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/thkx/agentmesh/internal/config"
+	"github.com/thkx/agentmesh/internal/modelgateway"
 	"github.com/thkx/agentmesh/internal/platform/cryptography"
 	"github.com/thkx/agentmesh/internal/platform/database"
 )
@@ -83,6 +84,60 @@ func addRouterTestModel(t *testing.T, service *Service, modelID, modelKey string
 		}); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestModelGatewayRouterForwardsJSONResponseFormat(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode request: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		var format map[string]string
+		if err := json.Unmarshal(payload["response_format"], &format); err != nil {
+			t.Errorf("decode response format: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if format["type"] != "json_object" {
+			t.Errorf("response_format.type = %q, want json_object", format["type"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"json-mode-response","object":"chat.completion","created":1,"model":"upstream","choices":[{"index":0,"message":{"role":"assistant","content":"{\"ok\":true}"},"finish_reason":"stop"}],"usage":{"prompt_tokens":4,"completion_tokens":3,"total_tokens":7}}`))
+	}))
+	defer server.Close()
+
+	service, _ := newRouterTestEnvironment(t)
+	addRouterTestModel(t, service, "json-model", "json-model-key", []struct {
+		id           string
+		url          string
+		priority     int
+		credentialID string
+		key          string
+	}{{
+		id:           "json-endpoint",
+		url:          server.URL + "/v1",
+		priority:     1,
+		credentialID: "json-credential",
+		key:          "json-secret",
+	}})
+	router, err := NewRouter(service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bridge := NewModelGatewayRouter(service, router)
+	response, err := bridge.Generate(context.Background(), modelgateway.GenerateRequest{
+		ModelID: "json-model", ProviderModel: "json-model-key",
+		Messages:       []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "JSON"}},
+		ResponseFormat: &modelgateway.ResponseFormat{Type: "json_object"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Content != `{"ok":true}` {
+		t.Fatalf("content = %q", response.Content)
 	}
 }
 

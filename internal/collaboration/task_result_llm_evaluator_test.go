@@ -6,16 +6,27 @@ import (
 	"testing"
 
 	"github.com/thkx/agentmesh/internal/collaboration"
+	"github.com/thkx/agentmesh/internal/domain/provider"
 	"github.com/thkx/agentmesh/internal/modelgateway"
 )
 
 type fixedEvaluationModel struct {
-	content string
-	request modelgateway.GenerateRequest
+	content  string
+	response *modelgateway.GenerateResponse
+	request  modelgateway.GenerateRequest
 }
 
 func (m *fixedEvaluationModel) Generate(_ context.Context, request modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
 	m.request = request
+	if m.response != nil {
+		response := *m.response
+		// Preserve the fixture's decision content while allowing tests to
+		// provide response provenance and usage metadata independently.
+		if response.Content == "" {
+			response.Content = m.content
+		}
+		return &response, nil
+	}
 	return &modelgateway.GenerateResponse{Content: m.content}, nil
 }
 
@@ -48,8 +59,11 @@ func TestLLMTaskResultEvaluatorRequiresGroundedEvidence(t *testing.T) {
 	if assessment.Outcome != "accepted" {
 		t.Fatalf("expected grounded acceptance, got %+v", assessment)
 	}
-	if model.request.ModelID != "reviewer-model" || model.request.MaxOutputTokens != 512 {
+	if model.request.ModelID != "reviewer-model" || model.request.MaxOutputTokens != 1024 {
 		t.Fatalf("unexpected model request: %+v", model.request)
+	}
+	if model.request.ResponseFormat == nil || model.request.ResponseFormat.Type != "json_object" {
+		t.Fatalf("expected JSON response format, got %+v", model.request.ResponseFormat)
 	}
 }
 
@@ -201,5 +215,144 @@ func TestLLMTaskResultEvaluatorUsesLatestVerificationOnly(t *testing.T) {
 	}
 	if assessment.Outcome != "human_review" {
 		t.Fatalf("an older passed verification must not override the latest failed verification, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorAcceptsGroundedPlainTextResult(t *testing.T) {
+	model := &fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"The result addresses each requested point.","confidence":0.96,"evidence_refs":["task:task-plain","result:result-plain"]}`,
+		response: &modelgateway.GenerateResponse{
+			ID:         "response-plain-review",
+			ProviderID: provider.ID("provider-deepseek"),
+			ModelID:    "deepseek-reviewer-model",
+			Usage:      modelgateway.Usage{InputTokens: 321, OutputTokens: 87, TotalTokens: 408},
+		},
+	}
+	resolvedAgentID := ""
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(_ context.Context, agentID string) (string, error) {
+		resolvedAgentID = agentID
+		return "deepseek-reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task: collaboration.Task{
+			ID: "task-plain", Title: "Explain webhook idempotency",
+			Description: "Explain duplicate delivery, idempotency keys, and safe retries.",
+		},
+		Result: collaboration.TaskResult{
+			ID: "result-plain", TaskID: "task-plain", RecipientAgentID: "reviewer-agent",
+			Result: json.RawMessage(`{"content":"The result covers duplicate delivery, unique keys, and safe retries."}`),
+		},
+		Artifacts: []collaboration.TaskArtifactContext{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "accepted" || assessment.Confidence != 0.96 {
+		t.Fatalf("expected accepted plain-text result, got %+v", assessment)
+	}
+	if resolvedAgentID != "reviewer-agent" || model.request.ModelID != "deepseek-reviewer-model" {
+		t.Fatalf("reviewer must use the recipient Agent's pinned model: agent=%q model=%q", resolvedAgentID, model.request.ModelID)
+	}
+	if string(assessment.Evidence) != `["task:task-plain","result:result-plain"]` {
+		t.Fatalf("plain-result references were not persisted: %s", assessment.Evidence)
+	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked ||
+		assessment.ReviewerModelID != "deepseek-reviewer-model" ||
+		assessment.ReviewerProviderID != "provider-deepseek" ||
+		assessment.ModelResponseID != "response-plain-review" ||
+		assessment.InputTokens != 321 || assessment.OutputTokens != 87 {
+		t.Fatalf("review model provenance/usage was not captured: %+v", assessment)
+	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked || assessment.ReviewerModelID != "deepseek-reviewer-model" {
+		t.Fatalf("review model provenance missing: %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorTreatsLengthFinishReasonAsTruncated(t *testing.T) {
+	model := &fixedEvaluationModel{
+		content: `{"outcome":"accepted","reason":"The result covers all requirements.","confidence":0.99,"evidence_refs":["task:task-plain","result:result-plain"]}`,
+		response: &modelgateway.GenerateResponse{
+			ID:           "response-truncated-review",
+			ProviderID:   provider.ID("provider-deepseek"),
+			ModelID:      "deepseek-reviewer-model",
+			FinishReason: modelgateway.FinishReasonLength,
+			Usage:        modelgateway.Usage{InputTokens: 400, OutputTokens: 1024, TotalTokens: 1424},
+		},
+	}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "deepseek-reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Complete all requirements."},
+		Result: collaboration.TaskResult{
+			ID: "result-plain", RecipientAgentID: "reviewer-agent",
+			Result: json.RawMessage(`{"content":"complete"}`),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("length-truncated response must require human review, got %+v", assessment)
+	}
+	if assessment.Reason != "reviewer output was truncated (finish_reason=length); human review is required" {
+		t.Fatalf("unexpected truncation reason: %q", assessment.Reason)
+	}
+	if assessment.ReviewMethod != "model" || !assessment.ModelInvoked ||
+		assessment.ModelResponseID != "response-truncated-review" ||
+		assessment.OutputTokens != 1024 {
+		t.Fatalf("model provenance must be preserved for truncated output: %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorRejectsInventedPlainResultReferences(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"accepted","reason":"Looks complete.","confidence":0.99,"evidence_refs":["task:task-plain","result:invented"]}`}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Provide a concise explanation."},
+		Result:    collaboration.TaskResult{ID: "result-plain", RecipientAgentID: "reviewer-agent", Result: json.RawMessage(`{"content":"done"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("invented result reference must require human review, got %+v", assessment)
+	}
+}
+
+func TestLLMTaskResultEvaluatorRequiresBothPlainResultReferences(t *testing.T) {
+	model := &fixedEvaluationModel{content: `{"outcome":"rejected","reason":"The result omits required details.","confidence":0.98,"evidence_refs":["result:result-plain"]}`}
+	evaluator, err := collaboration.NewLLMTaskResultEvaluator(model, func(context.Context, string) (string, error) {
+		return "reviewer-model", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment, err := evaluator.EvaluateTaskResultWithContext(context.Background(), collaboration.TaskResultEvaluationContext{
+		Workspace: collaboration.Workspace{AutonomyMode: "hybrid"},
+		Task:      collaboration.Task{ID: "task-plain", Description: "Provide all required details."},
+		Result:    collaboration.TaskResult{ID: "result-plain", RecipientAgentID: "reviewer-agent", Result: json.RawMessage(`{"content":"partial"}`)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.Outcome != "human_review" {
+		t.Fatalf("missing task reference must require human review, got %+v", assessment)
 	}
 }

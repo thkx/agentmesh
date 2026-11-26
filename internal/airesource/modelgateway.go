@@ -142,6 +142,13 @@ func (r *ModelGatewayRouter) SupportsNativeToolCalling(ctx context.Context, mode
 	return false, nil
 }
 
+func mapResponseFormat(format *modelgateway.ResponseFormat) *ResponseFormat {
+	if format == nil {
+		return nil
+	}
+	return &ResponseFormat{Type: format.Type}
+}
+
 func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.GenerateRequest) (*modelgateway.GenerateResponse, error) {
 	if r == nil || r.router == nil {
 		return nil, errors.New("dynamic model gateway router is not initialized")
@@ -167,6 +174,7 @@ func (r *ModelGatewayRouter) Generate(ctx context.Context, req modelgateway.Gene
 		Model: req.ProviderModel, Messages: messages,
 		Temperature: req.Temperature, TopP: req.TopP,
 		MaxTokens: req.MaxOutputTokens, Tools: tools, ToolChoice: req.ToolChoice,
+		ResponseFormat: mapResponseFormat(req.ResponseFormat),
 	})
 	if err != nil {
 		if errors.Is(err, ErrNativeToolCallingUnsupported) {

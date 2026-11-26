@@ -169,6 +169,9 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 	if len(req.Tools) > 0 && c.Provider.Protocol != ProtocolOpenAI {
 		return GenerateResponse{}, 0, ErrNativeToolCallingUnsupported
 	}
+	if req.ResponseFormat != nil && c.Provider.Protocol != ProtocolOpenAI {
+		return GenerateResponse{}, 0, ErrStructuredOutputUnsupported
+	}
 	timeout := time.Duration(c.Endpoint.TimeoutMS) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 60 * time.Second
@@ -180,6 +183,14 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 	var err error
 	switch c.Provider.Protocol {
 	case ProtocolOpenAI:
+		// OpenAI-compatible chat completions require system/developer
+		// instructions to be represented as messages. normalizeMessages
+		// extracts them for Anthropic/Gemini, so restore them here before
+		// sending the request. Dropping this message silently discards
+		// evaluator and agent system prompts.
+		if system != "" {
+			messages = append([]map[string]any{{"role": "system", "content": system}}, messages...)
+		}
 		payload := map[string]any{"model": c.UpstreamModel, "messages": messages, "stream": false}
 		if req.Temperature != nil {
 			payload["temperature"] = *req.Temperature
@@ -189,6 +200,9 @@ func generate(ctx context.Context, c Candidate, req GenerateRequest) (GenerateRe
 		}
 		if req.MaxTokens > 0 {
 			payload["max_tokens"] = req.MaxTokens
+		}
+		if req.ResponseFormat != nil {
+			payload["response_format"] = req.ResponseFormat
 		}
 		if len(req.Tools) > 0 {
 			payload["tools"] = req.Tools

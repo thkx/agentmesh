@@ -26,6 +26,13 @@ type TaskResultAssessment struct {
 	ReviewerID       string          `json:"reviewer_id,omitempty"`
 	DecisionNote     string          `json:"decision_note,omitempty"`
 	ReviewedAt       *time.Time      `json:"reviewed_at,omitempty"`
+	ReviewMethod     string          `json:"review_method,omitempty"`
+	ReviewerModelID  string          `json:"reviewer_model_id,omitempty"`
+	ReviewerProviderID string        `json:"reviewer_provider_id,omitempty"`
+	ModelResponseID  string          `json:"model_response_id,omitempty"`
+	ModelInvoked     bool            `json:"model_invoked"`
+	InputTokens      int64           `json:"input_tokens,omitempty"`
+	OutputTokens     int64           `json:"output_tokens,omitempty"`
 }
 
 // TaskResultEvaluator is the seam for deterministic policy or model-backed review.
@@ -155,11 +162,22 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 		return err
 	}
 	defer tx.Rollback()
+	if item.ReviewMethod == "" {
+		item.ReviewMethod = "legacy"
+	}
+	if item.ReviewMethod != "legacy" && item.ReviewMethod != "policy" && item.ReviewMethod != "model" {
+		return ErrInvalid
+	}
+	if item.InputTokens < 0 || item.OutputTokens < 0 || (item.ModelInvoked && item.ReviewMethod != "model") {
+		return ErrInvalid
+	}
 	inserted, err := tx.ExecContext(ctx, `INSERT INTO agent_task_result_assessments
-		(id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(result_id,recipient_agent_id) DO NOTHING`,
+		(id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at,
+		 review_method,reviewer_model_id,reviewer_provider_id,model_response_id,model_invoked,input_tokens,output_tokens)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(result_id,recipient_agent_id) DO NOTHING`,
 		item.ID, item.ResultID, item.WorkspaceID, item.TaskID, item.AssignmentID, item.RecipientAgentID,
-		item.Outcome, item.Reason, item.Confidence, string(item.Evidence), item.CreatedAt.UTC().UnixMilli())
+		item.Outcome, item.Reason, item.Confidence, string(item.Evidence), item.CreatedAt.UTC().UnixMilli(),
+		item.ReviewMethod, item.ReviewerModelID, item.ReviewerProviderID, item.ModelResponseID, taskResultAssessmentBoolInt(item.ModelInvoked), item.InputTokens, item.OutputTokens)
 	if err != nil {
 		return err
 	}
@@ -167,16 +185,22 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 	if err != nil {
 		return err
 	}
-	var storedOutcome, storedReason, storedEvidence string
+	var storedOutcome, storedReason, storedEvidence, storedReviewMethod, storedReviewerModelID, storedReviewerProviderID, storedModelResponseID string
 	var storedConfidence float64
-	err = tx.QueryRowContext(ctx, `SELECT outcome,reason,confidence,evidence_json
+	var storedModelInvoked, storedInputTokens, storedOutputTokens int64
+	err = tx.QueryRowContext(ctx, `SELECT outcome,reason,confidence,evidence_json,review_method,reviewer_model_id,reviewer_provider_id,model_response_id,model_invoked,input_tokens,output_tokens
 		FROM agent_task_result_assessments WHERE result_id=? AND recipient_agent_id=?`,
-		item.ResultID, item.RecipientAgentID).Scan(&storedOutcome, &storedReason, &storedConfidence, &storedEvidence)
+		item.ResultID, item.RecipientAgentID).Scan(&storedOutcome, &storedReason, &storedConfidence, &storedEvidence,
+		&storedReviewMethod, &storedReviewerModelID, &storedReviewerProviderID, &storedModelResponseID,
+		&storedModelInvoked, &storedInputTokens, &storedOutputTokens)
 	if err != nil {
 		return err
 	}
 	if storedOutcome != item.Outcome || storedReason != item.Reason ||
-		storedConfidence != item.Confidence || storedEvidence != string(item.Evidence) {
+		storedConfidence != item.Confidence || storedEvidence != string(item.Evidence) ||
+		storedReviewMethod != item.ReviewMethod || storedReviewerModelID != item.ReviewerModelID ||
+		storedReviewerProviderID != item.ReviewerProviderID || storedModelResponseID != item.ModelResponseID ||
+		(storedModelInvoked == 1) != item.ModelInvoked || storedInputTokens != item.InputTokens || storedOutputTokens != item.OutputTokens {
 		return ErrConflict
 	}
 	// A grounded rejection blocks the Task so it can be reassigned to another
@@ -196,6 +220,13 @@ func (s *Service) StoreTaskResultAssessment(ctx context.Context, item TaskResult
 	return tx.Commit()
 }
 
+func taskResultAssessmentBoolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // GetTaskResultAssessment returns the persisted assessment for an Agent's result.
 func (s *Service) GetTaskResultAssessment(ctx context.Context, recipientAgentID, assignmentID string) (TaskResultAssessment, error) {
 	var item TaskResultAssessment
@@ -203,10 +234,12 @@ func (s *Service) GetTaskResultAssessment(ctx context.Context, recipientAgentID,
 	var created int64
 	var reviewed sql.NullInt64
 	err := s.db.QueryRowContext(ctx, `SELECT id,result_id,workspace_id,task_id,assignment_id,recipient_agent_id,outcome,reason,confidence,evidence_json,created_at,
-		COALESCE(reviewer_id,''),COALESCE(decision_note,''),reviewed_at
+		COALESCE(reviewer_id,''),COALESCE(decision_note,''),reviewed_at,
+		review_method,reviewer_model_id,reviewer_provider_id,model_response_id,model_invoked,input_tokens,output_tokens
 		FROM agent_task_result_assessments WHERE recipient_agent_id=? AND assignment_id=?`, recipientAgentID, assignmentID).
 		Scan(&item.ID, &item.ResultID, &item.WorkspaceID, &item.TaskID, &item.AssignmentID, &item.RecipientAgentID,
-			&item.Outcome, &item.Reason, &item.Confidence, &evidence, &created, &item.ReviewerID, &item.DecisionNote, &reviewed)
+			&item.Outcome, &item.Reason, &item.Confidence, &evidence, &created, &item.ReviewerID, &item.DecisionNote, &reviewed,
+			&item.ReviewMethod, &item.ReviewerModelID, &item.ReviewerProviderID, &item.ModelResponseID, &item.ModelInvoked, &item.InputTokens, &item.OutputTokens)
 	if errors.Is(err, sql.ErrNoRows) {
 		return item, ErrNotFound
 	}

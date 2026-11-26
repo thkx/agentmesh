@@ -132,15 +132,20 @@ type ToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
 }
+type ResponseFormat struct {
+	Type string `json:"type"`
+}
+
 type GenerateRequest struct {
-	Model       string    `json:"model"`
-	Messages    []Message `json:"messages"`
-	Temperature *float64  `json:"temperature,omitempty"`
-	TopP        *float64  `json:"top_p,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Stream      bool      `json:"stream,omitempty"`
-	Tools       []Tool    `json:"tools,omitempty"`
-	ToolChoice  string    `json:"tool_choice,omitempty"`
+	Model          string          `json:"model"`
+	Messages       []Message       `json:"messages"`
+	Temperature    *float64        `json:"temperature,omitempty"`
+	TopP           *float64        `json:"top_p,omitempty"`
+	MaxTokens      int             `json:"max_tokens,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	Stream         bool            `json:"stream,omitempty"`
+	Tools          []Tool          `json:"tools,omitempty"`
+	ToolChoice     string          `json:"tool_choice,omitempty"`
 }
 type GenerateResponse struct {
 	ID      string      `json:"id"`
@@ -177,6 +182,7 @@ var (
 	ErrUnsupportedProtocol          = errors.New("unsupported provider protocol")
 	ErrStreamingUnsupported         = errors.New("streaming is not supported by this gateway adapter")
 	ErrNativeToolCallingUnsupported = errors.New("native tool calling is not supported by this provider protocol")
+	ErrStructuredOutputUnsupported  = errors.New("structured output is not supported by this provider protocol")
 )
 
 func validateID(v string) error {

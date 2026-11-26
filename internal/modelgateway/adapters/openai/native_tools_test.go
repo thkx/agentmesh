@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/thkx/agentmesh/internal/modelgateway"
@@ -36,5 +37,53 @@ func TestGenerateNativeToolCall(t *testing.T) {
 	}
 	if len(got.ToolCalls) != 1 || got.ToolCalls[0].Name != "file.read" || got.ToolCalls[0].ID != "call-1" {
 		t.Fatalf("unexpected tool calls: %+v", got.ToolCalls)
+	}
+}
+
+
+func TestGenerateNativeRefusalContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-refusal","model":"gpt-test","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"refusal","refusal":"I cannot run an unapproved command."}]}],"usage":{"input_tokens":10,"output_tokens":8}}`))
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{apiKey: "test-key", baseURL: server.URL + "/v1", httpClient: server.Client()}
+	got, err := adapter.Generate(context.Background(), modelgateway.GenerateRequest{
+		ModelID:       "model-1",
+		ProviderModel: "gpt-test",
+		Messages:      []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "inspect the workspace"}},
+		Tools:         []modelgateway.ToolDefinition{{Name: "file.list", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "I cannot run an unapproved command." {
+		t.Fatalf("unexpected refusal content: %q", got.Content)
+	}
+	if len(got.ToolCalls) != 0 {
+		t.Fatalf("unexpected tool calls: %+v", got.ToolCalls)
+	}
+}
+
+func TestGenerateNativeRejectsUnrecognizedEmptyOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-unknown","model":"gpt-test","status":"completed","output":[{"type":"reasoning","summary":[]}],"usage":{"input_tokens":10,"output_tokens":8}}`))
+	}))
+	defer server.Close()
+
+	adapter := &Adapter{apiKey: "test-key", baseURL: server.URL + "/v1", httpClient: server.Client()}
+	_, err := adapter.Generate(context.Background(), modelgateway.GenerateRequest{
+		ModelID:       "model-1",
+		ProviderModel: "gpt-test",
+		Messages:      []modelgateway.Message{{Role: modelgateway.RoleUser, Content: "continue"}},
+		Tools:         []modelgateway.ToolDefinition{{Name: "file.list", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	if err == nil {
+		t.Fatal("expected an explicit error for a response without usable output")
+	}
+	if !strings.Contains(err.Error(), "resp-unknown") || !strings.Contains(err.Error(), "reasoning") {
+		t.Fatalf("error does not identify the unusable response shape: %v", err)
 	}
 }

@@ -830,6 +830,20 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 	if got.Status != "pending" {
 		t.Fatalf("status=%s", got.Status)
 	}
+	dispatcher, err := collaboration.NewDispatcher(db.DB, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = dispatcher.DispatchOnce(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
+	var retryInboxCount int
+	if err = db.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM collaboration_inbox WHERE agent_id=? AND event_type='task.assignment_retried'", a.ID).Scan(&retryInboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if retryInboxCount != 1 {
+		t.Fatalf("assignment retry event was not routed to its agent: %d", retryInboxCount)
+	}
 	for i := 0; i < 3; i++ {
 		claimed, err = s.ClaimAssignment(ctx, as.ID, "runner", time.Minute)
 		if err != nil {
@@ -846,6 +860,57 @@ func TestAssignmentFailureAndRetryAreBounded(t *testing.T) {
 	}
 	if _, err = s.RetryAssignment(ctx, as.ID, "operator"); !errors.Is(err, collaboration.ErrConflict) {
 		t.Fatalf("retry limit: %v", err)
+	}
+}
+
+func TestRetryAssignmentRejectsPriorToolSideEffects(t *testing.T) {
+	ctx := context.Background()
+	s, db := testService(t)
+	defer db.Close()
+	w, err := s.CreateWorkspace(ctx, collaboration.Workspace{Name: "Unsafe Retry", Slug: "unsafe-retry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: w.ID, Name: "Worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.CreateTask(ctx, collaboration.Task{WorkspaceID: w.ID, Title: "Do not replay side effects"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := s.AssignTask(ctx, task.ID, a.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimAssignment(ctx, assignment.ID, "retry-safety-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FailAssignmentWithRetry(ctx, claimed.ID, "retry-safety-test", claimed.ClaimVersion, "runtime failed", true); err != nil {
+		t.Fatal(err)
+	}
+	runtimeTaskID := "collab-" + assignment.ID
+	now := time.Now().UnixNano()
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO agent_jobs
+		(id,task_id,task_json,status,attempts,max_attempts,available_at,created_at,updated_at)
+		VALUES(?,?,?,'failed',1,3,?,?,?)`, "unsafe-retry-job", runtimeTaskID, `{"id":"`+runtimeTaskID+`"}`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.DB.ExecContext(ctx, `INSERT INTO agent_tool_invocations
+		(idempotency_key,task_id,tool_call_id,tool_name,status,created_at,updated_at)
+		VALUES(?,?,? ,?,'started',?,?)`, "unsafe-retry-tool", runtimeTaskID, "call-1", "file.write", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RetryAssignment(ctx, assignment.ID, "operator"); !errors.Is(err, collaboration.ErrConflict) {
+		t.Fatalf("retry must reject prior tool side effects, got %v", err)
+	}
+	var status string
+	if err = db.DB.QueryRowContext(ctx, "SELECT status FROM task_assignments WHERE id=?", assignment.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "expired" {
+		t.Fatalf("unsafe retry mutated assignment status: %s", status)
 	}
 }
 
@@ -1309,5 +1374,65 @@ func TestArtifactAndEvidencePreserveExecutionAttemptProvenance(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].ExecutionID != execution.ID || items[0].AttemptID != attempt.ID {
 		t.Fatalf("persisted evidence provenance mismatch: %+v", items)
+	}
+}
+
+func TestTaskResultAssessmentPersistsReviewerModelProvenance(t *testing.T) {
+	ctx := context.Background()
+	service, db := testService(t)
+	defer db.Close()
+
+	workspace, err := service.CreateWorkspace(ctx, collaboration.Workspace{Name: "Review Provenance", Slug: "review-provenance"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := service.CreateAgent(ctx, collaboration.AgentIdentity{WorkspaceID: workspace.ID, Name: "Reviewer", Role: "reviewer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := service.CreateTask(ctx, collaboration.Task{WorkspaceID: workspace.ID, Title: "Review a plain result"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignment, err := service.AssignTask(ctx, task.ID, agent.ID, "human")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := service.ClaimAssignment(ctx, assignment.ID, "review-provenance-test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = service.CompleteAssignment(ctx, assignment.ID, "review-provenance-test", claimed.ClaimVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err = service.StoreTaskResult(ctx, agent.ID, task.ID, assignment.ID, "execution-review-provenance", json.RawMessage(`{"content":"completed"}`)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.GetTaskResult(ctx, agent.ID, assignment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assessment := collaboration.TaskResultAssessment{
+		ResultID: result.ID, WorkspaceID: workspace.ID, TaskID: task.ID,
+		AssignmentID: assignment.ID, RecipientAgentID: agent.ID,
+		Outcome: "accepted", Reason: "The result satisfies the task.",
+		Confidence: 0.96, Evidence: json.RawMessage(`["task:task","result:result"]`),
+		ReviewMethod: "model", ReviewerModelID: "model-deepseek-reviewer",
+		ReviewerProviderID: "provider-deepseek", ModelResponseID: "response-123",
+		ModelInvoked: true, InputTokens: 1200, OutputTokens: 180,
+	}
+	if err = service.StoreTaskResultAssessment(ctx, assessment); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := service.GetTaskResultAssessment(ctx, agent.ID, assignment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.ReviewMethod != "model" || !stored.ModelInvoked ||
+		stored.ReviewerModelID != assessment.ReviewerModelID ||
+		stored.ReviewerProviderID != assessment.ReviewerProviderID ||
+		stored.ModelResponseID != assessment.ModelResponseID ||
+		stored.InputTokens != assessment.InputTokens || stored.OutputTokens != assessment.OutputTokens {
+		t.Fatalf("reviewer model provenance was not persisted: %+v", stored)
 	}
 }
