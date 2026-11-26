@@ -305,8 +305,8 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if err != nil {
 		return fmt.Errorf("agent runtime binding: %w", err)
 	}
-	if !binding.Enabled || !binding.Definition.Enabled {
-		return errors.New("agent runtime binding or definition is disabled")
+	if !binding.Enabled {
+		return errors.New("agent runtime binding is disabled")
 	}
 	currentDefinition, definitionErr := w.definitions.Get(ctx, binding.DefinitionID)
 	if definitionErr != nil {
@@ -315,6 +315,9 @@ func (w *WakeupWorker) executeAssignment(ctx context.Context, inbox InboxLease, 
 	if !currentDefinition.Enabled {
 		return errors.New("bound agent definition has been disabled")
 	}
+	// GetRuntimeBinding may contain a previously loaded Definition snapshot.
+	// Always build new runtime tasks from the latest catalog version.
+	binding.Definition = currentDefinition
 	if _, err = w.workspaces.Resolve(binding.RuntimeWorkspaceID); err != nil {
 		return fmt.Errorf("resolve bound runtime workspace: %w", err)
 	}
